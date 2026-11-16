@@ -79,8 +79,7 @@ local fifth = NHStore.newRun(state)
 assert(NHStore.endRun(state, fifth))
 assert(not advance(state,fifth,state.order.required) and state.order.progress==20)
 local sixth = NHStore.newRun(state)
-assert(advance(state,sixth,20,"mountain-1") and state.order.progress==20+NHStore.checkpointFrames)
-assert(advance(state,sixth,state.order.required))
+assert(advance(state,sixth,20,"mountain-1") and not state.order) -- One checkpoint finishes a new eight-second batch.
 state = save(state)
 assert(state.finished == 1 and not state.order and #state.warehouse == 1)
 assert(state.materials.magic_liquid_teleportation == 512 and state.materials.water==20)
@@ -117,6 +116,8 @@ assert(not NHStore.commit(separate))
 -- batch is running in the same world.
 state.materials[unstable],state.materials.slime=500,500
 assert(NHStore.startOrder(state))
+-- A stable batch paid for on 0.34 still has its original two-minute timer.
+state.order.required=120*60
 state=save(state)
 local first_tick={run=sixth,orderId=state.order.id,progress=60,checkpoint="mountain-2"}
 assert(NHStore.advanceProduction(state,first_tick))
@@ -141,6 +142,7 @@ assert(NHStore.advanceProduction(state,delivery))
 state=save(state)
 assert(state.materials.magic_liquid_teleportation==stock+500 and state.finished==before+1)
 assert(NHStore.startOrder(state))
+assert(state.order.required==8*60)
 assert(not NHStore.advanceProduction(state,delivery) and state.order.progress==0)
 assert(not advance(state,sixth,0,"mountain-3"))
 assert(advance(state,sixth,state.order.required) and state.finished==before+2)

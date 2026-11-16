@@ -8,13 +8,13 @@ dofile("mods/noita_hideout/files/store.lua")
 local byId={}
 for _,recipe in ipairs(NHStore.recipes) do byId[recipe.id]=recipe end
 local expected={
-    {id="grenade",materials={sand=100,slime=50}},
-    {id="grenade_essence",essence="essence_high_energy",spell="BOMB"},
-    {id="fire_grenade",essence="essence_fire",spell="FIREBALL"},
-    {id="frost_grenade",essence="essence_frost",spell="ICEBALL"},
-    {id="shock_grenade",essence="essence_lightning",spell="LIGHTNING"},
-    {id="sand_knife",materials={sand=80}},
-    {id="metal_knife",materials={metal_sand=1,steel_sand=9,copper=20,brass=20,silver=30}},
+    {id="grenade",seconds=10,materials={sand=64,slime=32}},
+    {id="grenade_essence",seconds=10,cost=4,essence="essence_high_energy",spell="BOMB"},
+    {id="fire_grenade",seconds=10,cost=6,essence="essence_fire",spell="FIREBALL"},
+    {id="frost_grenade",seconds=10,cost=6,essence="essence_frost",spell="ICEBALL"},
+    {id="shock_grenade",seconds=10,cost=6,essence="essence_lightning",spell="LIGHTNING"},
+    {id="sand_knife",seconds=5,materials={sand=40}},
+    {id="metal_knife",seconds=8,materials={metal_sand=1,steel_sand=9,copper=20,brass=20,silver=14}},
 }
 local function load() return assert(NHStore.load()) end
 local s=load()
@@ -35,17 +35,16 @@ for _,test in ipairs(expected) do
     assert(kind==(test.id=="grenade_essence" and "grenade" or test.id))
     assert(recipe.category=="weapons" and recipe.facility=="grenade")
     assert(recipe.count==8 and recipe.item.count==8 and NHStore.category(kind)=="supplies")
-    local seconds=(kind=="sand_knife" or kind=="metal_knife") and 10 or 20
-    assert(NHStore.productionFrames(recipe)==seconds*60)
+    assert(NHStore.productionFrames(recipe)==test.seconds*60)
     s.levels.grenade=0
     assert(not NHStore.startOrder(s,test.id))
     s.levels.grenade=1
     if test.essence then
-        assert(recipe.resources[test.essence]==6 and NHEssences.byAction[test.spell]==test.essence)
+        assert(recipe.resources[test.essence]==test.cost and NHEssences.byAction[test.spell]==test.essence)
         assert(recipe.resources[test.essence]*10<=NHEssences.values[test.spell])
-        s.resources[test.essence]=5
-        assert(not NHStore.startOrder(s,test.id) and not s.order and s.resources[test.essence]==5)
-        s.resources[test.essence]=6
+        s.resources[test.essence]=test.cost-1
+        assert(not NHStore.startOrder(s,test.id) and not s.order and s.resources[test.essence]==test.cost-1)
+        s.resources[test.essence]=test.cost
     else
         assert(not recipe.resources)
         for material,amount in pairs(test.materials) do s.materials[material]=amount end

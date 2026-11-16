@@ -29,6 +29,7 @@ NHStore.maxMaterialAmount = max_safe_integer
 NHStore.maxResourceAmount = max_safe_integer
 
 function NHStore.productionFrames(recipe)
+    -- Pre-timer saves used the original two-minute batch when converting progress to frames.
     local frames=(recipe and recipe.durationFrames) or 2 * 60 * 60
     return math.min(frames, 3 * 60 * 60)
 end
@@ -567,22 +568,22 @@ end
 
 NHStore.restock=NHPouches.restock
 
--- Each listed reaction in data/materials.xml converts one pixel of each
--- ingredient into the same number of product pixels. Use 250 units per part.
-local function alchemyBatch(id,zh,en,product,ingredients)
+-- Scale every part of a reversible reaction together so splitting the full
+-- output returns the exact amount purchased, including for small rare batches.
+local function alchemyBatch(id,zh,en,product,ingredients,units,seconds)
     local inputs={}
     for _,name in ipairs(ingredients) do
-        inputs[#inputs+1]={name=name,amount=250}
+        inputs[#inputs+1]={name=name,amount=units}
     end
-    local yield=250*#inputs
+    local yield=units*#inputs
     return {id=id,category="alchemy",alchemyMode="synthesis",zh=zh,en=en,inputs=inputs,
-        materials={[product]=yield},count=yield,reversible=true}
+        materials={[product]=yield},count=yield,reversible=true,durationFrames=seconds*60}
 end
 
-local function catalyticBatch(id,zh,en,ingredient,catalyst,product)
+local function catalyticBatch(id,zh,en,ingredient,catalyst,product,units,seconds)
     return {id=id,category="alchemy",alchemyMode="synthesis",zh=zh,en=en,
-        inputs={{name=ingredient,amount=250}},catalysts={{name=catalyst,amount=1}},
-        materials={[product]=250},count=250}
+        inputs={{name=ingredient,amount=units}},catalysts={{name=catalyst,amount=1}},
+        materials={[product]=units},count=units,durationFrames=seconds*60}
 end
 
 local function farmItem(kind)
@@ -596,52 +597,52 @@ bandage_bundle.count=8
 -- Inputs and the paid order are committed together. Only loose stock is spendable.
 NHStore.recipes={
     alchemyBatch("stable","稳定传送液","Teleportatium","magic_liquid_teleportation",
-        {"magic_liquid_unstable_teleportation","slime"}),
+        {"magic_liquid_unstable_teleportation","slime"},250,8),
     alchemyBatch("flummoxium","除草基质","Flummoxium","material_confusion",
-        {"magic_liquid_worm_attractor","blood_worm"}),
+        {"magic_liquid_worm_attractor","blood_worm"},100,10),
     alchemyBatch("pheromone","费洛蒙","Pheromone","magic_liquid_charm",
-        {"material_confusion","magic_liquid_berserk"}),
+        {"material_confusion","magic_liquid_berserk"},100,15),
     -- Copper is a powder in the vanilla [sand_metal] group. Naming one metal
     -- keeps the recovered ingredient unambiguous when a batch is decomposed.
     alchemyBatch("levitatium","漂浮基质","Levitatium","magic_liquid_faster_levitation",
-        {"material_confusion","copper"}),
+        {"material_confusion","copper"},100,15),
     {id="levitatium_metals",category="alchemy",alchemyMode="synthesis",zh="漂浮基质（替代金属粉）",en="Levitatium (metal powders)",
-        inputs={{name="material_confusion",amount=250},{name="metal_sand",amount=250,
+        inputs={{name="material_confusion",amount=100},{name="metal_sand",amount=100,
             alternatives={"metal_sand","steel_sand","brass","silver","gold_radioactive","gold","diamond"},
             labelZh="替代金属粉",labelEn="Metal powders"}},
-        materials={magic_liquid_faster_levitation=500},count=500,
+        materials={magic_liquid_faster_levitation=200},count=200,durationFrames=15*60,
         noteZh="分解漂浮基质固定返还除草基质和铜。",noteEn="Decomposition always returns flummoxium and copper."},
     alchemyBatch("hastium","迅速基质","Hastium","magic_liquid_faster_levitation_and_movement",
-        {"magic_liquid_faster_levitation","magic_liquid_movement_faster"}),
+        {"magic_liquid_faster_levitation","magic_liquid_movement_faster"},100,30),
     alchemyBatch("unstable_polymorphine","不稳变形魔药","Unstable polymorphine","magic_liquid_unstable_polymorph",
-        {"material_confusion","blood","oil"}),
+        {"material_confusion","blood","oil"},100,30),
     alchemyBatch("diminution","缩小","Diminution","magic_liquid_weakness",
-        {"vomit","bone"}),
+        {"vomit","bone"},100,8),
     {id="ambrosia",category="alchemy",alchemyMode="synthesis",zh="灵丹妙药",en="Ambrosia",
-        inputs={{name="honey",amount=250},{name="diamond",amount=250}},
-        materials={magic_liquid_protection_all=250,poison=250},count=500,reversible=true},
+        inputs={{name="honey",amount=50},{name="diamond",amount=50}},
+        materials={magic_liquid_protection_all=50,poison=50},count=100,reversible=true,durationFrames=90*60},
     catalyticBatch("mana","扩制汇聚法力","Multiply concentrated mana",
-        "water","magic_liquid_mana_regeneration","magic_liquid_mana_regeneration"),
+        "water","magic_liquid_mana_regeneration","magic_liquid_mana_regeneration",100,8),
     catalyticBatch("chaotic_polymorphine","混乱变形魔药","Chaotic polymorphine",
-        "magic_liquid_polymorph","radioactive_liquid","magic_liquid_random_polymorph"),
+        "magic_liquid_polymorph","radioactive_liquid","magic_liquid_random_polymorph",100,45),
     catalyticBatch("midas","扩制点金之水","Multiply Draught of Midas",
-        "midas_precursor","midas","midas"),
-    alchemyBatch("purifying_powder","净化粉末","Purifying powder","purifying_powder",{"brass","diamond"}),
+        "midas_precursor","midas","midas",100,180),
+    alchemyBatch("purifying_powder","净化粉末","Purifying powder","purifying_powder",{"brass","diamond"},50,45),
     {id="purifying_powder_silver",category="alchemy",alchemyMode="synthesis",zh="净化粉末（银）",en="Purifying powder (silver)",
-        inputs={{name="diamond",amount=250},{name="silver",amount=250},{name="blood_worm",amount=250}},
-        materials={purifying_powder=250},count=250,
+        inputs={{name="diamond",amount=50},{name="silver",amount=50},{name="blood_worm",amount=50}},
+        materials={purifying_powder=50},count=50,durationFrames=60*60,
         noteZh="烟雾在反应中逸散。",noteEn="Smoke dissipates during the reaction."},
     {id="guiding_powder",category="alchemy",alchemyMode="synthesis",zh="导引粉末",en="Guiding powder",
-        inputs={{name="material_confusion",amount=250},{name="magic_liquid_unstable_teleportation",amount=250}},
-        materials={orb_powder=250},count=250,
+        inputs={{name="material_confusion",amount=100},{name="magic_liquid_unstable_teleportation",amount=100}},
+        materials={orb_powder=100},count=100,durationFrames=30*60,
         noteZh="反应产生的火焰会消散。",noteEn="Fire dissipates during the reaction."},
     {id="void_diamond",category="alchemy",alchemyMode="synthesis",zh="虚无液体（钻石）",en="Void liquid (diamond)",
-        inputs={{name="diamond",amount=250},{name="magic_liquid_random_polymorph",amount=250},{name="radioactive_liquid",amount=250}},
-        materials={void_liquid=750},count=750},
+        inputs={{name="diamond",amount=50},{name="magic_liquid_random_polymorph",amount=50},{name="radioactive_liquid",amount=50}},
+        materials={void_liquid=150},count=150,durationFrames=120*60},
     {id="void_fungus",category="alchemy",alchemyMode="synthesis",zh="虚无液体（怪异真菌）",en="Void liquid (weird fungus)",
-        inputs={{name="radioactive_liquid",amount=250},{name="blood_worm",amount=250},{name="fungi",amount=250}},
-        materials={void_liquid=500},count=500,
-        noteZh="原版列出两份液体产物，每批回收 500。",noteEn="The vanilla reaction yields two parts of liquid. This batch recovers 500."},
+        inputs={{name="radioactive_liquid",amount=50},{name="blood_worm",amount=50},{name="fungi",amount=50}},
+        materials={void_liquid=100},count=100,durationFrames=120*60,
+        noteZh="每三份原料回收两份液体。",noteEn="Three parts of ingredients yield two parts of liquid."},
     {id="medical",category="medical",facility="medical",zh=NHMedkits.types.medkit.zh,en=NHMedkits.types.medkit.en,durationFrames=medkit_frames,
         inputs={{name="water",amount=100},{name="blood",amount=50}},item=medkit,
         noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
@@ -660,24 +661,24 @@ NHStore.recipes={
     NHInjectors.recipe("lightning"),
     NHInjectors.recipe("frost"),
     NHInjectors.recipe("healing"),
-    NHThrowables.recipe("grenade",{{name="sand",amount=100},{name="slime",amount=50}}),
-    NHThrowables.recipe("grenade",nil,{essence_high_energy=6},"grenade_essence","魔法手雷（高能精华）","Magic grenade (high-energy essence)"),
+    NHThrowables.recipe("grenade",{{name="sand",amount=64},{name="slime",amount=32}}),
+    NHThrowables.recipe("grenade",nil,{essence_high_energy=4},"grenade_essence","魔法手雷（高能精华）","Magic grenade (high-energy essence)"),
     NHThrowables.recipe("fire_grenade",nil,{essence_fire=6}),
     NHThrowables.recipe("frost_grenade",nil,{essence_frost=6}),
     NHThrowables.recipe("shock_grenade",nil,{essence_lightning=6}),
-    NHThrowables.recipe("sand_knife",{{name="sand",amount=80}}),
-    NHThrowables.recipe("metal_knife",{{name="metal_sand",amount=80,
+    NHThrowables.recipe("sand_knife",{{name="sand",amount=40}}),
+    NHThrowables.recipe("metal_knife",{{name="metal_sand",amount=64,
         alternatives={"metal_sand","steel_sand","copper","brass","silver"},labelZh="金属粉",labelEn="Metal powders"}}),
     {id="pouch",category="equipment",facility="injector",zh="空针剂包",en="Empty injector pouch",
-        inputs={{name="slime",amount=50}},emptyContainers=1,item={kind="pouch"}},
+        durationFrames=10*60,inputs={{name="slime",amount=25}},emptyContainers=1,item={kind="pouch"}},
     {id="card_wallet",category="equipment",facility="farmland",zh="空卡片夹",en="Empty card wallet",
-        inputs={},resources={fiber=4},emptyContainers=1,item=NHCardWallets.empty(),
+        durationFrames=8*60,inputs={},resources={fiber=4},emptyContainers=1,item=NHCardWallets.empty(),
         noteZh="四格卡片夹，可在外出时打开并存取召唤卡。",
         noteEn="Four card slots. Open the wallet to store or withdraw summon cards while exploring."},
 }
 for _,food in ipairs(dofile("mods/noita_hideout/files/cooking.lua")) do
     NHStore.recipes[#NHStore.recipes+1]={id=food.id,category="food",facility=food.facility,zh=food.zh,en=food.en,
-        inputs={},resources=food.resources,item=farmItem(food.id),noteZh=food.noteZh,noteEn=food.noteEn}
+        durationFrames=food.workSeconds*60,inputs={},resources=food.resources,item=farmItem(food.id),noteZh=food.noteZh,noteEn=food.noteEn}
 end
 NHStore.recipe=NHStore.recipes[1]
 
@@ -711,8 +712,8 @@ end
 -- gunpowder stays available for the grenade station.
 table.insert(NHStore.recipes,{
     id="separate_gunpowder",category="alchemy",alchemyMode="decomposition",zh="分解火药",en="Separate gunpowder",
-    inputs={{name="gunpowder",alternatives={"gunpowder_unstable","gunpowder"},amount=500}},
-    materials={magic_liquid_hp_regeneration=250,purifying_powder=250},count=500,
+    inputs={{name="gunpowder",alternatives={"gunpowder_unstable","gunpowder"},amount=200}},
+    materials={magic_liquid_hp_regeneration=100,purifying_powder=100},count=200,durationFrames=90*60,
 })
 
 for _,recipe in ipairs(dofile("mods/noita_hideout/files/spell_recipes.lua")) do

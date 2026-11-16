@@ -9,6 +9,9 @@ dofile("mods/noita_hideout/files/potion.lua")
 local state=assert(NHStore.load())
 local run=NHStore.newRun(state)
 local seen,counts={}, {projectile=0,static_projectile=0}
+local durationExamples={LIGHT_BULLET=5,BOMB=10,HEAL_BULLET=30,REGENERATION_FIELD=60,NUKE=120,NUKE_GIGA=180}
+local durationBands={[5]=true,[10]=true,[30]=true,[60]=true,[120]=true,[180]=true}
+local cheapestSpell={}
 local originalUnlocks=0
 for _,recipe in ipairs(NHStore.recipes) do
     if recipe.category=="spell" then
@@ -18,6 +21,10 @@ for _,recipe in ipairs(NHStore.recipes) do
         counts[recipe.spellType]=counts[recipe.spellType]+1
         local key=NHEssences.byAction[card.id]
         local amount=recipe.resources[key]
+        cheapestSpell[key]=math.min(cheapestSpell[key] or amount,amount)
+        local seconds=recipe.durationFrames/60
+        assert(durationBands[seconds] and NHStore.productionFrames(recipe)==recipe.durationFrames,card.id)
+        assert(not durationExamples[card.id] or durationExamples[card.id]==seconds,card.id)
         local refund,resource=NHStore.salvageYield(recipe.item,"essence")
         assert(recipe.facility=="salvage" and refund==amount and key==resource and amount>0)
         assert(next(recipe.resources)==key and next(recipe.resources,key)==nil and not card.stack and recipe.item.kind=="spell")
@@ -42,11 +49,12 @@ for _,recipe in ipairs(NHStore.recipes) do
         state.resources[key]=amount
         assert(NHStore.startOrder(state,recipe.id))
         local order=state.order
+        assert(order.required==recipe.durationFrames)
         assert(not state.resources[key] and order.output.slot==1 and not NHStore.freeSlot(state,"warehouse",1,"spell"))
         assert(NHStore.freeSlot(state,"warehouse",1,"wand")==1 and not NHStore.startOrder(state,recipe.id))
         assert(NHStore.commit(state))
         state=assert(NHStore.load())
-        local halfway={run=run,orderId=order.id,progress=order.required-NHStore.checkpointFrames}
+        local halfway={run=run,orderId=order.id,progress=math.max(math.floor(order.required/2),order.required-NHStore.checkpointFrames)}
         assert(NHStore.advanceProduction(state,halfway) and state.order and #state.warehouse==0)
         halfway.checkpoint="temple/"..order.id
         local changed,finished=NHStore.advanceProduction(state,halfway)
@@ -62,6 +70,13 @@ for _,recipe in ipairs(NHStore.recipes) do
     end
 end
 for id in pairs(NHEssences.byAction) do assert(seen[id],id) end
+for _,recipe in ipairs(NHStore.recipes) do
+    if recipe.category=="medical" or recipe.category=="weapons" then
+        for key,amount in pairs(recipe.resources or {}) do
+            if cheapestSpell[key] then assert(amount*10<=cheapestSpell[key],recipe.id..": "..key) end
+        end
+    end
+end
 assert(counts.projectile==117 and counts.static_projectile==41 and originalUnlocks==20)
 assert(not NHStore.startOrder(state,"spell_SPEED") and not NHStore.startOrder(state,"spell_RANDOM_PROJECTILE"))
 

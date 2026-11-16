@@ -32,11 +32,13 @@ assert(NHFarm.sync(state,now) and not NHFarm.sync(state,now))
 assert(state.resources.egg==6 and state.resources.milk==2 and state.resources.meat==5)
 assert(NHStore.commit(state))
 state=assert(NHStore.load())
-for _,food in ipairs({"herb_flatbread","spice_cake","milk_omelet","spiced_stew"}) do
+for _,dish in ipairs({{"herb_flatbread",15},{"spice_cake",20},{"milk_omelet",30},{"spiced_stew",45}}) do
+    local food,seconds=dish[1],dish[2]
     assert(NHStore.startOrder(state,food))
     assert(NHStore.commit(state))
     state=assert(NHStore.load())
     local order=state.order
+    assert(order.required==seconds*60)
     local ok,done=NHStore.advanceProduction(state,{run=run,orderId=order.id,progress=order.required})
     assert(ok and done)
     local found=0
@@ -48,8 +50,8 @@ for _,food in ipairs({"herb_flatbread","spice_cake","milk_omelet","spiced_stew"}
     end
     assert(found==1)
 end
-assert(state.resources.spice==1 and state.resources.herb==10 and state.resources.grain==11 and state.resources.sugar==14)
-assert(state.resources.egg==4 and not state.resources.milk and state.resources.meat==3)
-assert(not NHStore.startOrder(state,"milk_omelet") and state.resources.egg==4)
+assert(state.resources.spice==1 and state.resources.herb==10 and state.resources.grain==13 and state.resources.sugar==14)
+assert(state.resources.egg==5 and not state.resources.milk and state.resources.meat==3)
+assert(not NHStore.startOrder(state,"milk_omelet") and state.resources.egg==5)
 assert(NHStore.commit(state))
 print("Farm and ranch produce paid for all four advanced dishes across order reloads.")

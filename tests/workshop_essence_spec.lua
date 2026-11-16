@@ -107,7 +107,7 @@ for _,typeId in ipairs(NHInjectors.order) do
     assert(item.kind=="dose" and item.subtype==typeId and item.remaining==3 and item.count==1)
 end
 for _,example in ipairs({
-    {id="grenade_essence",base="grenade",category="weapons",key="essence_high_energy",cost=6,kind="grenade"},
+    {id="grenade_essence",base="grenade",category="weapons",key="essence_high_energy",cost=4,kind="grenade"},
 }) do
     local entry,original=recipes[example.id],recipes[example.base]
     assert(entry.category==example.category and entry.facility==original.facility and entry.item.kind==original.item.kind and entry.item.count==8 and original.item.count==8)

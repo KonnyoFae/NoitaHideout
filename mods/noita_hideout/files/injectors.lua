@@ -22,7 +22,7 @@ end
 function M.recipe(id)
     local d=M.types[id]
     return {id=id=="fire" and "injector" or "injector_"..id,category="medical",facility="injector",
-        zh=d.zh,en=d.en,inputs={},resources={active_herb=2,[d.essence]=d.cost},
+        zh=d.zh,en=d.en,durationFrames=120*60,inputs={},resources={active_herb=2,[d.essence]=d.cost},
         item={kind="dose",subtype=id,remaining=3,count=1},
         noteZh="每支 3 针，每针效果："..d.zhEffect.."。",noteEn="Three uses. Each grants "..d.enEffect.."."}
 end

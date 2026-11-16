@@ -308,10 +308,9 @@ tick(nil,"order")
 assert(state().order and not next(state().materials))
 local just_started=tick()
 local initial_remaining,drag_revision=just_started.order_remaining,just_started.revision
-assert(initial_remaining>0)
-local advancing=advance(1200)
-assert(advancing.order_remaining==initial_remaining-20 and advancing.revision==drag_revision)
-assert(state().order.progress>0)
+assert(initial_remaining==8)
+local advancing=advance(120)
+assert(advancing.order_remaining==initial_remaining-2 and advancing.revision==drag_revision)
 ending=true
 tick()
 OnPlayerDied()
@@ -520,7 +519,7 @@ local first_product
 local products={
     {recipe="medical",kind="medkit",name="Medkit",ingredients={water=100,blood=50}},
     {recipe="injector",kind="dose",name="Fire injector",stock="resources",ingredients={active_herb=2,essence_fire=6}},
-    {recipe="grenade",kind="grenade",name="Magic grenade",ingredients={sand=100,slime=50}},
+    {recipe="grenade",kind="grenade",name="Magic grenade",ingredients={sand=64,slime=32}},
 }
 for n,expected in ipairs(products) do
     tick(nil,"buy_upgrade",{id=expected.recipe,level=0})
@@ -595,7 +594,7 @@ assert(state().resources.arcane_scrap==1 and not tick().warehouse.spell)
 do
     local key=NHEssences.byAction.HEAL_BULLET
     local profile=NHEssences.healingProfiles.HEAL_BULLET
-    for _,test in ipairs({{"grenade_essence","essence_high_energy",6},{"injector","essence_fire",6}}) do
+    for _,test in ipairs({{"grenade_essence","essence_high_energy",4},{"injector","essence_fire",6}}) do
         local recipe=assert(has_project(tick().recipes,test[1]))
         assert(recipe.unlocked and not recipe.ready and recipe.reason=="Not enough workshop resources.")
         local i=#recipe.inputs
@@ -794,14 +793,14 @@ stand(1020,2048)
 assert(receipts()==1 and not state().order)
 
 local supplied=state()
-supplied.materials={magic_liquid_teleportation=500}
+supplied.materials={magic_liquid_protection_all=50,poison=50}
 assert(NHStore.commit(supplied))
 entities[player].x,entities[player].y=227,-85
 boot()
 tick()
-tick(nil,"craft",{id="reverse_stable"})
+tick(nil,"craft",{id="reverse_ambrosia"})
 local normal=tick().order_remaining
-assert(normal==120 and state().order)
+assert(normal==90 and state().order)
 local old_mountain=stand(1000,2048)
 assert(receipts()==1 and old_mountain.order_remaining>=normal-1)
 local accelerated=stand(1000,4096)
@@ -815,14 +814,14 @@ assert(receipts()==2 and math.abs(reloaded.order_remaining-repeat_visit.order_re
 stand(1000,6144)
 local complete_batch=state()
 assert(receipts()==3 and not complete_batch.order and complete_batch.finished==1)
-assert(complete_batch.materials.magic_liquid_unstable_teleportation==250 and complete_batch.materials.slime==250)
+assert(complete_batch.materials.honey==50 and complete_batch.materials.diamond==50)
 tick()
 assert(state().finished==1)
 
 -- No active player pauses elapsed time. A polymorphed player still explores
 -- the world, earns active time and can discover a new checkpoint.
 stand(227,-85)
-tick(nil,"craft",{id="stable"})
+tick(nil,"craft",{id="ambrosia"})
 local before_absence=tick().order_remaining
 entities[player].tags.player_unit=nil
 tick()
@@ -1097,7 +1096,7 @@ local function testPowderSeparation()
     settings,flags={},{}
     new_world()
     local profile=state()
-    profile.materials={gunpowder_unstable=200,gunpowder=320}
+    profile.materials={gunpowder_unstable=80,gunpowder=140}
     assert(NHStore.commit(profile))
     function CellFactory_GetAllLiquids() return {"magic_liquid_hp_regeneration"} end
     function CellFactory_GetAllSands() return {"purifying_powder","gunpowder","gunpowder_unstable"} end
@@ -1105,16 +1104,16 @@ local function testPowderSeparation()
     inventory_open=true
     local view=tick()
     local split=assert(has_project(view.recipes,"separate_gunpowder"))
-    assert(split.alchemyMode=="decomposition" and split.ready and split.inputs[1].available==520)
-    assert(split.inputs[1].detail:find("Alchemical gunpowder  200 / 200\nRegular gunpowder  320 / 300",1,true))
+    assert(split.alchemyMode=="decomposition" and split.ready and split.inputs[1].available==220)
+    assert(split.inputs[1].detail:find("Alchemical gunpowder  80 / 80\nRegular gunpowder  140 / 120",1,true))
     assert(view.materials[1].name=="Regular gunpowder" and view.materials[2].name=="Alchemical gunpowder")
     tick(nil,"craft",{id=split.id})
     assert(state().materials.gunpowder==20 and not state().materials.gunpowder_unstable)
-    advance(NHStore.productionFrames())
+    advance(split.duration*60)
     local stock={}
     for _,material in ipairs(tick().materials) do stock[material.key]=material end
-    assert(stock.magic_liquid_hp_regeneration.amount==250 and stock.magic_liquid_hp_regeneration.slot==1)
-    assert(stock.purifying_powder.amount==250 and stock.purifying_powder.slot==2)
+    assert(stock.magic_liquid_hp_regeneration.amount==100 and stock.magic_liquid_hp_regeneration.slot==1)
+    assert(stock.purifying_powder.amount==100 and stock.purifying_powder.slot==2)
 end
 testPowderSeparation()
 print("Controller: combined gunpowder stock, separated inputs and liquid/powder delivery passed.")
@@ -1130,7 +1129,7 @@ local function testCatalyticWorkshop()
     local menu=tick().recipes
     local midas=assert(has_project(menu,"midas"))
     assert(midas.ready and #midas.catalysts==1 and midas.catalysts[1].available==1)
-    assert(#midas.outputs==1 and midas.outputs[1].amount==250 and midas.outputs[1].key=="midas")
+    assert(midas.duration==180 and #midas.outputs==1 and midas.outputs[1].amount==100 and midas.outputs[1].key=="midas")
     assert(not has_project(menu,"mana").ready and has_project(menu,"mana").reason=="Missing catalyst.")
     for _,recipe in ipairs(menu) do
         for _,result in ipairs(recipe.outputs) do assert(result.key~="gold") end
@@ -1139,9 +1138,9 @@ local function testCatalyticWorkshop()
     boot()
     local inProgress=has_project(tick().recipes,"midas")
     assert(inProgress.catalysts[1].held==1 and inProgress.catalysts[1].available==0)
-    assert(inProgress.outputs[1].amount==250 and not state().materials.midas)
-    advance(NHStore.productionFrames())
-    assert(state().materials.midas==251 and state().materials.midas_precursor==250)
+    assert(inProgress.outputs[1].amount==100 and not state().materials.midas)
+    advance(midas.duration*60)
+    assert(state().materials.midas==101 and state().materials.midas_precursor==400)
     assert(not state().materials.gold and state().bankGold==0 and not state().order)
 end
 testCatalyticWorkshop()

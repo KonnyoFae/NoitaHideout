@@ -98,10 +98,19 @@ end
 local synthesis,decomposition={},{}
 local powderSeparation
 local ids={}
+local secondsPerBatch={
+    stable=8, diminution=8, mana=8, flummoxium=10,
+    pheromone=15, levitatium=15, levitatium_metals=15,
+    hastium=30, unstable_polymorphine=30, guiding_powder=30,
+    chaotic_polymorphine=45, purifying_powder=45, purifying_powder_silver=60,
+    ambrosia=90, separate_gunpowder=90, void_diamond=120, void_fungus=120, midas=180,
+}
 for _,recipe in ipairs(NHStore.recipes) do
     assert(not ids[recipe.id],"Duplicate recipe: "..recipe.id)
     ids[recipe.id]=recipe
     if recipe.category=="alchemy" then
+        local seconds=assert(secondsPerBatch[recipe.reverseOf or recipe.id],recipe.id)
+        assert(NHStore.productionFrames(recipe)==seconds*60,recipe.id)
         assert(not recipe.materials.magic_liquid_hp_regeneration_unstable,recipe.id)
         assert(not recipe.materials.gold and not recipe.materials.midas_precursor,recipe.id)
         for _,input in ipairs(recipe.inputs) do assert(input.name~="magic_liquid_hp_regeneration_unstable",recipe.id) end
@@ -121,14 +130,14 @@ for _,recipe in ipairs(NHStore.recipes) do
 end
 -- Fixed batches for the vanilla reactions offered by the workshop.
 local knownBatches={
-    flummoxium={{magic_liquid_worm_attractor=250,blood_worm=250},{material_confusion=500}},
-    pheromone={{material_confusion=250,magic_liquid_berserk=250},{magic_liquid_charm=500}},
-    hastium={{magic_liquid_faster_levitation=250,magic_liquid_movement_faster=250},{magic_liquid_faster_levitation_and_movement=500}},
-    unstable_polymorphine={{material_confusion=250,blood=250,oil=250},{magic_liquid_unstable_polymorph=750}},
-    levitatium={{material_confusion=250,copper=250},{magic_liquid_faster_levitation=500}},
-    diminution={{vomit=250,bone=250},{magic_liquid_weakness=500}},
-    ambrosia={{honey=250,diamond=250},{magic_liquid_protection_all=250,poison=250}},
-    purifying_powder={{brass=250,diamond=250},{purifying_powder=500}},
+    flummoxium={{magic_liquid_worm_attractor=100,blood_worm=100},{material_confusion=200}},
+    pheromone={{material_confusion=100,magic_liquid_berserk=100},{magic_liquid_charm=200}},
+    hastium={{magic_liquid_faster_levitation=100,magic_liquid_movement_faster=100},{magic_liquid_faster_levitation_and_movement=200}},
+    unstable_polymorphine={{material_confusion=100,blood=100,oil=100},{magic_liquid_unstable_polymorph=300}},
+    levitatium={{material_confusion=100,copper=100},{magic_liquid_faster_levitation=200}},
+    diminution={{vomit=100,bone=100},{magic_liquid_weakness=200}},
+    ambrosia={{honey=50,diamond=50},{magic_liquid_protection_all=50,poison=50}},
+    purifying_powder={{brass=50,diamond=50},{purifying_powder=100}},
 }
 for id,batch in pairs(knownBatches) do
     local recipe=assert(synthesis[id],id)
@@ -174,76 +183,76 @@ print(("Reverse alchemy: %d recipe pairs paid from stock, reserved capacity, rel
 
 local split=assert(powderSeparation,"Missing one-way powder separation")
 assert(split.alchemyMode=="decomposition" and not split.reversible and not split.reverseOf)
-assert(not ids["reverse_"..split.id] and #split.inputs==1 and split.inputs[1].amount==500)
-local yield={magic_liquid_hp_regeneration=250,purifying_powder=250}
+assert(not ids["reverse_"..split.id] and #split.inputs==1 and split.inputs[1].amount==200)
+local yield={magic_liquid_hp_regeneration=100,purifying_powder=100}
 sameStock(split.materials,yield,split.id)
 
 for _,name in ipairs({"gunpowder","gunpowder_unstable"}) do
-    s.materials={[name]=500}
+    s.materials={[name]=200}
     completeBatch(split)
 end
 
 -- Visually similar explosives are not substitutes for the final missing unit.
-local short={gunpowder=298,gunpowder_unstable=201,gunpowder_explosive=500,gunpowder_tnt=500,gunpowder_unstable_big=500}
+local short={gunpowder=100,gunpowder_unstable=99,gunpowder_explosive=500,gunpowder_tnt=500,gunpowder_unstable_big=500}
 s.materials={}
 for name,amount in pairs(short) do s.materials[name]=amount end
-assert(NHStore.ingredientStock(s,split.inputs[1])==499)
+assert(NHStore.ingredientStock(s,split.inputs[1])==199)
 assert(not NHStore.canStartBatch(s,split) and not NHStore.startOrder(s,split.id))
 sameStock(s.materials,short,split.id)
 
-s.materials={gunpowder_unstable=185,gunpowder=389,gunpowder_tnt=32}
-assert(NHStore.ingredientStock(s,split.inputs[1])==574)
+s.materials={gunpowder_unstable=85,gunpowder=189,gunpowder_tnt=32}
+assert(NHStore.ingredientStock(s,split.inputs[1])==274)
 assert(NHStore.startOrder(s,split.id))
 sameStock(s.materials,{gunpowder=74,gunpowder_tnt=32},split.id)
 persist()
 sameStock(s.order.output.materials,yield,split.id)
 local before=s.finished
 finish()
-sameStock(s.materials,{gunpowder=74,gunpowder_tnt=32,magic_liquid_hp_regeneration=250,purifying_powder=250},split.id)
+sameStock(s.materials,{gunpowder=74,gunpowder_tnt=32,magic_liquid_hp_regeneration=100,purifying_powder=100},split.id)
 assert(s.finished==before+1)
 
 -- In a full warehouse, keeping even one grain of the ordinary powder leaves
 -- only one slot free. Spending the last grain frees the second product slot.
 local fillers=NHStore.warehouseCapacity(s,"materials")-2
-s.materials={gunpowder=301,gunpowder_unstable=200}
+s.materials={gunpowder=101,gunpowder_unstable=100}
 for i=1,fillers do s.materials["filler_"..i]=1 end
 local ok,reason=NHStore.startOrder(s,split.id)
 assert(not ok and reason=="Material storage is full." and not s.order)
-assert(s.materials.gunpowder==301 and s.materials.gunpowder_unstable==200)
-s.materials.gunpowder=300
+assert(s.materials.gunpowder==101 and s.materials.gunpowder_unstable==100)
+s.materials.gunpowder=100
 assert(NHStore.canStartBatch(s,split) and NHStore.startOrder(s,split.id))
 assert(not s.materials.gunpowder and not s.materials.gunpowder_unstable)
 assert(not NHStore.canStockMaterials(s,{foreign=1}) and NHStore.canStockMaterials(s,yield))
 persist()
 finish()
-assert(s.materials.magic_liquid_hp_regeneration==250 and s.materials.purifying_powder==250)
+assert(s.materials.magic_liquid_hp_regeneration==100 and s.materials.purifying_powder==100)
 for i=1,fillers do assert(s.materials["filler_"..i]==1) end
 
 -- An existing Healthium stack needs no new slot. Burn through the ordinary
 -- powder instead when the preferred powder stack is too large to empty.
-s.materials={gunpowder=500,gunpowder_unstable=600,magic_liquid_hp_regeneration=17}
+s.materials={gunpowder=200,gunpowder_unstable=300,magic_liquid_hp_regeneration=17}
 for i=1,fillers-1 do s.materials["filler_"..i]=1 end
 assert(NHStore.canStartBatch(s,split) and NHStore.startOrder(s,split.id))
-assert(not s.materials.gunpowder and s.materials.gunpowder_unstable==600)
+assert(not s.materials.gunpowder and s.materials.gunpowder_unstable==300)
 assert(not NHStore.canStockMaterials(s,{foreign=1}))
 persist()
 finish()
-assert(s.materials.magic_liquid_hp_regeneration==267 and s.materials.purifying_powder==250)
-assert(not s.materials.gunpowder and s.materials.gunpowder_unstable==600)
+assert(s.materials.magic_liquid_hp_regeneration==117 and s.materials.purifying_powder==100)
+assert(not s.materials.gunpowder and s.materials.gunpowder_unstable==300)
 for i=1,fillers-1 do assert(s.materials["filler_"..i]==1) end
 print("One-way powder separation: both powder types, mixed payment, excluded explosives, capacity and single delivery passed.")
 
 for _,name in ipairs({"magic_liquid_protection_all","poison"}) do
-    s.materials={[name]=500}
+    s.materials={[name]=200}
     assert(not NHStore.startOrder(s,"reverse_ambrosia") and not s.order)
-    sameStock(s.materials,{[name]=500},name)
+    sameStock(s.materials,{[name]=200},name)
 end
 
 local singleRoutes={
-    purifying_powder_silver={{silver=250,diamond=250,blood_worm=250},{purifying_powder=250}},
-    guiding_powder={{material_confusion=250,magic_liquid_unstable_teleportation=250},{orb_powder=250}},
-    void_diamond={{diamond=250,magic_liquid_random_polymorph=250,radioactive_liquid=250},{void_liquid=750}},
-    void_fungus={{radioactive_liquid=250,blood_worm=250,fungi=250},{void_liquid=500}},
+    purifying_powder_silver={{silver=50,diamond=50,blood_worm=50},{purifying_powder=50}},
+    guiding_powder={{material_confusion=100,magic_liquid_unstable_teleportation=100},{orb_powder=100}},
+    void_diamond={{diamond=50,magic_liquid_random_polymorph=50,radioactive_liquid=50},{void_liquid=150}},
+    void_fungus={{radioactive_liquid=50,blood_worm=50,fungi=50},{void_liquid=100}},
 }
 for id,batch in pairs(singleRoutes) do
     local r=assert(ids[id])
@@ -260,42 +269,42 @@ local alternatives={"metal_sand","steel_sand","brass","silver","gold_radioactive
 assert(#metals.inputs[2].alternatives==#alternatives)
 for i,name in ipairs(alternatives) do
     assert(metals.inputs[2].alternatives[i]==name)
-    s.materials={material_confusion=250,[name]=250}
+    s.materials={material_confusion=100,[name]=100}
     completeBatch(metals)
 end
-s.materials={material_confusion=250,copper=250}
+s.materials={material_confusion=100,copper=100}
 assert(not NHStore.startOrder(s,metals.id) and NHStore.canStartBatch(s,synthesis.levitatium))
-s.materials={material_confusion=250,brass=150,silver=150}
-assert(NHStore.startOrder(s,metals.id) and not s.materials.brass and s.materials.silver==50)
+s.materials={material_confusion=100,brass=60,silver=60}
+assert(NHStore.startOrder(s,metals.id) and not s.materials.brass and s.materials.silver==20)
 finish()
 assert(NHStore.startOrder(s,decomposition.levitatium.id))
 finish()
-sameStock(s.materials,{copper=250,material_confusion=250,silver=50},metals.id)
+sameStock(s.materials,{copper=100,material_confusion=100,silver=20},metals.id)
 
-s.materials={material_confusion=251,metal_sand=300,brass=100,silver=170}
+s.materials={material_confusion=101,metal_sand=120,brass=40,silver=70}
 for i=1,NHStore.warehouseCapacity(s,"materials")-4 do s.materials["filler_"..i]=1 end
-assert(NHStore.startOrder(s,metals.id) and s.materials.metal_sand==300 and not s.materials.brass)
-assert(s.materials.silver==20 and s.materials.material_confusion==1)
+assert(NHStore.startOrder(s,metals.id) and s.materials.metal_sand==120 and not s.materials.brass)
+assert(s.materials.silver==10 and s.materials.material_confusion==1)
 finish()
-assert(s.materials.magic_liquid_faster_levitation==500)
+assert(s.materials.magic_liquid_faster_levitation==200)
 
 local mana="magic_liquid_mana_regeneration"
 local function testCatalyst(id,feed,sample,product)
     local r=assert(ids[id])
     assert(not r.reversible and not ids["reverse_"..id] and r.alchemyMode=="synthesis")
-    sameStock(inputAmounts(r),{[feed]=250},id)
-    sameStock(r.materials,{[product]=250},id)
+    sameStock(inputAmounts(r),{[feed]=100},id)
+    sameStock(r.materials,{[product]=100},id)
     assert(#r.catalysts==1 and r.catalysts[1].name==sample and r.catalysts[1].amount==1)
-    s.materials={[feed]=250}
+    s.materials={[feed]=100}
     local ok,reason=NHStore.startOrder(s,id)
     assert(not ok and reason=="Missing catalyst." and not s.order)
-    s.materials={[sample]=1,[feed]=249}
-    assert(not NHStore.startOrder(s,id) and s.materials[sample]==1 and s.materials[feed]==249)
-    s.materials[feed]=250
+    s.materials={[sample]=1,[feed]=99}
+    assert(not NHStore.startOrder(s,id) and s.materials[sample]==1 and s.materials[feed]==99)
+    s.materials[feed]=100
     assert(NHStore.startOrder(s,id) and not next(s.materials))
     persist()
     sameStock(s.order.catalysts,{[sample]=1},id)
-    local expected={[product]=250}
+    local expected={[product]=100}
     expected[sample]=(expected[sample] or 0)+1
     sameStock(s.order.output.materials,expected,id)
     if id=="midas" then
@@ -312,26 +321,38 @@ testCatalyst("midas","midas_precursor","midas","midas")
 
 -- Returning a different catalyst occupies a second type. The held sample and
 -- its product are reserved against flask deposits until the order finishes.
-s.materials={magic_liquid_polymorph=251,radioactive_liquid=1}
+s.materials={magic_liquid_polymorph=101,radioactive_liquid=1}
 for i=1,fillers do s.materials["filler_"..i]=1 end
 assert(not NHStore.startOrder(s,"chaotic_polymorphine") and s.materials.radioactive_liquid==1)
-s.materials.magic_liquid_polymorph=250
+s.materials.magic_liquid_polymorph=100
 assert(NHStore.startOrder(s,"chaotic_polymorphine") and not s.materials.radioactive_liquid)
 assert(not NHStore.canStockMaterials(s,{foreign=1}) and NHStore.canStockMaterials(s,{radioactive_liquid=1}))
 finish()
-assert(s.materials.radioactive_liquid==1 and s.materials.magic_liquid_random_polymorph==250)
+assert(s.materials.radioactive_liquid==1 and s.materials.magic_liquid_random_polymorph==100)
 
 -- The reservation includes the original sample when catalyst and product match.
 local limit=NHStore.maxMaterialAmount
-s.materials={water=250,[mana]=limit-249}
-assert(not NHStore.startOrder(s,"mana") and s.materials.water==250)
-s.materials[mana]=limit-250
-assert(NHStore.startOrder(s,"mana") and s.order.output.materials[mana]==251)
+s.materials={water=100,[mana]=limit-99}
+assert(not NHStore.startOrder(s,"mana") and s.materials.water==100)
+s.materials[mana]=limit-100
+assert(NHStore.startOrder(s,"mana") and s.order.output.materials[mana]==101)
 local flask=s.docks[1]
 flask.item.materials={[mana]=1}
 assert(not NHPotion.transferMaterial(s,{slot=1,storedId=flask.id,unload=true}))
-assert(flask.item.materials[mana]==1 and s.materials[mana]==limit-251)
+assert(flask.item.materials[mana]==1 and s.materials[mana]==limit-101)
 persist()
 finish()
 assert(s.materials[mana]==limit)
 print("Catalytic batches and one-way alchemy: samples reserved and returned once, excess deliveries rejected, side products handled.")
+
+-- A batch paid before the smaller recipe went live keeps both promised
+-- products and its original remaining time when reloaded.
+s.materials={}
+s.order={id=s.finished+1,recipe="ambrosia",progress=7200-2,required=7200,
+    output={materials={magic_liquid_protection_all=250,poison=250}}}
+persist()
+assert(s.order.required==7200 and s.order.progress==7198)
+local changed,delivered=NHStore.advanceProduction(s,{run=run,orderId=s.order.id,progress=7199})
+assert(changed and not delivered and not next(s.materials))
+finish()
+sameStock(s.materials,{magic_liquid_protection_all=250,poison=250},"pre-rebalance ambrosia")

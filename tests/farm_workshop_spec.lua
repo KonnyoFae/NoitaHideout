@@ -53,5 +53,5 @@ assert(state.warehouse[2].id~=bandageId and state.warehouse[2].item.kind=="medki
 finish("bread")
 finish("sugar_cube")
 assert(#state.warehouse==4 and state.warehouse[3].item.kind=="bread" and state.warehouse[4].item.kind=="sugar_cube")
-assert(state.resources.fiber==2 and state.resources.herb==2 and state.resources.grain==4 and not state.resources.sugar)
+assert(state.resources.fiber==2 and state.resources.herb==2 and state.resources.grain==4 and state.resources.sugar==1)
 print("Four parallel crops harvested once, then turned into actual warehouse supplies across reloads.")
