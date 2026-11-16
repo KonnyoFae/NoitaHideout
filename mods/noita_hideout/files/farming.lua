@@ -202,14 +202,11 @@ end
 function NHFarm.view(state,lang,now)
     local view={plots={},crops={},equipment=NHStore.level(state,"agri_equipment")>0}
     now=math.max(now,state.farm.time)
-    view.pens=NHLivestock.view(state,lang,now)
-    view.produce={}
-    for _,id in ipairs({"egg","milk","meat"}) do
-        local resource=NHLivestock.resources[id]
-        table.insert(view.produce,{name=lang=="zh" and resource.zh or resource.en,stock=state.resources[id] or 0})
-    end
+    view.pens,view.produce=NHLivestock.view(state,lang,now)
+    local fieldCounts={}
     for id=1,NHStore.level(state,"farmland") do
         local plot=state.farm.plots[id] or {token=0}
+        if plot.crop then fieldCounts[plot.crop]=(fieldCounts[plot.crop] or 0)+1 end
         local remaining=plot.crop and math.max(0,math.ceil((plot.readyAt-now)/60)) or 0
         view.plots[id]={id=id,token=plot.token,crop=plot.crop,remaining=remaining,
             blocked=plot.crop~=nil and remaining==0 and cropBatches(state,plot,now)==0}
@@ -217,7 +214,8 @@ function NHFarm.view(state,lang,now)
     for _,id in ipairs(NHFarm.order) do
         local kind=NHFarm.crops[id]
         view.crops[#view.crops+1]={id=id,name=lang=="zh" and kind.zh or kind.en,amount=kind.amount,
-            duration=kind.frames/60,unlocked=not kind.equipment or view.equipment,stock=state.resources[id] or 0}
+            duration=kind.frames/60,unlocked=not kind.equipment or view.equipment,stock=state.resources[id] or 0,
+            perMinute=(fieldCounts[id] or 0)*kind.amount*3600/kind.frames}
     end
     return view
 end

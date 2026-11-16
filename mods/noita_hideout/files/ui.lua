@@ -318,13 +318,6 @@ local function draw_essences(entries,start,limit,left,top,width,scale,mx,my)
 end
 
 local function draw_farm(farm,y,tr,button,label,value_row,dispatch)
-    if farm_page=="stock" then
-        for i,crop in ipairs(farm.crops) do
-            value_row(y+(i-1)*13,crop.name,compact(crop.stock),crop.stock>0 and green or muted,
-                crop.name.."  "..string.format("%.0f",crop.stock))
-        end
-        return
-    end
     if #farm.plots==0 then
         if button(412,6,y,tr("去扩建田地","Build farmland")) then
             tab,selected_entry="expansion","farmland"
@@ -370,13 +363,6 @@ local function draw_farm(farm,y,tr,button,label,value_row,dispatch)
 end
 
 local function draw_livestock(farm,y,tr,button,label,value_row)
-    if livestock_page=="produce" then
-        for i,entry in ipairs(farm.produce) do
-            value_row(y+(i-1)*13,entry.name,compact(entry.stock),entry.stock>0 and green or muted,
-                string.format("%.0f",entry.stock))
-        end
-        return
-    end
     if #farm.pens==0 then
         if button(442,6,y,tr("去扩建畜牧设备","Build livestock pens")) then tab,selected_entry="expansion","livestock" end
         return
@@ -427,6 +413,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         return positions,y+16
     end
     local nav,body=position_tabs(work_tabs,18)
+    local nav_end=body
     local crafting=tab=="orders"
     local alchemy=crafting and recipe_category=="alchemy"
     local shopping=tab=="shop"
@@ -488,13 +475,13 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     elseif salvage then
         body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)+(per_card and 13 or 0)
     elseif ranching then
-        if livestock_page=="produce" then body_height=13*#model.farm.produce+5
+        if livestock_page=="produce" then body_height=13*(1+#model.farm.produce)+5
         elseif selected_pen and model.farm.pens[selected_pen] then body_height=84
         else body_height=13*math.max(1,#model.farm.pens)+5 end
     elseif farming then
         local farm=model.farm
         local plot=selected_plot and farm.plots[selected_plot]
-        if farm_page=="stock" then body_height=13*#farm.crops+5
+        if farm_page=="stock" then body_height=13*(1+#farm.crops)+5
         elseif not plot then body_height=13*math.max(1,#farm.plots)+5
         else body_height=(plot.crop and 42 or 28)+13*#farm.crops+2 end
     elseif crafting and selected then
@@ -511,12 +498,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if #menu>entries_per_page then body_height=body_height+13 end
         if crafting and model.order_active then body_height=body_height+15 end
     end
-    local height=workshop_folded and 18 or body+body_height
-    if height*scale>sh-10 then
-        local panel_width=width*scale
-        scale=(sh-10)/height
-        width=panel_width/scale
-    end
+    local height=workshop_folded and 20 or layout.panelHeight
     local top=sh-5-height*scale
     local function label(y,value,color)
         local txt,short=fit(value,(width-12)*scale,scale)
@@ -547,6 +529,30 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             return hover
         end
     end
+    -- Keep all navigation above the scrolling body when there is room. On a
+    -- narrow screen wrapped subcategories may scroll, but the main tabs stay put.
+    local scroll=body+body_height>height-2
+    local scroll_y=height-body>=38 and body or nav_end
+    local in_scroll=false
+    local function begin_scroll()
+        local view_key=table.concat({tab,recipe_category,alchemy_mode,shop_category,
+            farm_page,selected_plot or "",livestock_page,selected_pen or "",selected_entry or "",
+            salvage and salvage.id or "",salvage_target and salvage_target.mode or ""},"/")
+        GuiIdPushString(gui,view_key)
+        GuiBeginScrollContainer(gui,20000,left+2*scale,top+scroll_y*scale,
+            (width-4)*scale,(height-scroll_y-3)*scale,true,0,0)
+        in_scroll=true
+        -- Children of a native scroll container use relative coordinates.
+        left,top,width=0,-scroll_y*scale,width-12
+    end
+    local function finish()
+        if in_scroll then
+            GuiEndScrollContainer(gui)
+            GuiIdPop(gui)
+        end
+        return hover
+    end
+    if scroll and scroll_y==nav_end then begin_scroll() end
     for _,t in ipairs(category_nav or {}) do
         local current=ranching and livestock_page or farming and farm_page or (shopping and shop_category or recipe_category)
         if button(t.id,t.x,t.y,t.name,t.key==current and gold or muted) then
@@ -554,15 +560,16 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             elseif farming then farm_page,selected_plot=t.key,nil
             elseif shopping then shop_category=t.key else recipe_category=t.key end
             selected_entry=nil
-            return hover
+            return finish()
         end
     end
     for _,t in ipairs(alchemy_nav or {}) do
         if button(t.id,t.x,t.y,t.name,t.key==alchemy_mode and gold or muted) then
             alchemy_mode,selected_entry=t.key,nil
-            return hover
+            return finish()
         end
     end
+    if scroll and scroll_y~=nav_end then begin_scroll() end
     -- Quantities and timers stay visible even when a long name needs a tooltip.
     local function value_row(y,name,value,color,tip,detail)
         local right=width-6-GuiGetTextDimensions(gui,value,scale)/scale
@@ -573,6 +580,41 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         tint(color)
         GuiText(gui,left+right*scale,top+y*scale,value,scale)
         if tip then GuiTooltip(gui,tip,detail or "") end
+    end
+    local function stock_table(entries,y)
+        local rate_label=width<110 and tr("每分","/min") or tr("每分钟","Per min")
+        local rows={{name=tr("产物","Item"),stock=tr("库存","Stock"),rate=rate_label}}
+        for _,entry in ipairs(entries) do
+            local rate=string.format("%.2f",entry.perMinute):gsub("%.?0+$","")
+            rows[#rows+1]={name=entry.name,stock=compact(entry.stock),rate=rate,entry=entry}
+        end
+        local stock_w,rate_w=0,0
+        for _,r in ipairs(rows) do
+            r.stockWidth=GuiGetTextDimensions(gui,r.stock,scale)
+            r.rateWidth=GuiGetTextDimensions(gui,r.rate,scale)
+            stock_w=math.max(stock_w,r.stockWidth)
+            rate_w=math.max(rate_w,r.rateWidth)
+        end
+        local name_x=left+4*scale
+        local rate_right=left+(width-3)*scale
+        local stock_right=rate_right-rate_w-3*scale
+        local name_w=stock_right-stock_w-3*scale-name_x
+        for i,r in ipairs(rows) do
+            local row_y=top+(y+(i-1)*13)*scale
+            local entry=r.entry
+            local detail=entry and string.format(tr("库存 %.0f\n每分钟产量 %s","Stock %.0f\nOutput per minute %s"),
+                entry.stock,r.rate)
+            tint(entry and white or muted)
+            GuiText(gui,name_x,row_y,fit(r.name,name_w,scale),scale)
+            if detail then GuiTooltip(gui,r.name,detail) end
+            tint(entry and entry.stock>0 and white or muted)
+            GuiText(gui,stock_right-r.stockWidth,row_y,r.stock,scale)
+            if detail then GuiTooltip(gui,r.name,detail) end
+            tint(entry and entry.perMinute>0 and green or muted)
+            GuiText(gui,rate_right-r.rateWidth,row_y,r.rate,scale)
+            if detail then GuiTooltip(gui,r.name,detail)
+            else GuiTooltip(gui,tr("每分钟产量","Output per minute"),tr("按当前完整生产周期计算","Average over a full production cycle")) end
+        end
     end
     local function cost(y,name,have,need,detail)
         value_row(y,name,compact(have).." / "..compact(need),have>=need and green or gold,
@@ -592,10 +634,10 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             local essence=tr("精华","Essence")
             local scrap=tr("碎片","Scrap")
             local choice=extract and "["..essence.."]" or essence
-            if button(262,6,y,choice,extract and gold or muted) then salvage_target.mode="essence"; return hover end
+            if button(262,6,y,choice,extract and gold or muted) then salvage_target.mode="essence"; return finish() end
             local x=13+GuiGetTextDimensions(gui,choice,scale)/scale
             if button(263,x,y,extract and scrap or "["..scrap.."]",extract and muted or gold) then
-                salvage_target.mode="scrap"; return hover
+                salvage_target.mode="scrap"; return finish()
             end
             y=y+14
         end
@@ -630,14 +672,16 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             if button(260,6,y+26,confirm,green) then
                 dispatch("salvage",salvage_target)
                 salvage_target=nil
-                return hover
+                return finish()
             end
         else label(y+26,tr("库存已满","Storage full"),muted) end
         if button(261,6,y+38,tr("取消","Cancel")) then salvage_target=nil end
     elseif ranching then
-        draw_livestock(model.farm,body,tr,button,label,value_row)
+        if livestock_page=="produce" then stock_table(model.farm.produce,body)
+        else draw_livestock(model.farm,body,tr,button,label,value_row) end
     elseif farming then
-        draw_farm(model.farm,body,tr,button,label,value_row,dispatch)
+        if farm_page=="stock" then stock_table(model.farm.crops,body)
+        else draw_farm(model.farm,body,tr,button,label,value_row,dispatch) end
     elseif crafting and selected then
         local back=tr("< 返回配方","< Recipes")
         local confirm=tr("确认制造","Confirm craft")
@@ -648,7 +692,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
                 back,confirm=tr("< 分解","< Decomposition"),tr("确认分解","Decompose")
             end
         end
-        if button(240,6,body,back) then selected_entry=nil; return hover end
+        if button(240,6,body,back) then selected_entry=nil; return finish() end
         label(body+14,show_outputs and selected.name or selected.name.." ×"..selected.output,available(selected) and green or white)
         value_row(body+27,tr("预计用时","Craft time"),time_text(selected.duration),white)
         local y=body+40
@@ -694,7 +738,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             if button(214,6,y,confirm,green) then dispatch("craft",{id=selected.id}) end
         else label(y,selected.reason or tr("材料或空位不足","Need stock or space"),muted) end
     elseif shopping and selected then
-        if button(240,6,body,tr("< 返回商品","< Goods")) then selected_entry=nil; return hover end
+        if button(240,6,body,tr("< 返回商品","< Goods")) then selected_entry=nil; return finish() end
         label(body+14,selected.name,white)
         value_row(body+27,tr("数量","Quantity"),string.format("%.0f",selected.quantity),white)
         local destination=selected.category=="materials" and tr("物料","Materials") or tr("消耗品","Supplies")
@@ -721,7 +765,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             end
         else label(confirm_y,selected.reason,gold) end
     elseif selected then
-        if button(240,6,body,tr("< 返回列表","< Projects")) then selected_entry=nil; return hover end
+        if button(240,6,body,tr("< 返回列表","< Projects")) then selected_entry=nil; return finish() end
         label(body+14,selected.name,available(selected) and green or white)
         label(body+27,tr("当前：","Now: ")..selected.current)
         if selected.next then label(body+39,tr("升级后：","Next: ")..selected.next) end
@@ -771,7 +815,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
                 if item.planned or item.maxed or item.unlocked==false then color=muted end
                 if button(243+i,6,y+(i-1)*13,item.name,color) then
                     selected_entry=item.id
-                    return hover
+                    return finish()
                 end
             end
         end
@@ -789,7 +833,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             dispatch("test_wallet")
         end
     end
-    return hover
+    return finish()
 end
 
 local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layout,pw)
@@ -869,7 +913,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         local cols=math.max(1,math.min(10,math.floor((width-16)/qw)))
         local tabs,grid_y=layout.tabs,layout.gridY
         local content_height=layout.contentHeight
-        local height=folded and 20 or grid_y+content_height+18
+        local height=folded and 20 or layout.panelHeight
         local top=sh-5-height*scale
         local warehouse_hover=mx>=left and mx<left+width*scale and my>=top and my<top+height*scale
         panel_hover=panel_hover or warehouse_hover
@@ -1226,12 +1270,13 @@ function NHUI.draw(model, dispatch)
         layout=home_layout(sw,s,qw)
         layout.tabs,layout.gridY=stash_tabs(layout.stash,s,tr)
         local fit_scale=(sh-10)/(layout.gridY+content_height+18)
-        if not folded and fit_scale<s then
+        if fit_scale<s then
             s=fit_scale
             layout=home_layout(sw,s,qw)
             layout.tabs,layout.gridY=stash_tabs(layout.stash,s,tr)
         end
         layout.contentHeight=content_height
+        layout.panelHeight=layout.gridY+content_height+18
         pw=layout.secure
     end
     local ox,oy=sw-pw*s-5,sh-ph*s-5

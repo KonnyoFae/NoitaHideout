@@ -1,3 +1,3 @@
 <Mod name="Hideout Prototype | 藏身处测试版"
-     description="0.25.0 | Summon cards show companion portraits. Fields and livestock deliver produce to hideout storage automatically."
+     description="0.26.0 | Crop and livestock stocks show production per minute. The hideout panel matches the warehouse height."
      request_no_api_restrictions="0" />

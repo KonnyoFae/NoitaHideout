@@ -19,6 +19,15 @@ local function buy(id,slot,now)
 end
 local function expand() return NHStore.buyUpgrade(s,{id="livestock",level=NHStore.level(s,"livestock")}) end
 local function view(now) return NHLivestock.view(s,"en",now) end
+local function checkRates(now,eggs,milk,meat)
+    local expected={egg=eggs,milk=milk,meat=meat}
+    local produce=NHFarm.view(s,"zh",now).produce
+    assert(#produce==3)
+    for _,row in ipairs(produce) do
+        assert(math.abs(row.perMinute-expected[row.id])<1e-9)
+        assert(row.stock==(s.resources[row.id] or 0))
+    end
+end
 assert(NHStore.creditGold(s,1000) and not buy("chick",1,0) and s.bankGold==1000)
 s.materials={sandstone=1200,water=900}
 assert(expand() and s.materials.sandstone==1000 and s.materials.water==750)
@@ -42,6 +51,8 @@ NHCompanions.reward=function(_,source,cycles)
     return {}
 end
 assert(not view(hen.growth-1)[1].grown and view(hen.growth)[1].grown)
+checkRates(hen.growth-1,0,0,0)
+checkRates(hen.growth,1,0,0.5)
 assert(view(hen.growth)[1].remaining==hen.period/60)
 assert(NHFarm.observe(s,first+69)==first-1 and NHFarm.sync(s,first-1) and not s.resources.egg and rewards==0)
 NHFarm.resetClock()
@@ -52,6 +63,7 @@ s.resources.meat=NHStore.maxResourceAmount
 local changed,produced=NHFarm.sync(s,at)
 assert(changed and not produced and not s.resources.egg and s.farm.pens[1].nextAt==first and rewards==0)
 assert(view(at)[1].blocked and not NHFarm.due(s,at))
+checkRates(at,1,0,0.5)
 s.resources.meat=nil
 assert(NHFarm.due(s,at) and NHFarm.sync(s,at) and not NHFarm.sync(s,at))
 assert(s.resources.egg==2 and s.resources.meat==1 and rewards==1 and not next(s.materials))
@@ -79,4 +91,8 @@ s.farm.pens[1].nextAt=first
 persist()
 assert(s.farm.pens[1].nextAt==at-3*hen.period)
 assert(NHFarm.sync(s,at) and s.resources.egg==(hens+4)*2 and s.farm.pens[1].nextAt==at+hen.period)
+assert(buy("chick",3,at) and buy("calf",4,at))
+checkRates(at,1,2/3,0.5+2/3)
+checkRates(at+hen.growth,2,2/3,1+2/3)
+checkRates(at+cow.growth,2,4/3,1+4/3)
 print("Livestock: timed automatic deposits, independent pens, caps, old pending batches and replay-safe rewards passed.")

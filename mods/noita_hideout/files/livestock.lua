@@ -65,6 +65,7 @@ end
 
 function NHLivestock.view(state,lang,now)
     local pens={}
+    local perMinute={egg=0,milk=0,meat=0}
     local language=lang=="zh" and 1 or 2
     for slot=1,NHStore.level(state,"livestock")*2 do
         local species=slot%2==1 and "chick" or "calf"
@@ -76,6 +77,11 @@ function NHLivestock.view(state,lang,now)
         if animal then
             local adultAt=animal.born+kind.growth
             pen.grown=now>=adultAt
+            if pen.grown then
+                local cyclesPerMinute=3600/kind.period
+                perMinute[kind.product]=perMinute[kind.product]+kind.amount*cyclesPerMinute
+                perMinute.meat=perMinute.meat+kind.meat*cyclesPerMinute
+            end
             pen.name=pen.grown and kind.adult[language] or pen.young
             pen.nextAt=animal.nextAt
             pen.blocked=now>=animal.nextAt and NHLivestock.batches(state,animal,now)==0
@@ -84,5 +90,11 @@ function NHLivestock.view(state,lang,now)
         end
         pens[slot]=pen
     end
-    return pens
+    local produce={}
+    for _,id in ipairs({"egg","milk","meat"}) do
+        local resource=NHLivestock.resources[id]
+        produce[#produce+1]={id=id,name=lang=="zh" and resource.zh or resource.en,
+            stock=state.resources[id] or 0,perMinute=perMinute[id]}
+    end
+    return pens,produce
 end

@@ -24,6 +24,11 @@ local function commit()
     assert(NHStore.commit(s))
     s=assert(NHStore.load())
 end
+local function cropRates(now)
+    local rates={}
+    for _,row in ipairs(NHFarm.view(s,"en",now).crops) do rates[row.id]=row.perMinute end
+    return rates
+end
 
 assert(#NHFarm.view(s,"zh",0).plots==0)
 assert(not NHFarm.plant(s,request(1,"fiber"),0))
@@ -67,6 +72,7 @@ assert(NHFarm.view(s,"zh",7200).plots[1].blocked)
 assert(not s.resources.fiber and not s.summons)
 assert(NHFarm.plant(s,request(1,"fiber"),7250))
 assert(s.farm.pending.sugar==1 and s.farm.plots[1].readyAt==16200)
+assert(cropRates(7250).sugar==0 and cropRates(7250).fiber==3)
 assert(not NHFarm.plant(s,sow,7250))
 
 -- Death checkpoints elapsed gameplay, leaving each field's deadline intact.
@@ -108,6 +114,14 @@ assert(NHFarm.plant(s,request(1,"grain"),30600) and s.farm.plots[1].readyAt==378
 s.materials.sand,s.materials.water=1050,700
 assert(build("farmland") and build("farmland") and #NHFarm.view(s,"en",s.farm.time).plots==4)
 assert(not build("farmland") and not s.materials.sand and not s.materials.water)
+assert(NHFarm.plant(s,request(3,"grain"),s.farm.time))
+local rates=cropRates(s.farm.time)
+assert(rates.grain==4 and rates.active_herb==0.6 and rates.fiber==0 and rates.herb==0)
+local deadline=s.farm.plots[3].readyAt
+assert(NHFarm.plant(s,request(3,"herb"),s.farm.time) and s.farm.plots[3].readyAt==deadline)
+rates=cropRates(s.farm.time)
+assert(rates.grain==2 and math.abs(rates.herb-4/3)<1e-9)
+assert(not s.farm.plots[4])
 
 -- Write a pre-farm shaped payload with the real snapshot serializer.
 -- Old manual fields that sat ripe for many cycles held only one earned crop.

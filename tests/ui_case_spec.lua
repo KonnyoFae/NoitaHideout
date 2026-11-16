@@ -14,6 +14,15 @@ function GuiStartFrame() drawn,panels,tips = {},{},{} end
 function GuiGetScreenDimensions() return width, height end
 function GuiZSet() end
 function GuiZSetForNextWidget() end
+local scroll,scroll_key,scroll_offsets=nil,nil,{}
+function GuiIdPushString(_,key) assert(not scroll_key); scroll_key=key end
+function GuiIdPop() assert(scroll_key and not scroll); scroll_key=nil end
+function GuiBeginScrollContainer(_,id,x,y,w,h)
+    assert(scroll_key and not scroll and w>0 and h>0)
+    scroll={id=id,x=x,y=y,w=w,h=h,key=scroll_key,offset=scroll_offsets[scroll_key] or 0}
+    panels[id]=scroll
+end
+function GuiEndScrollContainer() assert(scroll); scroll=nil end
 local next_color,image_colors={},{}
 function GuiColorSetForNextWidget(_,r,g,b) next_color={r,g,b} end
 local tipbox
@@ -39,8 +48,9 @@ function GuiGetTextDimensions(_, value, scale)
 end
 function GuiText(_, _, _, value) drawn[value] = true end
 local buttons={}
-function GuiButton(_, id, x, y, value)
-    buttons[id]={x=x,y=y,name=value,color=next_color}
+function GuiButton(_, id, x, y, value, scale)
+    if scroll then x,y=x+scroll.x,y+scroll.y-scroll.offset end
+    buttons[id]={x=x,y=y,name=value,color=next_color,scroll=scroll,scale=scale or 1}
     drawn[value] = true
     return id == click
 end
@@ -60,7 +70,19 @@ local function render(model, widget)
         assert(not action, "multiple actions on a single input")
         action, argument = command, item
     end)
+    assert(not scroll and not scroll_key,"a navigation action leaked the scroll container")
     return action, argument
+end
+local function reveal(model,id)
+    local b=assert(buttons[id])
+    local box=b.scroll
+    if box then
+        scroll_offsets[box.key]=math.max(0,b.y+box.offset-box.y-box.h+9*b.scale)
+        render(model)
+        b=assert(buttons[id])
+        assert(b.y>=box.y-0.001 and b.y+9*b.scale<=box.y+box.h+0.001,"action cannot scroll into view")
+    end
+    return b
 end
 local function green_button(id)
     local b=buttons[id]
@@ -441,9 +463,10 @@ for _,lang in ipairs({"en","zh"}) do
     for _,size in ipairs({{320,180},{427,240},{640,360}}) do
         width,height=size[1],size[2]
         render(model)
-        local b,bench=assert(buttons[214]),panels[210]
-        assert(bench.y>=0 and b.y>=bench.y and b.y+9<=bench.y+bench.h)
-        assert(drawn[lang=="zh" and "催化剂（完工归还）" or "Catalyst (returned)"])
+        local b,bench=reveal(model,214),panels[210]
+        assert(bench.y>=0 and b.y>=bench.y and b.y+9*b.scale<=bench.y+bench.h)
+        local catalyst=lang=="zh" and "催化剂（完工归还）" or "Catalyst (returned)"
+        assert(drawn[catalyst] or tips[catalyst])
         assert(drawn[lang=="zh" and "净产出" or "Net output"] and drawn["300 / 250"] and drawn["1 / 1"])
         local info=tips["Concentrated mana  1 / 1"]
         assert(info and info~="" and tips["Concentrated mana ×250"] and not tips["Concentrated mana ×251"])
@@ -855,6 +878,34 @@ pointer.released=false
 action,param=render(model,4201)
 assert(action=="pack_perk" and param.entity==135)
 
+local function checkStockColumns(lang,stock,rate)
+    local cells={}
+    local drawText=GuiText
+    function GuiText(g,x,y,value,scale)
+        cells[#cells+1]={value=value,x=x,y=y,right=x+GuiGetTextDimensions(g,value,scale)}
+        drawText(g,x,y,value,scale)
+    end
+    render(model)
+    GuiText=drawText
+    local function find(value,predicate)
+        for _,cell in ipairs(cells) do
+            if cell.value==value and (not predicate or predicate(cell)) then return cell end
+        end
+    end
+    local rates=assert(find(lang=="zh" and "每分钟" or "Per min") or find(lang=="zh" and "每分" or "/min"))
+    local stocks=assert(find(lang=="zh" and "库存" or "Stock",function(c) return c.y==rates.y end))
+    local qty=assert(find(stock,function(c) return c.y>stocks.y and math.abs(c.right-stocks.right)<0.01 end))
+    local output=assert(find(rate,function(c) return c.y==qty.y and math.abs(c.right-rates.right)<0.01 end))
+    assert(qty.right<output.x,"inventory and per-minute output occupy separate columns")
+    for _,entry in ipairs(cells) do
+        if entry.y==qty.y and entry.x<qty.x then
+            assert(entry.right<qty.x,"product name overlaps the stock quantity")
+            return
+        end
+    end
+    error("stock row is missing a product name")
+end
+
 local function testFarmPanel(lang)
     width,height,model.lang,model.near=320,180,lang,true
     pointer={x=0,y=0}
@@ -899,9 +950,18 @@ local function testFarmPanel(lang)
     local full=lang=="zh" and "农产库存已满" or "Crop storage full"
     assert(drawn[full] or tips[full])
     render(model,411)
-    render(model)
+    checkStockColumns(lang,"4","1.33")
     assert(drawn["13"] and drawn["4"] and drawn["0"] and not buttons[415])
     for _,crop in ipairs(model.farm.crops) do assert(drawn[crop.name] or tips[crop.name]) end
+    stock.resources.fiber=12345
+    model.farm=NHFarm.view(stock,lang,7200)
+    checkStockColumns(lang,"12.3k","0")
+    local name=model.farm.crops[1].name
+    assert(tips[name]:find("12345",1,true),"stock tooltip should show unabridged quantities")
+    assert(drawn[name],"short product names should fit beside large quantities on the narrow panel")
+    width,height=640,360
+    checkStockColumns(lang,"12.3k","0")
+    assert(drawn[lang=="zh" and "每分钟" or "Per min"])
     assert(panels[210].y>=0)
 end
 testFarmPanel("en")
@@ -926,6 +986,7 @@ local function testLivestockPanel(lang)
     local action,request=render(model,258)
     assert(action=="shop_buy" and request.id=="chick" and request.pen==1)
     NHLivestock.deliver(stock,"chick",1,0)
+    NHLivestock.deliver(stock,"calf",2,0)
     model.farm=NHFarm.view(stock,lang,0)
     render(model,223)
     render(model,451)
@@ -943,7 +1004,7 @@ local function testLivestockPanel(lang)
     local full=lang=="zh" and "畜产库存已满" or "Produce storage full"
     assert(drawn[full] or tips[full])
     render(model,441)
-    render(model)
+    checkStockColumns(lang,"1","1.17")
     assert(drawn["23"] and drawn["1"] and panels[210].y>=0)
     stock.levels.livestock,stock.farm.pens=0,nil
     model.farm=NHFarm.view(stock,lang,0)
@@ -1025,3 +1086,64 @@ local function testCardWalletPanel()
 end
 testCardWalletPanel()
 print("UI: test supplies, collection, 80/80 stacks and exact-wallet transfers passed.")
+
+local function testFixedWorkshop()
+    model.debug,model.near,model.order_active=true,true,false
+    model.popup,model.walletId,model.pouchId=false,nil,nil
+    local inputs={}
+    for i=1,18 do inputs[i]={name="Ingredient "..i,amount=1,available=3} end
+    model.recipes={{id="long_recipe",category="medical",name="Long recipe",duration=120,
+        output=1,ready=true,inputs=inputs}}
+    local tabs={212,218,219,220,221,223,213}
+    for _,lang in ipairs({"en","zh"}) do
+        model.lang=lang
+        for _,size in ipairs({{320,180},{427,240},{640,360}}) do
+            width,height=size[1],size[2]
+            render(model,212)
+            render(model)
+            local stash=panels[70]
+            local positions={}
+            for _,id in ipairs(tabs) do positions[id]=buttons[id] end
+            local function check()
+                local p=panels[210]
+                assert(p.y==stash.y and p.h==stash.h and p.y>=0 and p.y+p.h<=height)
+                for _,id in ipairs(tabs) do
+                    local b=assert(buttons[id])
+                    assert(not b.scroll and b.x==positions[id].x and b.y==positions[id].y,
+                        "the main category buttons must stay fixed outside the scroll area")
+                end
+            end
+            for _,id in ipairs(tabs) do
+                render(model,id)
+                render(model)
+                check()
+            end
+            render(model,212)
+            render(model,251)
+            render(model,244)
+            scroll_offsets={}
+            render(model)
+            check()
+            local box=assert(buttons[214].scroll)
+            assert(box.y>buttons[213].y and box.y+box.h<stash.y+stash.h)
+            assert(buttons[214].y>box.y+box.h,"long recipes must have more content below the viewport")
+            reveal(model,214)
+            check()
+            local action,arg=render(model,214)
+            assert(action=="craft" and arg.id=="long_recipe")
+            render(model,71)
+            render(model)
+            check()
+            assert(panels[70].h<panels[210].h)
+            render(model,71)
+            render(model,211)
+            render(model)
+            assert(panels[210].h<panels[70].h and not buttons[212])
+            render(model,211)
+            render(model)
+            check()
+        end
+    end
+end
+testFixedWorkshop()
+print("UI: fixed warehouse and hideout bounds, stationary tabs, independent folding and scrollable confirmations passed.")

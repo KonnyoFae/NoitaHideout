@@ -1271,6 +1271,20 @@ local function testFarmController()
     assert(state().farm.time==elapsed)
     new_world()
     assert(NHFarm.observe(state(),frame)==elapsed and state().farm.plots[1].readyAt==deadline)
+    local supplies=state()
+    supplies.materials.sand,supplies.materials.water=300,200
+    assert(NHStore.commit(supplies))
+    boot()
+    inventory_open=true
+    tick()
+    tick(nil,"buy_upgrade",{id="farmland",level=1})
+    local second=tick().farm.plots[2]
+    tick(nil,"farm_plant",{plot=2,token=second.token,crop="grain"})
+    local twoFields=tick().farm
+    assert(has_project(twoFields.crops,"grain").perMinute==4 and has_project(twoFields.crops,"fiber").perMinute==0)
+    tick(nil,"farm_plant",{plot=2,token=twoFields.plots[2].token,crop="fiber"})
+    local switched=tick().farm
+    assert(has_project(switched.crops,"grain").perMinute==2 and has_project(switched.crops,"fiber").perMinute==3)
 end
 testFarmController()
 print("Controller: passive field deposits, retry, crop switching, live workshop stock and crafting passed.")
@@ -1342,16 +1356,26 @@ local function testLivestockController()
     assert(state().bankGold==40 and state().farm.pens[2].born>=600)
     local young=tick().farm.pens[1]
     assert(young.name=="Chick" and not young.grown)
+    local pens=state().farm.pens
+    local adulthood=pens[1].born+NHLivestock.species.chick.growth
+    local calfAdulthood=pens[2].born+NHLivestock.species.calf.growth
+    local juveniles=advance(adulthood-NHFarm.observe(state(),frame)-1).farm.produce
+    for _,product in ipairs(juveniles) do assert(product.perMinute==0) end
+    local firstAdult=tick().farm.produce
+    assert(firstAdult[1].perMinute==1 and firstAdult[2].perMinute==0 and firstAdult[3].perMinute==0.5)
+    assert(firstAdult[1].stock==0 and firstAdult[3].stock==0,"maturity updates rates before the first deposit")
     entities[player].x=227+81
     inventory_open=false
     tick()
-    advance(300*60)
+    advance(calfAdulthood-NHFarm.observe(state(),frame))
     assert(state().resources.egg==2 and state().resources.meat==1 and not state().resources.milk)
     assert(#state().warehouse==1 and state().warehouse[1].item.kind=="summon_card")
     entities[player].x=227
     inventory_open=true
     local adult=tick().farm.pens[1]
     assert(adult.name=="Hen" and adult.grown and adult.remaining>0)
+    local combined=tick().farm.produce
+    assert(math.abs(combined[2].perMinute-2/3)<1e-9 and math.abs(combined[3].perMinute-7/6)<1e-9)
     assert(tick().status:find("Summon cards",1,true))
     local longTrip=5*NHLivestock.species.chick.period
     advance(longTrip)
