@@ -102,3 +102,17 @@ entities[water].components.ItemComponent.ui_sprite="data/ui_gfx/items/potion.png
 AddMaterialInventoryMaterial(water,"water",683)
 local flask=assert(NHPotion.capture(water))
 assert(assert(NHPotion.capture(assert(NHPotion.restore(flask,0,0)))).materials.water==683)
+
+missing_on_add=nil
+for _,variant in ipairs({"powder_stash","jar","jar_of_urine","potion_aggressive"}) do
+    local path="data/entities/items/pickup/"..variant..".xml"
+    local container=EntityLoad(path)
+    AddMaterialInventoryMaterial(container,"slime",37)
+    local record=assert(NHPotion.capture(container))
+    assert(record.variant==variant and record.materials.slime==37)
+    local rebuilt=assert(NHPotion.restore(record,0,0))
+    assert(entities[rebuilt].path==path)
+    entities[rebuilt].path="??sav/player.xml"
+    local saved=assert(NHPotion.capture(rebuilt))
+    assert(saved.variant==variant and saved.materials.slime==37)
+end

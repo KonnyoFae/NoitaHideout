@@ -1,8 +1,12 @@
 NHUI = {}
 
 local gui
-local tab = "stash"
-local stash_page = 1
+local tab = "orders"
+local warehouse_tab, warehouse_page, folded = "wand", 1, false
+local warehouse_tabs = {
+    {"wand","魔杖","Wands"}, {"spell","法术","Spells"}, {"containers","容器","Containers"},
+    {"supplies","消耗品","Supplies"}, {"materials","物料","Materials"},
+}
 local recipe_choice = 1
 local panel_width, panel_height = 314, 196
 local white = { 0.96, 0.93, 0.84 }
@@ -52,9 +56,9 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
     local slots = {}
     -- Container rows advance by the native tile width, including its border.
     local qw,qh = GuiGetImageDimensions(gui,tile)
-    local function slot(column,y,key,kind,name,icon,entity)
+    local function slot(column,y,key,kind,name,icon,entity,left,top)
         local x = 8 + column * qw
-        slots[#slots+1] = {x=ox+x*scale, y=oy+y*scale, key=key, kind=kind,
+        slots[#slots+1] = {x=(left or ox)+x*scale, y=(top or oy)+y*scale, key=key, kind=kind,
             name=name, icon=icon, entity=entity}
     end
 
@@ -96,6 +100,71 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         end
     end
 
+    local warehouse_hover=false
+    if model.near and not standalone then
+        local left=5*scale
+        local available=(ox-left)/scale-5
+        local above=available<100
+        local width=math.min(230,above and (sw/scale-10) or available)
+        local cols=math.max(1,math.min(10,math.floor((width-16)/qw)))
+        local per_page=cols*2
+        local tx,ty=8,22
+        local tabs={}
+        for i,t in ipairs(warehouse_tabs) do
+            local name=tr(t[2],t[3])
+            local text_width=GuiGetTextDimensions(gui,name,scale)/scale
+            if tx>8 and tx+text_width>width-6 then tx,ty=8,ty+13 end
+            tabs[i]={x=tx,y=ty,name=name}
+            tx=tx+text_width+8
+        end
+        local grid_y=ty+15
+        local height=folded and 20 or grid_y+2*qh+4
+        local bottom=above and (oy+(model.popup and popupY or 0)*scale) or sh
+        local top=bottom-(height+5)*scale
+        warehouse_hover=mx>=left and mx<left+width*scale and my>=top and my<top+height*scale
+        if warehouse_hover and drag and drag.source.key=="native" and not folded and warehouse_tab~="materials"
+            and drag.source.kind~="other" then
+            local category=NHStore.category(drag.source.kind)
+            if category~=warehouse_tab then warehouse_tab,warehouse_page=category,1 end
+        end
+        GuiZSetForNextWidget(gui,-79)
+        GuiImageNinePiece(gui,70,left,top,width*scale,height*scale,1)
+        tint(gold)
+        if GuiButton(gui,71,left+6*scale,top+3*scale,(folded and "[+] " or "[-] ")..tr("仓库","Stash"),scale) and not drag then
+            folded=not folded
+            return
+        end
+        if not folded then
+            for i,t in ipairs(warehouse_tabs) do
+                local pos=tabs[i]
+                tint(t[1]==warehouse_tab and gold or muted)
+                if GuiButton(gui,74+i,left+pos.x*scale,top+pos.y*scale,pos.name,scale) and not drag then
+                    warehouse_tab,warehouse_page=t[1],1
+                end
+            end
+            if warehouse_tab=="materials" then
+                tint(muted)
+                GuiText(gui,left+8*scale,top+grid_y*scale,tr("散装物料库存尚未开放","Bulk material storage is planned"),scale)
+            else
+                local rows=model.warehouse[warehouse_tab] or {}
+                local pages=1+math.floor((model.warehouse_last[warehouse_tab] or 0)/per_page)
+                warehouse_page=math.min(warehouse_page,pages)
+                if pages>1 then
+                    if GuiButton(gui,72,left+(width-65)*scale,top+3*scale,"<",scale) and not drag then warehouse_page=math.max(1,warehouse_page-1) end
+                    GuiText(gui,left+(width-52)*scale,top+3*scale,warehouse_page.."/"..pages,scale)
+                    if GuiButton(gui,73,left+(width-16)*scale,top+3*scale,">",scale) and not drag then warehouse_page=math.min(pages,warehouse_page+1) end
+                end
+                for i=0,per_page-1 do
+                    local n=(warehouse_page-1)*per_page+i+1
+                    local v=rows[n] or {}
+                    slot(i%cols,grid_y+math.floor(i/cols)*qh,"warehouse",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id,left,top)
+                    local target=slots[#slots]
+                    target.safeSlot,target.remaining,target.count=n,v.remaining,v.count
+                end
+            end
+        end
+    elseif drag and drag.source.key=="warehouse" then drag=nil end
+
     local native_x = tonumber(MagicNumbersGetValue("UI_BARS_POS_X"))
     local native_y = tonumber(MagicNumbersGetValue("UI_BARS_POS_Y"))
     local full_offset = tonumber(MagicNumbersGetValue("UI_FULL_INVENTORY_OFFSET_X"))
@@ -110,6 +179,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         local y = native_y + v.yslot*h
         if (not standalone or not full) and mx>=x and my>=y and mx<x+w and my<y+h then hovered=v; break end
     end
+    if warehouse_hover then hovered={key="panel"} end
     for _,v in ipairs(slots) do
         if mx>=v.x and my>=v.y and mx<v.x+qw*scale and my<v.y+qh*scale then hovered=v end
     end
@@ -128,28 +198,33 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
             and source.safeSlot==target.safeSlot and not drag.moved then
             return "open_container",source,source.safeSlot
         end
-        if source.kind=="pouch" and source.key=="valuable" and target.key=="valuable" and not target.kind then
+        local from_store=source.key=="valuable" or source.key=="warehouse"
+        local to_store=target.key=="valuable" or target.key=="warehouse"
+        if source.kind=="pouch" and from_store and source.key==target.key and not target.kind then
             return "move_pouch",source,target.safeSlot
         end
         local canStack = source.kind=="dose" and target.kind=="dose"
             and (source.remaining or model.maxUses)==model.maxUses and (target.remaining or model.maxUses)==model.maxUses
-        if source.key=="valuable" and source.kind=="dose" and target.key=="valuable"
+        if from_store and source.kind=="dose" and source.key==target.key
             and source.safeSlot~=target.safeSlot and (not target.kind or canStack) then
             return "move_safe_dose",source,target.safeSlot
+        end
+        if source.key=="warehouse" and target.key=="warehouse" and not target.kind then
+            return "move_warehouse",source,target.safeSlot
         end
         if source.key=="dose" and target.key=="dose" and source.cell~=target.cell and (not target.kind or canStack) then
             return "move_cell",source
         end
-        if source.key=="dose" and target.key=="valuable" and (not target.kind or canStack) then
+        if source.key=="dose" and to_store and (target.key~="warehouse" or warehouse_tab=="supplies") and (not target.kind or canStack) then
             return "unpack_dose",source,target.safeSlot
         end
-        if source.key=="valuable" and source.kind=="dose" and target.key=="dose" and (not target.kind or canStack) then
+        if from_store and source.kind=="dose" and target.key=="dose" and (not target.kind or canStack) then
             return "pack_dose",source,source.safeSlot
         end
         if source.key=="native" then
             if target.key=="dose" and model.popup and source.kind=="dose" and (not target.kind or canStack) then return "place",source end
-            if target.key=="valuable" and (not target.kind or canStack) and
-                (source.kind=="wand" or source.kind=="potion" or source.kind=="spell" or source.kind=="dose" or source.kind=="pouch") then
+            if to_store and (not target.kind or canStack) and source.kind~="other"
+                and (target.key~="warehouse" or NHStore.category(source.kind)==warehouse_tab) then
                 return "place",source,target.safeSlot
             end
             if target.key~="native" then return "cancel_native",source end
@@ -157,7 +232,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
             local lane=source.kind=="spell" and "spell" or (source.kind=="wand" and "wand" or "tool")
             if target.lane~=lane then return end
             if source.kind=="pouch" then return "take_pouch",target,source.safeSlot end
-            if source.key=="valuable" then return "secure_withdraw",target,source.safeSlot,source.entity end
+            if from_store then return "secure_withdraw",target,source.safeSlot,source.entity end
             if source.key=="dose" then return "take_dose",target end
         end
     end
@@ -183,7 +258,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
             local remaining=v.remaining or model.maxUses
             local caption=(v.count or 1)>1 and ("×"..v.count) or (remaining.."/"..model.maxUses)
             GuiZSetForNextWidget(gui,-84)
-            GuiText(gui,v.x,v.y+(qh-1)*scale,caption,0.8*scale)
+            GuiText(gui,v.x,v.y+(v.key=="warehouse" and qh-7 or qh-1)*scale,caption,0.8*scale)
         end
     end
     local hint = hovered and hovered.name
@@ -200,7 +275,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         drag=nil
         if action then
             local request = {parent=arg.parent,lane=arg.lane,xslot=arg.xslot,yslot=arg.yslot,
-                entity=arg.entity,safeSlot=safeSlot,storedId=storedId,from=arg.safeSlot,
+                entity=arg.entity,safeSlot=safeSlot,storedId=storedId,from=arg.safeSlot,kind=source.kind,
+                container=(source.key=="warehouse" or hovered.key=="warehouse") and "warehouse" or "safe",
                 sourceCell=source.cell,targetCell=hovered and hovered.cell,
                 intoContainer=hovered and hovered.key=="dose"}
             dispatch(action,request)
@@ -218,7 +294,7 @@ function NHUI.draw(model, dispatch)
     local function tr(zh, en) return model.lang == "zh" and zh or en end
     if not model.open then
         if not model.near then return end
-        local caption = tr("[H] 藏身处", "[H] Hideout")
+        local caption = tr("物品栏：仓库  [H] 工坊", "Inventory: stash  [H] Workshop")
         local text_w = GuiGetTextDimensions(gui, caption)
         local x = math.floor((sw - text_w) / 2)
         local y = sh - 20
@@ -264,11 +340,10 @@ function NHUI.draw(model, dispatch)
 
     command(11,252,5,tr("关闭","Close"),"close")
     local tabs = {
-        { "stash", tr("仓库", "Stash") },
         { "orders", tr("生产", "Production") },
     }
     if model.debug then tabs[#tabs + 1] = { "samples", tr("测试物资", "Test supplies") } end
-    if tab == "samples" and not model.debug then tab = "stash" end
+    if tab == "samples" and not model.debug then tab = "orders" end
     local tx = 9
     if not case then
         for i, t in ipairs(tabs) do
@@ -279,28 +354,7 @@ function NHUI.draw(model, dispatch)
         end
     end
 
-    if tab == "stash" then
-        local items = model.loot or {}
-        local per_page = 4
-        local pages = math.max(1, math.ceil(#items / per_page))
-        stash_page = math.min(math.max(1, stash_page), pages)
-        command(40, 10, 44, tr("存入手持物品", "Deposit held item"), "deposit")
-        label(132, 44, tr("物品数  ", "Items  ") .. #items, 80, muted)
-        if #items == 0 then
-            label(10, 65, tr("仓库为空。手持魔杖或药瓶后存入。", "Empty. Hold a wand or flask to deposit it."), 265, muted)
-        end
-        for row = 1, per_page do
-            local index = (stash_page - 1) * per_page + row
-            if items[index] then
-                local y = 63 + (row - 1) * 17
-                label(10, y, tostring(index) .. ". " .. tostring(items[index]), 201)
-                command(40 + row, 216, y, tr("取到脚边", "Drop at feet"), "withdraw", index)
-            end
-        end
-        if stash_page > 1 and button(45, 10, 138, tr("< 上页", "< Prev")) then stash_page = stash_page - 1 end
-        label(108, 138, stash_page .. " / " .. pages, 85, muted)
-        if stash_page < pages and button(46, 216, 138, tr("下页 >", "Next >")) then stash_page = stash_page + 1 end
-    elseif tab == "orders" then
+    if tab == "orders" then
         label(10, 42, tr("稳定传送液   500 单位", "Stable teleportatium   500 units"), 293)
         label(10, 56, tr("每批投入不稳定传送液 250、黏液 250。", "One batch takes 250 unstable teleportatium and 250 slime."), 293, muted)
         label(10, 71, tr("订单   ", "Order   ") .. tostring(model.order or ""), 293, green)
@@ -344,7 +398,7 @@ function NHUI.draw(model, dispatch)
         end
     else
         command(62, 10, 45, tr("生成测试魔杖与混合药瓶", "Spawn sample wand and mixed flask"), "preview_items")
-        label(10, 62, tr("从地上拾取，手持要测试的物品后打开仓库。", "Pick one up and hold it, then use Deposit in the stash."), 293, muted)
+        label(10, 62, tr("拾取样品后打开原版物品栏，拖入仓库。", "Pick up a sample, open your inventory and drag it into the stash."), 293, muted)
         command(60, 10, 89, tr("重发测试针剂包", "Reissue test pouch"), "restock")
         label(10, 106, tr("替换当前针剂包，在安全箱放入两支激活剂。", "Replaces your pouch with two doses in the secure case."), 293, muted)
     end

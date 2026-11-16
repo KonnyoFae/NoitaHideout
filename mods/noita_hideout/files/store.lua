@@ -57,6 +57,38 @@ function NHStore.freeSafeSlot(s, preferred)
     for i=1,capacity do if i~=occupied and not NHStore.safeIndex(s,i) then return i end end
 end
 
+-- Each category owns its own numbered grid; recipe order remains the dense warehouse array.
+function NHStore.category(kind)
+    if kind=="wand" or kind=="spell" then return kind end
+    if kind=="potion" then return "containers" end
+    return "supplies"
+end
+
+function NHStore.slotIndex(s,container,slot,kind)
+    if container=="safe" then return NHStore.safeIndex(s,slot) end
+    local category=NHStore.category(kind)
+    for index,row in ipairs(s.warehouse) do
+        if NHStore.category(row.item.kind)==category and (row.slot or index)==slot then return index end
+    end
+end
+
+function NHStore.freeSlot(s,container,preferred,kind)
+    if container=="safe" then return NHStore.freeSafeSlot(s,preferred) end
+    local occupied={}
+    local category=NHStore.category(kind)
+    if category=="supplies" and s.pouch and s.pouch.location=="warehouse" then occupied[s.pouch.slot]=true end
+    for i,row in ipairs(s.warehouse) do
+        if NHStore.category(row.item.kind)==category then occupied[row.slot or i]=true end
+    end
+    if preferred then
+        if whole(preferred) and preferred>=1 and not occupied[preferred] then return preferred end
+        return nil
+    end
+    local slot=1
+    while occupied[slot] do slot=slot+1 end
+    return slot
+end
+
 -- Persistent flags belong to the game's save slot. Mod settings can be shared.
 -- Bind a separate settings namespace to each save at its first visit.
 local function active_profile()
@@ -105,7 +137,7 @@ local function validate(s)
         assert(whole(slot) and slot>=1 and slot<=capacity and not seen[slot],"Invalid pouch slot")
     end
     assert(type(s.pouch) == "table" and whole(s.pouch.doses), "Invalid injector case")
-    assert(s.pouch.location == "safe" or s.pouch.location == "bag" or s.pouch.location == "lost",
+    assert(s.pouch.location == "safe" or s.pouch.location == "warehouse" or s.pouch.location == "bag" or s.pouch.location == "lost",
            "Invalid injector case location")
     local total=0
     local function validDose(remaining,count)
@@ -119,6 +151,18 @@ local function validate(s)
     assert(total==s.pouch.doses,"Invalid injector count")
     for _,row in ipairs(s.safe) do
         if row.item.kind=="dose" then assert(validDose(row.item.remaining or NHStore.doseDurability,row.item.count or 1),"Invalid stored injector") end
+    end
+    local warehouseSlots={wand={},spell={},containers={},supplies={}}
+    if s.pouch.location=="warehouse" then
+        assert(whole(s.pouch.slot) and s.pouch.slot>=1,"Invalid warehouse pouch slot")
+        warehouseSlots.supplies[s.pouch.slot]=true
+    end
+    for i,row in ipairs(s.warehouse) do
+        local slot=row.slot or i
+        local used=warehouseSlots[NHStore.category(row.item.kind)]
+        assert(whole(slot) and slot>=1 and not used[slot],"Invalid warehouse slot")
+        used[slot]=true
+        if row.item.kind=="dose" then assert(validDose(row.item.remaining or NHStore.doseDurability,row.item.count or 1),"Invalid warehouse injector") end
     end
     for _,record in pairs(s.issuedDoses or {}) do
         assert(validDose(record.remaining or NHStore.doseDurability,1),"Invalid issued injector")
@@ -224,6 +268,21 @@ local function unpack_slot(raw)
     local payload = raw:sub(last + 1)
     assert(expected == checksum(payload), "Snapshot checksum mismatch")
     local s = decode(payload)
+    -- Old warehouse records had only a list order. Give them stable grid positions.
+    local used={wand={},spell={},containers={},supplies={}}
+    if s.pouch.location=="warehouse" then used.supplies[s.pouch.slot]=true end
+    for _,row in ipairs(s.warehouse) do
+        if row.slot then used[NHStore.category(row.item.kind)][row.slot]=true end
+    end
+    local cursor={}
+    for _,row in ipairs(s.warehouse) do
+        if not row.slot then
+            local category=NHStore.category(row.item.kind)
+            local slot=cursor[category] or 1
+            while used[category][slot] do slot=slot+1 end
+            row.slot,used[category][slot],cursor[category]=slot,true,slot+1
+        end
+    end
     if not s.pouch.cells then s.pouch.cells=initial_doses(s.pouch.doses) end
     validate(s)
     if not s.sharedSlots then
@@ -438,7 +497,7 @@ function NHStore.reward(state, run_id)
     if state.order == false then return true, "Completion recorded. No active order." end
     state.order.progress = state.order.progress + 1
     if state.order.progress >= state.order.required then
-        state.warehouse[#state.warehouse + 1] = {id = state.nextItemId, item = state.order.output}
+        state.warehouse[#state.warehouse + 1] = {id = state.nextItemId, item = state.order.output,slot=NHStore.freeSlot(state,"warehouse",nil,"potion")}
         state.nextItemId = state.nextItemId + 1
         state.order = false
         state.finished = state.finished + 1

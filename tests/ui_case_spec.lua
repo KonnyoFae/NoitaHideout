@@ -37,6 +37,7 @@ function GuiButton(_, id, _, _, value)
 end
 function GuiImageButton(_, id) return id == click end
 
+dofile("mods/noita_hideout/files/store.lua")
 dofile("mods/noita_hideout/files/ui.lua")
 local function render(model, widget)
     frame = frame + 1
@@ -119,3 +120,37 @@ render(model)
 model.open=true
 assert(not point(148,28,"release"))
 print("Native inventory drag, spell row, exact slot, upgrade pages and close cancellation passed.")
+
+-- Left warehouse, native tile pitch, automatic filing and read-only materials tab.
+model.near,model.warehouse,model.warehouse_last=true,{},{}
+render(model)
+local origin=tiles[104]
+assert(tiles[105].x-origin.x==20)
+local nextrow
+for _,t in pairs(tiles) do if t.x==origin.x and t.y==origin.y+20 then nextrow=t end end
+assert(nextrow)
+point(198,28,"press")
+cmd,arg=point(origin.x+1,origin.y+1,"release")
+assert(cmd=="place" and arg.kind=="spell" and arg.container=="warehouse" and arg.safeSlot==1)
+model.warehouse.spell={{kind="spell",name="Bomb",id=32}}
+model.warehouse_last.spell=1
+point(origin.x+1,origin.y+1,"press")
+cmd,arg=point(298,28,"release")
+assert(cmd=="secure_withdraw" and arg.container=="warehouse" and arg.storedId==32 and arg.xslot==5)
+-- Each category pages independently and the next empty page remains writable.
+model.warehouse_last.spell=20
+render(model,73)
+point(198,28,"press")
+cmd,arg=point(origin.x+1,origin.y+1,"release")
+assert(cmd=="place" and arg.safeSlot==21)
+render(model,79)
+assert(drawn["Bulk material storage is planned"])
+point(198,28,"press")
+cmd,arg=point(origin.x+1,origin.y+1,"release")
+assert(cmd=="cancel_native")
+render(model,71)
+render(model)
+assert(drawn["[+] Stash"] and not drawn.Materials)
+model.near=false
+render(model)
+assert(not drawn["[+] Stash"])

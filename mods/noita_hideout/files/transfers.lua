@@ -82,7 +82,21 @@ local function stored_release(s, token, ids)
     return tonumber(profile) == s.profile and ids[tonumber(item_id)]
 end
 
+local customItems = {}
+local customOrder = {}
+-- Register before gameplay. A codec snapshots a live item and rebuilds it
+-- from the saved record; the transfer journal owns commit and disposal.
+function NHTransfers.registerItem(kind, matches, adapter)
+    assert(type(kind)=="string" and type(matches)=="function" and type(adapter)=="table" and type(adapter.capture)=="function"
+        and type(adapter.restore)=="function","Invalid item adapter")
+    assert(not customItems[kind] and kind~="wand" and kind~="spell" and kind~="potion"
+        and kind~="pouch" and kind~="dose" and kind~="other","Duplicate or reserved item kind")
+    customItems[kind]={matches=matches,adapter=adapter}
+    customOrder[#customOrder+1]=kind
+end
+
 function NHTransfers.item_kind(entity)
+    for _,kind in ipairs(customOrder) do if customItems[kind].matches(entity) then return kind end end
     if EntityHasTag(entity, "wand") then return "wand" end
     if EntityGetFirstComponentIncludingDisabled(entity,"ItemActionComponent") then return "spell" end
     if NHPotion.isFlask(entity) then return "potion" end
@@ -103,6 +117,7 @@ local function dispose(entity, player)
 end
 
 local function codec(kind)
+    if customItems[kind] then return customItems[kind].adapter end
     if kind == "spell" then return NHSpell end
     if kind == "wand" then return NHWand end
     if kind == "potion" then return NHPotion end
@@ -157,7 +172,7 @@ function NHTransfers.deposit(s, player, container, selected, preferred)
     local inv = EntityGetFirstComponentIncludingDisabled(player, "Inventory2Component")
     local item = selected or (inv and ComponentGetValue2(inv, "mActiveItem"))
     local parent = item and item ~= 0 and EntityGetIsAlive(item) and EntityGetParent(item)
-    local loose = dest == "safe" and parent and parent ~= 0 and EntityGetName(parent) == "inventory_full"
+    local loose = parent and parent ~= 0 and EntityGetName(parent) == "inventory_full"
         and EntityGetParent(parent) == player and NHTransfers.item_kind(item) == "spell"
     if not loose and not quick_item(player, item) then
         if selected then return nil, "The selected item is no longer in your quick inventory." end
@@ -171,17 +186,15 @@ function NHTransfers.deposit(s, player, container, selected, preferred)
             return nil, "The stored item was already transferred."
         end
     end
-    local slot
-    if dest == "safe" then
-        slot = NHStore.freeSafeSlot(s,preferred)
-        if not slot then return nil, "Secure valuables slot is full." end
-    end
-
     local kind = NHTransfers.item_kind(item)
+    local slot=NHStore.freeSlot(s,dest,preferred,kind)
+    if not slot then return nil,"Inventory slot changed." end
+
     local adapter = codec(kind)
-    if not adapter then return nil, "Only supported wands and flasks can be deposited." end
+    if not adapter then return nil, "This item has no storage adapter." end
     local record, err = adapter.capture(item)
     if not record then return nil, err end
+    if record.kind~=kind then return nil,"Invalid item record." end
     local id = s.nextItemId
     if not source or not EntityHasTag(item, tag) then
         source = source or new_token("d", s, id, id, item)
@@ -288,6 +301,7 @@ function NHTransfers.reconcile(s, player)
                 row.slot = NHStore.freeSafeSlot(changed,row.slot or 1) or NHStore.freeSafeSlot(changed)
                 if not row.slot then dest = "warehouse" end
             end
+            if dest=="warehouse" then row.slot=NHStore.freeSlot(changed,dest,row.slot,row.item.kind) or NHStore.freeSlot(changed,dest,nil,row.item.kind) end
             if not ids[release.row.id] then
                 table.insert(changed[dest], row)
                 ids[release.row.id] = true

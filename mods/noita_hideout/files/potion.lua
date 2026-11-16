@@ -1,6 +1,18 @@
 NHPotion = {}
 
 local empty_flask = "data/entities/items/pickup/potion_empty.xml"
+local pickup="data/entities/items/pickup/"
+local variants={
+    powder_stash={icon="material_pouch",zh="粉末袋",en="Powder pouch"},
+    jar={icon="jar",zh="罐子",en="Jar"},
+    jar_of_urine={icon="jar",zh="尿罐",en="Urine jar"},
+    potion_aggressive={icon="potion_alchemist",zh="炼金师药瓶",en="Alchemist flask"},
+}
+local fill_scripts={
+    ["data/scripts/items/powder_stash.lua"]=true,
+    ["data/scripts/items/potion.lua"]=true,
+    ["data/scripts/items/potion_aggressive.lua"]=true,
+}
 local normal_flask_tag = "noita_hideout_standard_flask"
 local unstable = "magic_liquid_unstable_teleportation"
 local stable = "magic_liquid_teleportation"
@@ -11,7 +23,7 @@ NHPotion.ingredients = {
 }
 
 -- These templates differ from the base flask only by their initial fill.
--- Preserve special containers (e.g. mimic or alchemist flasks) in the world.
+-- Distinct material containers retain their template; mimics remain world entities.
 local normal_templates = {}
 for _, suffix in ipairs({
     "", "_empty", "_starting", "_water", "_alcohol", "_beer", "_milk",
@@ -116,6 +128,26 @@ local function ordinary_flask(entity, item)
     return EntityGetName(entity) == "$item_potion" or ComponentGetValue2(item, "item_name") == "$item_potion"
 end
 
+local function variant_for(entity,item)
+    local path=normal_path(EntityGetFilename(entity))
+    local name=path:match("^data/entities/items/pickup/([%w_]+)%.xml$")
+    if name and variants[name] then return name end
+    if path:match("^mods/") or path:match("^data/entities/items/") or path:match("^data/entities/animals/") then return end
+    -- After a save the reported path may reference the player, not the item.
+    for key in pairs(variants) do
+        if EntityHasTag(entity,"noita_hideout_"..key) then return key end
+    end
+    local icon=ComponentGetValue2(item,"ui_sprite")
+    if icon=="data/ui_gfx/items/material_pouch.png" and EntityHasTag(entity,"powder_stash") then return "powder_stash" end
+    if icon=="data/ui_gfx/items/potion_alchemist.png" and EntityHasTag(entity,"projectile_item") then return "potion_aggressive" end
+    if icon=="data/ui_gfx/items/jar.png" and ComponentGetValue2(item,"item_name")=="$item_jar" then
+        for _,c in ipairs(EntityGetComponentIncludingDisabled(entity,"VariableStorageComponent") or {}) do
+            if ComponentGetValue2(c,"name")=="potion_material" and ComponentGetValue2(c,"value_string")=="urine" then return "jar_of_urine" end
+        end
+        return "jar"
+    end
+end
+
 local function flask_components(entity)
     local parts = {}
     for _, kind in ipairs({"MaterialInventoryComponent", "MaterialSuckerComponent",
@@ -166,13 +198,16 @@ function NHPotion.label(record, lang)
     local names = {}
     for name in pairs(record.materials) do names[#names + 1] = name end
     table.sort(names)
+    local variant=variants[record.variant]
+    local title=variant and variant[lang=="zh" and "zh" or "en"]
+    if #names==0 and title then return title end
     if #names == 0 then return lang == "zh" and "空药瓶" or "Empty flask" end
     local parts = {}
     for _, name in ipairs(names) do
         local localized = short_names[name] and short_names[name][lang == "zh" and 1 or 2] or name
         parts[#parts + 1] = localized .. " " .. record.materials[name]
     end
-    return table.concat(parts, " + ")
+    return (title and (title.." · ") or "")..table.concat(parts, " + ")
 end
 
 local function refresh_name(record)
@@ -184,7 +219,8 @@ end
 local function capture(entity)
     assert(entity and entity ~= 0, "Missing flask")
     local c = flask_components(entity)
-    assert(ordinary_flask(entity, c.ItemComponent), "Only a recognized ordinary flask can be stored")
+    local variant=variant_for(entity,c.ItemComponent)
+    assert(variant or ordinary_flask(entity, c.ItemComponent), "Only a recognized ordinary flask can be stored")
     assert(#(EntityGetAllChildren(entity) or {}) == 0, "This flask has attachments that cannot be restored")
     for _, price in ipairs(EntityGetComponentIncludingDisabled(entity, "ItemCostComponent") or {}) do
         local cost = ComponentGetValue2(price, "cost")
@@ -192,7 +228,8 @@ local function capture(entity)
     end
     local inv = c.MaterialInventoryComponent
     return refresh_name({
-        kind = "potion", materials = read_materials(inv),
+        kind = "potion", materials = read_materials(inv), variant=variant,
+        icon=ComponentGetValue2(c.ItemComponent,"ui_sprite"),
         capacity = ComponentGetValue2(c.MaterialSuckerComponent, "barrel_size"),
         max_capacity = ComponentGetValue2(inv, "max_capacity"),
         reactions = ComponentGetValue2(inv, "do_reactions"),
@@ -237,7 +274,8 @@ function NHPotion.restore(record, x, y)
             assert(type(name) == "string" and whole_units(amount) and amount > 0, "Invalid material quantity")
             material_id(name)
         end
-        entity = EntityLoad(empty_flask, x, y)
+        assert(not record.variant or variants[record.variant],"Unknown material container template")
+        entity = EntityLoad(record.variant and (pickup..record.variant..".xml") or empty_flask, x, y)
         assert(entity and entity ~= 0, "Empty flask failed to spawn")
         local c = flask_components(entity)
         local inv = c.MaterialInventoryComponent
@@ -247,7 +285,13 @@ function NHPotion.restore(record, x, y)
         if record.hp then ComponentSetValue2(c.DamageModelComponent, "hp", record.hp) end
         if record.picked ~= nil then ComponentSetValue2(c.ItemComponent, "has_been_picked_by_player", record.picked) end
         if record.extra_capacity then EntityAddTag(entity, "extra_potion_capacity") end
-        EntityAddTag(entity, normal_flask_tag)
+        if record.variant then
+            EntityAddTag(entity,"noita_hideout_"..record.variant)
+            -- A newly loaded pouch or jar may still have its one-shot random fill pending.
+            for _,lua in ipairs(EntityGetComponentIncludingDisabled(entity,"LuaComponent") or {}) do
+                if fill_scripts[ComponentGetValue2(lua,"script_source_file")] then EntityRemoveComponent(entity,lua) end
+            end
+        else EntityAddTag(entity, normal_flask_tag) end
         -- Prevent a modified base template from contributing any extra liquid.
         RemoveMaterialInventoryMaterial(entity, "")
         for name, amount in pairs(record.materials) do

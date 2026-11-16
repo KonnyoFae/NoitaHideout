@@ -280,3 +280,33 @@ tick(nil,"secure_withdraw",target)
 local delivered=assert(EntityGetAllChildren(3)[1])
 item=EntityGetFirstComponentIncludingDisabled(delivered,"ItemComponent")
 assert(item.slotX==9 and item.slotY==0 and item.uses_remaining==3 and #state().safe==0)
+
+local stash={parent=3,lane="spell",xslot=9,yslot=0,entity=delivered,safeSlot=1,container="warehouse",kind="spell"}
+entities[player].x=1000
+tick(nil,"place",stash)
+assert(EntityGetIsAlive(delivered))
+entities[player].x=227
+tick(nil,"place",stash)
+local view=tick()
+local card_row=assert(view.warehouse.spell[1])
+assert(view.warehouse.containers[1] and not EntityGetIsAlive(delivered))
+stash.storedId,stash.xslot=card_row.id,7
+fail_commit=true
+tick(nil,"secure_withdraw",stash)
+assert(tick().warehouse.spell[1].id==card_row.id and #EntityGetAllChildren(3)==0)
+fail_commit=false
+tick(nil,"secure_withdraw",stash)
+local native_card=assert(EntityGetAllChildren(3)[1])
+local native_item=EntityGetFirstComponentIncludingDisabled(native_card,"ItemComponent")
+assert(native_item.slotX==7 and native_item.uses_remaining==3 and not tick().warehouse.spell)
+-- A stored pouch opens only from its own container, in reach.
+tick(nil,"take_pouch",tool(nil,state().pouch.slot))
+local bag=assert(EntityGetWithTag("noita_hideout_pouch")[1])
+local to_stash=tool(bag,1)
+to_stash.container="warehouse"
+tick(nil,"place",to_stash)
+assert(state().pouch.location=="warehouse" and tick().warehouse.supplies[1].kind=="pouch")
+tick(nil,"open_container",{safeSlot=1,container="warehouse"})
+assert(tick().popup)
+entities[player].x=1000
+assert(not tick().popup)
