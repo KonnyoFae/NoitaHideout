@@ -9,6 +9,8 @@ dofile_once(files .. "transfers.lua")
 NHCompanions.registerItems()
 NHCardWallets.registerItem()
 dofile_once(files .. "products.lua")
+NHSurgeryCleanse=dofile(files .. "surgery_cleanse.lua")
+NHSurgery=dofile(files .. "surgery.lua")
 dofile_once(files .. "perks.lua")
 dofile_once(files .. "native_items.lua")
 dofile_once(files .. "doses.lua")
@@ -38,6 +40,7 @@ end
 local error_translations = {
     ["Invalid bandage count."] = "绷带的剩余卷数无效。",
     ["Invalid medkit."] = "医疗包的剩余次数无效。",
+    ["Invalid surgery kit."] = "手术包的使用次数无效。",
     ["Card wallet changed."] = "卡片夹已移动，请重新选择。",
     ["Card wallet slot unavailable."] = "卡片夹栏位已改变，或此格无法叠放该卡。",
     ["Invalid card wallet."] = "卡片夹记录无效。",
@@ -142,6 +145,12 @@ end
 local function feedback(message)
     last_error, status = nil, message
     GamePrint(message)
+end
+
+local function surgery_feedback(result)
+    if result=="interrupted" then feedback(tr("手术中断，手术包已保留。","Surgery interrupted. Kit kept."))
+    elseif result=="completed" then feedback(tr("手术完成。","Surgery complete."))
+    elseif result=="unneeded" then feedback(tr("生命已满，无需手术。","At full health with no condition to treat.")) end
 end
 
 local function invalidate()
@@ -344,7 +353,7 @@ local function item_label(entry)
         return tr(d.zh,d.en)
     end
     if item.kind=="bandage" then return translated(item.name) or tr("绷带","Bandage") end
-    local kit=NHMedkits.types[item.kind]
+    local kit=NHMedkits.types[item.kind] or NHSurgeryKits.types[item.kind]
     if kit then return translated(item.name) or tr(kit.zh,kit.en) end
     if item.kind == "spell" then
         local id=item.card.id
@@ -458,7 +467,7 @@ local function inventory_view()
             duration=math.ceil(NHStore.productionFrames(recipe)/60),
             ready=ready,unlocked=reason~="Facility is locked." and reason~="Spell not unlocked in this save.",
             facility_name=facility_names[recipe.facility] or recipe.facility}
-        local kit=recipe.item and NHMedkits.types[recipe.item.kind]
+        local kit=recipe.item and (NHMedkits.types[recipe.item.kind] or NHSurgeryKits.types[recipe.item.kind])
         if kit and kit.healPercent then view.medkit=kit end
         if recipe.category=="spell" then
             local card=recipe.item
@@ -957,6 +966,7 @@ local function suppress_item_input(player)
 end
 
 function OnWorldInitialized()
+    NHSurgery.reset()
     NHClock.reset()
     NHFarm.resetClock()
     NHHomeWandEdit.reset()
@@ -971,6 +981,7 @@ function OnWorldInitialized()
 end
 
 function OnPlayerSpawned(player)
+    NHSurgery.reset(player)
     player_id = player
     set_home(player, true)
     NHHomeWandEdit.update(player,near_home(player))
@@ -1017,6 +1028,7 @@ end
 
 function OnWorldPostUpdate()
     local player = current_player()
+    surgery_feedback(NHSurgery.update(player))
     if player then set_home(player, false) end
     local traveler=player or (EntityGetWithTag("polymorphed_player") or {})[1]
     if not run_id and not traveler then return end
@@ -1061,7 +1073,14 @@ function OnWorldPostUpdate()
             local row=NHCardWallets.carried(state,player,item)
             if row then opened,popup=true,{kind="card_wallet",id=row.id,entity=item} end
         elseif kind == "dose" then use_dose(player, item)
-        elseif item and (NHCompanions.use(player,item,lang) or NHProducts.use(player,item)) then mouse_release=true end
+        elseif item and (NHCompanions.use(player,item,lang) or NHProducts.use(player,item)) then mouse_release=true
+        elseif item then
+            local handled,reason=NHSurgery.start(player,item)
+            if handled then
+                mouse_release=true
+                surgery_feedback(reason)
+            end
+        end
     end
     if not active_run() then return end
     -- Discoveries made outside the hideout can unlock vanilla spells without changing its inventory.
@@ -1090,6 +1109,7 @@ function OnWorldPostUpdate()
     end
     model.mode = case_open and "case" or (popup and "container" or "closed")
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
+    model.surgery=NHSurgery.view()
 
     if case_open then NHPerks.view(state,player,model) end
     model.debug = opened and ModSettingGet("noita_hideout.test_tools") ~= false
@@ -1101,6 +1121,7 @@ function OnWorldPostUpdate()
 end
 
 function OnPlayerDied()
+    NHSurgery.reset()
     NHHomeWandEdit.update(nil,false)
     popup=nil
     opened, case_open = false, nil

@@ -6,6 +6,7 @@ dofile("mods/noita_hideout/files/affinity.lua")
 dofile("mods/noita_hideout/files/card_wallets.lua")
 NHInjectors=dofile("mods/noita_hideout/files/injectors.lua")
 NHMedkits=dofile("mods/noita_hideout/files/medkits.lua")
+NHSurgeryKits=dofile("mods/noita_hideout/files/surgery_kits.lua")
 dofile("mods/noita_hideout/files/farming.lua")
 dofile("mods/noita_hideout/files/essences.lua")
 dofile("mods/noita_hideout/files/pouches.lua")
@@ -193,6 +194,8 @@ local function validate(s)
     local function validateMedicalItem(item)
         if NHMedkits.types[item.kind] then
             assert(NHMedkits.validUses(item.kind,NHMedkits.remaining(item)) and (item.count==nil or item.count==1),"Invalid medkit.")
+        elseif NHSurgeryKits.types[item.kind] then
+            assert(item.remaining==NHSurgeryKits.types[item.kind].uses and (item.count==nil or item.count==1),"Invalid surgery kit.")
         elseif item.kind=="bandage" and item.count~=nil then
             assert(NHStore.validBandageCount(item.count),"Invalid bandage count.")
         end
@@ -641,6 +644,9 @@ NHStore.recipes={
         noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
     NHMedkits.upgradeRecipe("tactical_medkit","medkit",4,105,60),
     NHMedkits.upgradeRecipe("advanced_medkit","tactical_medkit",8,165,180),
+    NHSurgeryKits.recipe("field_surgery_kit"),
+    NHSurgeryKits.recipe("tactical_surgery_kit"),
+    NHSurgeryKits.recipe("advanced_surgery_kit"),
     NHInjectors.recipe("fire"),
     NHInjectors.recipe("lightning"),
     NHInjectors.recipe("frost"),

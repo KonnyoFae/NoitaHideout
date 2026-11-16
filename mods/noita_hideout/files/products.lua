@@ -20,10 +20,15 @@ end
 local foods=dofile("mods/noita_hideout/files/cooking.lua")
 local products={"grenade"}
 for kind in pairs(healing_items) do products[#products+1]=kind end
+for _,kind in ipairs(NHSurgeryKits.order) do products[#products+1]=kind end
 for _,food in ipairs(foods) do products[#products+1]=food.id end
 for _,kind in ipairs(products) do
     local id=kind
     local product=healing_items[id]
+    local surgery=NHSurgeryKits.types[id]
+    if surgery then
+        product={field="remaining",valid=function(n) return n==surgery.uses end,error="Invalid surgery kit."}
+    end
     NHTransfers.registerItem(id,function(entity) return EntityHasTag(entity,"noita_hideout_"..id) end,{
         capture=function(entity)
             local record={kind=id,name="$nh_hideout_"..id,icon=items..id..".png"}

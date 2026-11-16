@@ -159,6 +159,13 @@ local function item_details(slot,model,tr)
         end
         return details
     end
+    local surgery=NHSurgeryKits.types[slot.kind]
+    if surgery then
+        return {slot.name,tr("清除负面状态","Clears harmful conditions"),
+            string.format(tr("恢复最大生命的 %d%%","Restores %d%% of maximum HP"),surgery.healPercent),
+            string.format(tr("用时 %d 秒，受伤会中断","Takes %d s. Damage interrupts."),surgery.castFrames/60),
+            tr("完成时消耗一包","Consumes one kit on completion")}
+    end
     local kit=NHMedkits.types[slot.kind]
     if kit then
         local healing=kit.healPercent and string.format(tr("每次恢复最大生命值的 %d%%","Restores %d%% of maximum HP per use"),kit.healPercent)
@@ -548,7 +555,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if spells then body_height=body_height+13 end
         if catalyst_count>0 then body_height=body_height+13+12*catalyst_count end
         if show_outputs then body_height=body_height+13+12*#outputs end
-        if selected.medkit then body_height=body_height+26
+        if selected.medkit then body_height=body_height+(selected.medkit.castFrames and 65 or 26)
         elseif selected.note then body_height=body_height+13 end
         if model.order_active and selected.unlocked==false then body_height=body_height+13 end
     elseif shopping and selected then
@@ -823,6 +830,14 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             value_row(y,tr("使用次数","Uses"),tostring(selected.medkit.uses),white)
             y=y+13
             value_row(y,tr("每次回血","Healing per use"),selected.medkit.healPercent..tr("% 最大生命","% max HP"),white)
+            if selected.medkit.castFrames then
+                y=y+13
+                value_row(y,tr("手术用时","Use time"),(selected.medkit.castFrames/60)..tr(" 秒"," s"),white)
+                y=y+13
+                label(y,tr("清除负面状态","Clears harmful conditions"),white)
+                y=y+13
+                label(y,tr("受伤中断，手术包保留","Damage interrupts. Kit kept."),muted)
+            end
         elseif selected.note then
             y=y+13
             label(y,selected.note,muted)
@@ -1365,6 +1380,25 @@ function NHUI.draw(model, dispatch)
     local sw, sh = GuiGetScreenDimensions(gui)
     local function tr(zh, en) return model.lang == "zh" and zh or en end
     if not model.open then
+        if model.surgery then
+            local cast=model.surgery
+            local caption=string.format(tr("手术中  %.1f 秒","Surgery  %.1f s"),math.ceil((cast.total-cast.elapsed)/6)/10)
+            local w=math.max(84,GuiGetTextDimensions(gui,caption)+10)
+            local x,y=math.floor((sw-w)/2),sh-25
+            GuiZSetForNextWidget(gui,-79)
+            GuiImageNinePiece(gui,1,x,y,w,19,0.96)
+            tint(white)
+            GuiText(gui,x+5,y+1,caption)
+            local pixel="data/ui_gfx/1px_white.png"
+            tint(muted)
+            GuiImage(gui,2,x+5,y+14,pixel,0.4,w-10,2)
+            if cast.elapsed>0 then
+                GuiZSetForNextWidget(gui,-81)
+                tint(green)
+                GuiImage(gui,3,x+5,y+14,pixel,1,(w-10)*cast.elapsed/cast.total,2)
+            end
+            return
+        end
         if not model.near then return end
         local caption = tr("打开物品栏：仓库和工坊", "Open inventory for stash and workshop")
         local text_w = GuiGetTextDimensions(gui, caption)

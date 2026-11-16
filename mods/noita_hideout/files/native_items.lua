@@ -3,6 +3,7 @@ NHNative = {}
 local item_path = "mods/noita_hideout/files/items/"
 local injectors=NHInjectors or dofile("mods/noita_hideout/files/injectors.lua")
 local medkits=NHMedkits or dofile("mods/noita_hideout/files/medkits.lua")
+local surgery_kits=NHSurgeryKits or dofile("mods/noita_hideout/files/surgery_kits.lua")
 local tag = {pouch = "noita_hideout_pouch", dose = "noita_hideout_dose"}
 NHNative.icons = {pouch = item_path .. "pouch.png", dose = item_path .. "dose.png"}
 
@@ -32,11 +33,13 @@ function NHNative.registerTranslations()
         {"nh_hideout_pouch", "Injector pouch", "针剂包"},
         {"nh_hideout_pouch_desc", "Use to open the pouch. Drag injectors into or out of it.", "手持使用可打开针剂包。拖动针剂即可存入或取出。"},
     }
-    for _,id in ipairs(medkits.order) do
-        local kit=medkits.types[id]
-        local key="nh_hideout_"..id
-        labels[#labels+1]={key,kit.en,kit.zh}
-        labels[#labels+1]={key.."_desc",kit.noteEn,kit.noteZh}
+    for _,catalog in ipairs({medkits,surgery_kits}) do
+        for _,id in ipairs(catalog.order) do
+            local kit=catalog.types[id]
+            local key="nh_hideout_"..id
+            labels[#labels+1]={key,kit.en,kit.zh}
+            labels[#labels+1]={key.."_desc",kit.noteEn,kit.noteZh}
+        end
     end
     for _,id in ipairs(injectors.order) do
         local d=injectors.get(id)

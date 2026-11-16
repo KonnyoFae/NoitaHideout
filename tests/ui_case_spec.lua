@@ -1409,3 +1409,30 @@ local function testTieredMedkitDisplay()
 end
 testTieredMedkitDisplay()
 print("UI: medkit charge overlays, percentage healing, fixed costs and scrollable narrow recipe confirmed.")
+
+local function testSurgeryDisplay()
+    local kit=NHSurgeryKits.types.advanced_surgery_kit
+    local medical={id="advanced_surgery_kit",category="medical",medkit=kit,duration=180,
+        name=kit.zh,output=1,ready=true,inputs={}}
+    model.recipes={medical}
+    render(model,240)
+    render(model,244)
+    render(model)
+    assert(drawn["50% 最大生命"] and drawn["5 秒"] and drawn["3:00"])
+    assert(drawn["清除负面状态"] or tips["清除负面状态"])
+    assert(drawn["受伤中断，手术包保留"] or tips["受伤中断，手术包保留"])
+    reveal(model,214)
+    local cmd,arg=render(model,214)
+    assert(cmd=="craft" and arg.id==medical.id)
+    local outdoors={open=false,near=false,lang="zh",surgery={kind=medical.id,elapsed=90,total=300}}
+    render(outdoors)
+    assert(drawn["手术中  3.5 秒"] and drawn["data/ui_gfx/1px_white.png"])
+    outdoors.near=true
+    render(outdoors)
+    assert(drawn["手术中  3.5 秒"] and not drawn["打开物品栏：仓库和工坊"])
+    outdoors.surgery=nil
+    render(outdoors)
+    assert(drawn["打开物品栏：仓库和工坊"] and not drawn["手术中  3.5 秒"])
+end
+testSurgeryDisplay()
+print("UI: surgery recipe, interruption information and in-world cast display passed.")

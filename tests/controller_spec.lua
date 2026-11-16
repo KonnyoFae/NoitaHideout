@@ -1666,3 +1666,61 @@ local function testTieredMedkits()
 end
 testTieredMedkits()
 print("Controller: worn kits upgrade for fixed prices and both higher tiers arrive with full charges.")
+
+local function testSurgeryFromWorkshop()
+    settings,flags={},{}
+    new_world()
+    local saved=state()
+    saved.levels.medical=1
+    saved.resources={herb=3,essence_healing=20}
+    local base=NHMedkits.item("medkit")
+    base.remaining=1
+    saved.warehouse={{id=saved.nextItemId,slot=1,item=base}}
+    saved.nextItemId=saved.nextItemId+1
+    assert(NHStore.commit(saved))
+    boot()
+    inventory_open=true
+    local recipe=assert(has_project(tick().recipes,"field_surgery_kit"))
+    assert(recipe.ready and recipe.medkit.castFrames==180 and recipe.medkit.healPercent==20)
+    tick(nil,"craft",{id=recipe.id})
+    local built=advance(state().order.required).warehouse.supplies[1]
+    assert(built.kind==recipe.id and built.remaining==1)
+    tick(nil,"secure_withdraw",{container="warehouse",kind=built.kind,storedId=built.id,safeSlot=1,
+        parent=quick,lane="tool",xslot=1,yslot=0})
+    for _,slot in ipairs(tick().native_slots) do
+        if slot.kind==built.kind then held=slot.entity end
+    end
+    assert(EntityHasTag(held,"noita_hideout_field_surgery_kit"))
+    inventory_open=false
+    tick()
+    tick()
+    function EntityGetFirstComponent(id,kind,tag)
+        local c=EntityGetFirstComponentIncludingDisabled(id,kind,tag)
+        if c and not c.disabled then return c end
+    end
+    function EntityGetTags(id)
+        local list={}
+        for tag in pairs(entities[id].tags) do list[#list+1]=tag end
+        return table.concat(list,",")
+    end
+    function EntityGetFilename(id) return entities[id].file or "" end
+    function ComponentGetTags(c) return c._tags or "" end
+    function ComponentGetIsEnabled(c) return not c.disabled end
+    function GameGetGameEffectCount() return 0 end
+    local health=EntityAddComponent2(player,"DamageModelComponent",{hp=1,max_hp=40,mIsOnFire=true,mFireFramesLeft=200})
+    local food=EntityLoad("mods/noita_hideout/files/effect_sugar_cube.xml",0,0)
+    EntityAddChild(player,food)
+    local buff=EntityAddComponent2(food,"GameEffectComponent",{effect="MOVEMENT_FASTER",frames=7200})
+    local status=tick(nil,nil,nil,true).surgery
+    assert(status and status.total==180 and status.elapsed==0)
+    assert(advance(100).surgery.elapsed==100)
+    health.hp=0.9
+    assert(not tick().surgery and EntityGetIsAlive(held) and health.mIsOnFire and buff.frames==7200)
+    assert(tick(nil,nil,nil,true).surgery.elapsed==0)
+    assert(advance(179).surgery.elapsed==179 and health.hp==0.9)
+    local kit=held
+    assert(not tick().surgery and not EntityGetIsAlive(kit) and health.hp==8.9)
+    assert(not health.mIsOnFire and health.mFireFramesLeft==0 and EntityGetIsAlive(food) and buff.frames==7200)
+end
+testSurgeryFromWorkshop()
+print("Controller: craft, withdraw, interrupt and complete surgery through the normal game callbacks.")
