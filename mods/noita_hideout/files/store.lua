@@ -466,10 +466,36 @@ end
 
 NHStore.restock=NHPouches.restock
 
+-- Each listed reaction in data/materials.xml converts one pixel of each
+-- ingredient into the same number of product pixels. Use 250 units per part.
+local function alchemyBatch(id,zh,en,product,ingredients)
+    local inputs={}
+    for _,name in ipairs(ingredients) do
+        inputs[#inputs+1]={name=name,amount=250}
+    end
+    local yield=250*#inputs
+    return {id=id,category="alchemy",alchemyMode="synthesis",zh=zh,en=en,inputs=inputs,
+        materials={[product]=yield},count=yield,reversible=true}
+end
+
 -- Inputs and the paid order are committed together. Only loose stock is spendable.
 NHStore.recipes={
-    {id="stable",category="alchemy",zh="稳定传送液",en="Teleportatium",inputs={{name="magic_liquid_unstable_teleportation",amount=250},{name="slime",amount=250}},
-        materials={magic_liquid_teleportation=500},count=500,reversible=true},
+    alchemyBatch("stable","稳定传送液","Teleportatium","magic_liquid_teleportation",
+        {"magic_liquid_unstable_teleportation","slime"}),
+    alchemyBatch("flummoxium","除草基质","Flummoxium","material_confusion",
+        {"magic_liquid_worm_attractor","blood_worm"}),
+    alchemyBatch("pheromone","费洛蒙","Pheromone","magic_liquid_charm",
+        {"material_confusion","magic_liquid_berserk"}),
+    -- Copper is a powder in the vanilla [sand_metal] group. Naming one metal
+    -- keeps the recovered ingredient unambiguous when a batch is decomposed.
+    alchemyBatch("levitatium","漂浮基质","Levitatium","magic_liquid_faster_levitation",
+        {"material_confusion","copper"}),
+    alchemyBatch("hastium","迅速基质","Hastium","magic_liquid_faster_levitation_and_movement",
+        {"magic_liquid_faster_levitation","magic_liquid_movement_faster"}),
+    alchemyBatch("unstable_polymorphine","不稳变形魔药","Unstable polymorphine","magic_liquid_unstable_polymorph",
+        {"material_confusion","blood","oil"}),
+    alchemyBatch("diminution","缩小","Diminution","magic_liquid_weakness",
+        {"vomit","bone"}),
     {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",inputs={{name="water",amount=100},{name="blood",amount=50}},
         item={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"}},
     {id="injector",category="medical",facility="injector",zh="耐火激活剂",en="Fire injector",inputs={{name="water",amount=100},{name="lava",amount=25}},
@@ -497,7 +523,7 @@ local function reverseRecipe(recipe)
         materials[input.name]=(materials[input.name] or 0)+input.amount
         count=count+input.amount
     end
-    return {id="reverse_"..recipe.id,reverseOf=recipe.id,category=recipe.category,facility=recipe.facility,
+    return {id="reverse_"..recipe.id,reverseOf=recipe.id,category=recipe.category,alchemyMode="decomposition",facility=recipe.facility,
         zh="分解"..recipe.zh,en="Decompose "..recipe.en,inputs=inputs,materials=materials,count=count,
         durationFrames=recipe.durationFrames}
 end

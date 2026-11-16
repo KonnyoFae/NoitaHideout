@@ -157,13 +157,13 @@ model.debug=true
 local profile={safeCapacity=2,levels={},materials={water=500,sand=350,slime=200},resources={},warehouse={}}
 model.progression=NHStore.progressMenu(profile,"en")
 model.recipes={
-    {id="stable",category="alchemy",name="Teleportatium",output=500,duration=120,ready=true,inputs={{name="Slime",available=300,amount=250}}},
+    {id="stable",category="alchemy",alchemyMode="synthesis",name="Teleportatium",output=500,duration=120,ready=true,inputs={{name="Slime",available=300,amount=250}}},
     {id="medical",category="medical",name="Medkit",output=1,duration=90,ready=true,inputs={{name="Slime",available=300,amount=100}}},
     {id="injector",category="medical",name="Fire injector",output=1,duration=120,ready=false,reason="Need stock",inputs={}},
     {id="grenade",category="weapons",name="Magic grenade",output=1,duration=120,ready=false,unlocked=false,reason="Build the station",inputs={}},
     {id="pouch",category="equipment",name="Injector pouch",output=1,duration=120,ready=true,
         inputs={{name="Slime",amount=50,available=100},{name="Empty container",amount=1,available=2}}},
-    {id="reverse_stable",category="alchemy",name="Decompose Teleportatium",duration=120,ready=true,
+    {id="reverse_stable",category="alchemy",alchemyMode="decomposition",name="Decompose Teleportatium",duration=120,ready=true,
         inputs={{name="Teleportatium",available=600,amount=500}},
         outputs={{name="Unstable teleportatium",amount=250},{name="Slime",amount=250}}},
 }
@@ -308,7 +308,7 @@ for _,size in ipairs({{640,360},{427,240},{320,240}}) do
     assert(secure.x+secure.w<=width and pouch.x>=bench.x+bench.w and pouch.y+pouch.h<secure.y)
     assert(bench.y+bench.h==stash.y+stash.h and bench.y+bench.h==secure.y+secure.h)
     assert(tiles[1002].x-tiles[1001].x==20 and tiles[1007].x+20<=pouch.x+pouch.w)
-    for i=250,253 do
+    for i=250,255 do
         local b=assert(buttons[i])
         assert(b.x>=bench.x and b.y>=bench.y and b.x+GuiGetTextDimensions(nil,b.name)<=bench.x+bench.w)
     end
@@ -316,16 +316,21 @@ end
 -- Select a recipe to inspect it before submission. Categories are usable at
 -- the narrow size as well, and availability colors update with live stock.
 assert(drawn.Alchemy and drawn.Medical and drawn.Weapons and drawn.Equipment)
+assert(drawn.Synthesis and drawn.Decomposition and not buttons[245])
 assert(drawn.Teleportatium and not drawn.Medkit and green_button(244))
 assert(not render(model,214))
 assert(not render(model,244))
 render(model)
 assert(drawn["Teleportatium ×500"] and drawn["300 / 250"] and drawn["Craft time"] and drawn["2:00"] and green_button(214))
+assert(drawn["< Synthesis"] and drawn.Synthesize)
 local action,param=render(model,214)
 assert(action=="craft" and param.id=="stable")
 assert(not buttons[215] and not render(model,215))
 render(model,240)
-render(model,245)
+render(model,255)
+render(model)
+assert(not drawn.Teleportatium and not buttons[245] and green_button(244))
+render(model,244)
 render(model)
 assert(drawn["Batch output"] and tips["Unstable teleportatium ×250"] and tips["Slime ×250"] and drawn["600 / 500"])
 assert(tips["Decompose Teleportatium"] or drawn["Decompose Teleportatium"])
@@ -333,12 +338,45 @@ action,param=render(model,214)
 assert(action=="craft" and param.id=="reverse_stable")
 model.lang="zh"
 render(model)
-assert(drawn["预计用时"] and drawn["每批产出"] and drawn["2:00"])
+assert(drawn["预计用时"] and drawn["每批产出"] and drawn["2:00"] and drawn["< 分解"] and drawn["确认分解"])
+render(model,240)
+render(model)
+assert(drawn["炼成"] and drawn["分解"])
 model.lang="en"
+
+-- Both alchemy lists page independently, including when production is active.
+for _,mode in ipairs({"synthesis","decomposition"}) do
+    for i=2,6 do
+        model.recipes[#model.recipes+1]={id=mode..i,category="alchemy",alchemyMode=mode,name=mode.." "..i,
+            output=1,duration=120,ready=true,inputs={}}
+    end
+end
+model.order_active,model.order_name,model.order_remaining=true,"Medkit",65
+render(model,243)
+render(model)
+assert(drawn["decomposition 6"] and drawn["2/2"] and drawn["1:05"] and not green_button(244))
+assert(panels[210].y>=0 and buttons[244].y+9<=height)
+render(model,254)
+render(model)
+assert(drawn.Teleportatium and drawn["1/2"] and drawn["1:05"] and not drawn["decomposition 6"])
+render(model,243)
+model.order_active=false
+render(model,244)
+action,param=render(model,214)
+assert(action=="craft" and param.id=="synthesis6")
+render(model,240)
+render(model)
+assert(drawn["synthesis 6"] and drawn["2/2"])
+render(model,255)
+render(model)
+assert(drawn["decomposition 6"] and drawn["2/2"])
+render(model,244)
+action,param=render(model,214)
+assert(action=="craft" and param.id=="decomposition6")
 render(model,240)
 render(model,251)
 render(model)
-assert(drawn.Medkit and drawn["Fire injector"] and not drawn.Teleportatium)
+assert(drawn.Medkit and drawn["Fire injector"] and not drawn.Teleportatium and not buttons[254] and not buttons[255])
 assert(green_button(244) and not green_button(245))
 render(model,245)
 assert(not render(model,214) and drawn["Need stock"])

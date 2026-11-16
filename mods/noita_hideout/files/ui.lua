@@ -12,6 +12,7 @@ local workshop_folded=false
 local list_pages={}
 local entries_per_page=5
 local recipe_category="alchemy"
+local alchemy_mode="synthesis"
 local selected_entry,salvage_target
 local work_tabs={
     {key="orders",id=212,zh="工坊",en="Workshop"},
@@ -24,6 +25,10 @@ local recipe_tabs={
     {key="medical",id=251,zh="医疗",en="Medical"},
     {key="weapons",id=252,zh="武器",en="Weapons"},
     {key="equipment",id=253,zh="装备",en="Equipment"},
+}
+local alchemy_tabs={
+    {key="synthesis",id=254,zh="炼成",en="Synthesis"},
+    {key="decomposition",id=255,zh="分解",en="Decomposition"},
 }
 local white = { 0.96, 0.93, 0.84 }
 local gold = { 1.00, 0.83, 0.47 }
@@ -193,11 +198,14 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     end
     local nav,body=position_tabs(work_tabs,18)
     local crafting=tab=="orders"
+    local alchemy=crafting and recipe_category=="alchemy"
     local menu=model.progression[tab]
     if crafting then
         menu={}
         for _,recipe in ipairs(model.recipes) do
-            if recipe.category==recipe_category then menu[#menu+1]=recipe end
+            if recipe.category==recipe_category and (not alchemy or recipe.alchemyMode==alchemy_mode) then
+                menu[#menu+1]=recipe
+            end
         end
     end
     local selected
@@ -212,8 +220,11 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         salvage=category and category[salvage_target.slot]
         if not salvage or salvage.id~=salvage_target.id or not salvage.salvage_yield then salvage_target,salvage=nil,nil end
     end
-    local category_nav
-    if crafting and not selected and not salvage then category_nav,body=position_tabs(recipe_tabs,body) end
+    local category_nav,alchemy_nav
+    if crafting and not selected and not salvage then
+        category_nav,body=position_tabs(recipe_tabs,body)
+        if alchemy then alchemy_nav,body=position_tabs(alchemy_tabs,body) end
+    end
     local function available(item)
         if crafting then return item.ready and item.unlocked~=false and not model.order_active end
         return item.canBuy
@@ -265,6 +276,12 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             return hover
         end
     end
+    for _,t in ipairs(alchemy_nav or {}) do
+        if button(t.id,t.x,t.y,t.name,t.key==alchemy_mode and gold or muted) then
+            alchemy_mode,selected_entry=t.key,nil
+            return hover
+        end
+    end
     -- Quantities and timers stay visible even when a long name needs a tooltip.
     local function value_row(y,name,value,color,tip)
         local right=width-6-GuiGetTextDimensions(gui,value,scale)/scale
@@ -293,7 +310,16 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             salvage_target=nil
         elseif button(261,6,body+65,tr("取消","Cancel")) then salvage_target=nil end
     elseif crafting and selected then
-        if button(240,6,body,tr("< 返回配方","< Recipes")) then selected_entry=nil; return hover end
+        local back=tr("< 返回配方","< Recipes")
+        local confirm=tr("确认制造","Confirm craft")
+        if alchemy then
+            if alchemy_mode=="synthesis" then
+                back,confirm=tr("< 炼成","< Synthesis"),tr("确认炼成","Synthesize")
+            else
+                back,confirm=tr("< 分解","< Decomposition"),tr("确认分解","Decompose")
+            end
+        end
+        if button(240,6,body,back) then selected_entry=nil; return hover end
         label(body+14,show_outputs and selected.name or selected.name.." ×"..selected.output,available(selected) and green or white)
         value_row(body+27,tr("预计用时","Craft time"),time_text(selected.duration),white)
         local y=body+40
@@ -318,7 +344,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
                 label(y,selected.reason,muted)
             end
         elseif available(selected) then
-            if button(214,6,y,tr("确认制造","Confirm craft"),green) then dispatch("craft",{id=selected.id}) end
+            if button(214,6,y,confirm,green) then dispatch("craft",{id=selected.id}) end
         else label(y,selected.reason or tr("材料或空位不足","Need stock or space"),muted) end
     elseif selected then
         if button(240,6,body,tr("< 返回列表","< Projects")) then selected_entry=nil; return hover end
@@ -344,7 +370,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         elseif selected.maxed then label(y,tr("已完成","Complete"),muted)
         else label(y,tr("所需物料不足","Insufficient stock"),gold) end
     elseif menu then
-        local list_key=crafting and recipe_category or tab
+        local list_key=alchemy and alchemy_mode or (crafting and recipe_category or tab)
         local pages=math.max(1,math.ceil(#menu/entries_per_page))
         local current=math.min(list_pages[list_key] or 1,pages)
         local y=body

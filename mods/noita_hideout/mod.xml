@@ -1,3 +1,3 @@
 <Mod name="Hideout Prototype | 藏身处测试版"
-     description="0.13.0 | Open your inventory near spawn to use the hideout. Workshop orders run while you play. Reaching a new Holy Mountain speeds up your active order. Reverse alchemy returns materials to storage."
+     description="0.14.0 | Open your inventory near spawn to use the hideout. Synthesize or decompose seven potions using materials in storage. Workshop orders run while you play and speed up at new Holy Mountains."
      request_no_api_restrictions="0" />

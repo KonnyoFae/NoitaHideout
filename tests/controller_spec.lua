@@ -451,7 +451,24 @@ assert(tick().warehouse_capacity.equipment==72 and tick().warehouse_capacity.sup
 
 -- Locked recipes remain readable in their own category; the backend rechecks access.
 local catalog=tick().recipes
-assert(#catalog==6)
+assert(#catalog==#NHStore.recipes)
+for _,recipe in ipairs(NHStore.recipes) do
+    local entry=assert(has_project(catalog,recipe.id),recipe.id)
+    if recipe.category=="alchemy" then
+        local mode=recipe.reverseOf and "decomposition" or "synthesis"
+        assert(entry.category=="alchemy" and entry.alchemyMode==mode,recipe.id)
+        assert(entry.duration==math.ceil(NHStore.productionFrames(recipe)/60))
+        assert(#entry.inputs==#recipe.inputs and #entry.outputs>0)
+        for i,input in ipairs(recipe.inputs) do
+            assert(entry.inputs[i].name==NHPotion.materialName(input.name) and entry.inputs[i].amount==input.amount)
+        end
+        local shown={}
+        for _,output in ipairs(entry.outputs) do shown[output.key]=output.amount end
+        for name,amount in pairs(recipe.materials) do assert(shown[name]==amount,recipe.id) end
+    else
+        assert(entry.alchemyMode==nil,recipe.id)
+    end
+end
 local alchemy=assert(has_project(catalog,"stable"))
 assert(alchemy.category=="alchemy" and alchemy.unlocked and not alchemy.ready and alchemy.reason)
 local reverse=assert(has_project(catalog,"reverse_stable"))

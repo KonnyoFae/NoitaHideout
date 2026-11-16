@@ -342,7 +342,8 @@ local function inventory_view()
     model.recipes={}
     for _,recipe in ipairs(NHStore.recipes) do
         local ready,reason=NHStore.canStartBatch(state,recipe)
-        local view={id=recipe.id,category=recipe.category,name=tr(recipe.zh,recipe.en),output=recipe.count or 1,
+        local view={id=recipe.id,category=recipe.category,alchemyMode=recipe.alchemyMode,
+            name=tr(recipe.zh,recipe.en),output=recipe.count or 1,
             inputs={},outputs={},duration=math.ceil(NHStore.productionFrames(recipe)/60),
             ready=ready,unlocked=not recipe.facility or NHStore.level(state,recipe.facility)>0,
             facility_name=facility_names[recipe.facility] or recipe.facility}
