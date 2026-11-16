@@ -2,12 +2,13 @@ NHUI = {}
 
 local gui
 local tab = "orders"
-local warehouse_tab, warehouse_page, folded = "wand", 1, false
+local warehouse_tab, folded = "wand", false
+local warehouse_pages = {}
 local warehouse_tabs = {
     {"wand","魔杖","Wands"}, {"spell","法术","Spells"}, {"containers","容器","Containers"},
     {"supplies","消耗品","Supplies"}, {"materials","物料","Materials"},
 }
-local panel_width, panel_height = 314, 196
+local workshop_folded=false
 local white = { 0.96, 0.93, 0.84 }
 local gold = { 1.00, 0.83, 0.47 }
 local muted = { 0.76, 0.80, 0.78 }
@@ -36,7 +37,7 @@ end
 
 local drag, last_case_frame
 local page = 1
-local material_page,loading=1,nil
+local loading
 local material_rows=4
 local function compact(n)
     local unit,suffix
@@ -108,7 +109,104 @@ local function item_details(slot,model,tr)
     return {slot.name or slot.kind}
 end
 
-local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
+-- Dimensions here are GUI units. Container cells keep the native tile pitch
+-- while the three panels share the available horizontal space at spawn.
+local function home_layout(sw,scale,tile_width)
+    local room=(sw-10)/scale-10
+    local bench=math.min(186,math.floor(room*0.30))
+    local stash=math.min(230,math.floor(room*0.43))
+    local secure=math.min(187,math.max(16+4*tile_width,room-bench-stash))
+    stash=math.min(stash,room-bench-secure)
+    local left=5
+    local right=sw-5-secure*scale
+    local middle=(left+stash*scale+right-bench*scale)/2
+    return {left=left,stash=stash,middle=middle,bench=bench,secure=secure}
+end
+
+-- Keep the ends of a long page strip reachable and center the nearby numbers.
+local function warehouse_pager(x,y,width,scale,current,pages)
+    current=math.min(current,pages)
+    local selected=current
+    GuiZSetForNextWidget(gui,-79)
+    GuiImageNinePiece(gui,299,x,y,width*scale,14*scale,0.7)
+    local function button(id,offset,title,color)
+        tint(color)
+        return GuiButton(gui,id,x+offset*scale,y+2*scale,title,scale) and not drag
+    end
+    if button(300,4,"<",current>1 and gold or muted) then selected=math.max(1,current-1) end
+    if button(301,width-11,">",current<pages and gold or muted) then selected=math.min(pages,current+1) end
+    local pitch=GuiGetTextDimensions(gui,"["..pages.."]",scale)/scale+5
+    local count=math.min(pages,math.max(1,math.floor((width-32)/pitch)))
+    local start=math.max(1,math.min(pages-count+1,current-math.floor(count/2)))
+    for i=1,count do
+        local n=start+i-1
+        if count>=5 and i==1 then n=1 elseif count>=5 and i==count then n=pages end
+        local title=n==current and ("["..n.."]") or tostring(n)
+        local center=width/2+(i-(count+1)/2)*pitch
+        local offset=center-GuiGetTextDimensions(gui,title,scale)/(2*scale)
+        if button(301+i,offset,title,n==current and gold or white) then selected=n end
+    end
+    return selected
+end
+
+local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
+    local left,width=layout.middle,layout.bench
+    if not model.debug then tab="orders" end
+    local height=workshop_folded and 18 or (tab=="orders" and (model.debug and 118 or 102) or 91)
+    local top=sh-5-height*scale
+    local function label(y,value,color)
+        local txt,short=fit(value,(width-12)*scale,scale)
+        tint(color or white)
+        GuiText(gui,left+6*scale,top+y*scale,txt,scale)
+        if short then GuiTooltip(gui,value,"") end
+    end
+    local function button(id,x,y,value,color,tip)
+        local txt,short=fit(value,(width-x-5)*scale,scale)
+        tint(color or gold)
+        local clicked=GuiButton(gui,id,left+x*scale,top+y*scale,txt,scale)
+        if tip or short then GuiTooltip(gui,tip or value,"") end
+        return clicked and not drag
+    end
+    GuiZSetForNextWidget(gui,-79)
+    GuiImageNinePiece(gui,210,left,top,width*scale,height*scale,1)
+    local hover=mx>=left and mx<left+width*scale and my>=top and my<top+height*scale
+    if button(211,6,3,(workshop_folded and "[+] " or "[-] ")..tr("藏身处","Hideout")) then
+        workshop_folded=not workshop_folded
+        return hover
+    end
+    if workshop_folded then return hover end
+    local workshop=tr("工坊","Workshop")
+    if button(212,6,18,workshop,tab=="orders" and gold or muted) then tab="orders"; return hover end
+    local second=12+GuiGetTextDimensions(gui,workshop,scale)/scale
+    if model.debug and button(213,second,18,tr("测试物资","Supplies"),tab=="samples" and gold or muted) then
+        tab="samples"
+        return hover
+    end
+    if tab=="orders" then
+        label(33,tr("稳定传送液 ×500","Teleportatium ×500"))
+        local inputs=NHStore.recipe.inputs
+        for i,input in ipairs(inputs) do
+            local name=i==1 and tr("不稳定传送液","Unstable teleportatium") or tr("黏液","Slime")
+            label(47+(i-1)*12,name.."  "..compact(model.ingredients[input.name] or 0).." / "..input.amount,muted)
+        end
+        if model.order_active then label(74,tr("已投料 · 等待通关","Queued · awaiting clear"),green)
+        elseif model.batch_available then
+            if button(214,6,74,tr("从物料库存投料","Start batch from stock")) then dispatch("order") end
+        else label(74,tr("原料不足，请先卸料","Unload missing ingredients"),muted) end
+        label(88,model.reward_spent and tr("下次通关后入库","Delivered on next run's clear")
+            or tr("本局通关后入库","Delivered on this run's clear"),muted)
+        if model.debug and button(215,6,103,tr("模拟通关","Simulate clear"),gold,
+            tr("每局仅结算一次通关奖励。","Uses this run's one clear reward.")) then dispatch("simulate") end
+    else
+        if button(216,6,37,tr("生成测试魔杖和混合瓶","Spawn wand and flask")) then dispatch("preview_items") end
+        label(50,tr("在脚边拾取样品","Pick up the samples at your feet"),muted)
+        if button(217,6,65,tr("重发测试针剂包","Reissue test pouch"),gold,
+            tr("替换现有针剂包，内含两支激活剂。","Replace the current pouch with two doses.")) then dispatch("restock") end
+    end
+    return hover
+end
+
+local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layout,pw)
     local frame = GameGetFrameNum()
     local fresh = last_case_frame ~= frame - 1
     if fresh then drag,page,loading = nil,1,nil end
@@ -130,9 +228,10 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         local pages = math.ceil(model.capacity/3)
         page = math.min(page,pages)
         if pages>1 then
-            if GuiButton(gui,35,ox+110*scale,oy+5*scale,"<",scale) and not drag then page=math.max(1,page-1) end
-            label(130,5,page.."/"..pages,31,muted)
-            if GuiButton(gui,36,ox+167*scale,oy+5*scale,">",scale) and not drag then page=math.min(pages,page+1) end
+            local py=pw<145 and 56 or 5
+            if GuiButton(gui,35,ox+(pw-72)*scale,oy+py*scale,"<",scale) and not drag then page=math.max(1,page-1) end
+            label(pw-54,py,page.."/"..pages,38,muted)
+            if GuiButton(gui,36,ox+(pw-15)*scale,oy+py*scale,">",scale) and not drag then page=math.min(pages,page+1) end
         end
         for i=1,math.min(3,model.capacity-(page-1)*3) do
             local n = (page-1)*3+i
@@ -146,10 +245,10 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
     if model.popup then
         if not standalone then
             GuiZSetForNextWidget(gui,-79)
-            GuiImageNinePiece(gui,37,ox,oy+popupY*scale,187*scale,61*scale,1)
+            GuiImageNinePiece(gui,37,ox,oy+popupY*scale,pw*scale,61*scale,1)
         end
-        label(8,popupY+5,tr("针剂包","Injector pouch"),120,white)
-        if GuiButton(gui,38,ox+148*scale,oy+(popupY+5)*scale,tr("关闭","Close"),scale) then
+        label(8,popupY+5,tr("针剂包","Injector pouch"),pw-43,white)
+        if GuiButton(gui,38,ox+(pw-34)*scale,oy+(popupY+5)*scale,tr("关闭","Close"),scale) then
             drag=nil
             dispatch("close_container")
             return
@@ -164,14 +263,11 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
     end
 
     local stock_tip
-    local warehouse_hover=false
-    if model.near and not standalone then
-        local left=5*scale
-        local available=(ox-left)/scale-5
-        local above=available<(warehouse_tab=="materials" and not model.popup and 166 or 100)
-        local width=math.min(230,above and (sw/scale-10) or available)
+    local panel_hover=false
+    if layout then
+        panel_hover=draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
+        local left,width=layout.left,layout.stash
         local cols=math.max(1,math.min(10,math.floor((width-16)/qw)))
-        local per_page=cols*2
         local tx,ty=8,22
         local tabs={}
         for i,t in ipairs(warehouse_tabs) do
@@ -182,15 +278,15 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
             tx=tx+text_width+8
         end
         local grid_y=ty+15
-        local height=folded and 20 or grid_y+2*qh+4
-        if not folded and warehouse_tab=="materials" then height=grid_y+qh+30+material_rows*11 end
-        local bottom=above and (oy+(model.popup and popupY or 0)*scale) or sh
-        local top=math.max(2,bottom-(height+5)*scale)
-        warehouse_hover=mx>=left and mx<left+width*scale and my>=top and my<top+height*scale
+        local content_height=qh+30+material_rows*11
+        local height=folded and 20 or grid_y+content_height+18
+        local top=sh-5-height*scale
+        local warehouse_hover=mx>=left and mx<left+width*scale and my>=top and my<top+height*scale
+        panel_hover=panel_hover or warehouse_hover
         if warehouse_hover and drag and drag.source.key=="native" and not folded and warehouse_tab~="materials"
             and drag.source.kind~="other" then
             local category=NHStore.category(drag.source.kind)
-            if category~=warehouse_tab then warehouse_tab,warehouse_page=category,1 end
+            warehouse_tab=category
         end
         GuiZSetForNextWidget(gui,-79)
         GuiImageNinePiece(gui,70,left,top,width*scale,height*scale,1)
@@ -210,11 +306,24 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
                     ((drag.source.key=="warehouse" and t[1]=="materials") or (drag.source.key=="docks" and t[1]=="containers"))
                 local over=cross and mx>=bx and mx<bx+GuiGetTextDimensions(gui,pos.name,scale) and my>=by and my<by+10*scale
                 if (clicked and not drag or over) and warehouse_tab~=t[1] then
-                    warehouse_tab,warehouse_page,loading=t[1],1,nil
+                    warehouse_tab,loading=t[1],nil
                     return
                 end
             end
-            if warehouse_tab=="materials" then
+            local bulk=warehouse_tab=="materials"
+            local per_page=bulk and material_rows*2 or cols*math.floor(content_height/qh)
+            local pages
+            if bulk then pages=math.max(1,math.ceil(#model.materials/per_page))
+            else
+                -- Keep a spare writable page even when the last occupied grid is only partly filled.
+                local last=model.warehouse_last[warehouse_tab] or 0
+                pages=math.max(1,math.ceil(last/per_page))+1
+            end
+            local current=warehouse_pages[warehouse_tab] or 1
+            local page_no=warehouse_pager(left+4*scale,top+(height-17)*scale,width-8,scale,current,pages)
+            if current~=page_no then loading=nil end
+            warehouse_pages[warehouse_tab]=page_no
+            if bulk then
                 local docks,materials=model.docks,model.materials
                 local column_width=math.floor((width-12)/2)
                 for n=1,2 do
@@ -237,22 +346,14 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
                     end
                 end
                 local y=grid_y+qh+15
-                local per_page=material_rows*2
-                local pages=math.max(1,math.ceil(#materials/per_page))
-                material_page=math.min(material_page,pages)
                 GuiText(gui,left+8*scale,top+y*scale,tr("库存","Stock"),scale)
-                if pages>1 then
-                    if GuiButton(gui,184,left+(width-64)*scale,top+y*scale,"<",scale) then material_page=math.max(1,material_page-1) end
-                    GuiText(gui,left+(width-51)*scale,top+y*scale,material_page.."/"..pages,scale)
-                    if GuiButton(gui,185,left+(width-16)*scale,top+y*scale,">",scale) then material_page=math.min(pages,material_page+1) end
-                end
                 if #materials==0 then
                     tint(muted)
                     GuiText(gui,left+8*scale,top+(y+13)*scale,tr("库存为空","Empty"),scale)
                 end
                 local held_target
                 for i=1,per_page do
-                    local mat=materials[(material_page-1)*per_page+i]
+                    local mat=materials[(page_no-1)*per_page+i]
                     if mat then
                         local col=(i-1)%2
                         local row=math.floor((i-1)/2)+1
@@ -294,15 +395,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
                 if not held_target then loading=nil end
             else
                 local rows=model.warehouse[warehouse_tab] or {}
-                local pages=1+math.floor((model.warehouse_last[warehouse_tab] or 0)/per_page)
-                warehouse_page=math.min(warehouse_page,pages)
-                if pages>1 then
-                    if GuiButton(gui,72,left+(width-65)*scale,top+3*scale,"<",scale) and not drag then warehouse_page=math.max(1,warehouse_page-1) end
-                    GuiText(gui,left+(width-52)*scale,top+3*scale,warehouse_page.."/"..pages,scale)
-                    if GuiButton(gui,73,left+(width-16)*scale,top+3*scale,">",scale) and not drag then warehouse_page=math.min(pages,warehouse_page+1) end
-                end
                 for i=0,per_page-1 do
-                    local n=(warehouse_page-1)*per_page+i+1
+                    local n=(page_no-1)*per_page+i+1
                     local v=rows[n] or {}
                     slot(i%cols,grid_y+math.floor(i/cols)*qh,"warehouse",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id,left,top)
                     local target=slots[#slots]
@@ -330,11 +424,11 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         local y = native_y + v.yslot*h
         if (not standalone or not full) and mx>=x and my>=y and mx<x+w and my<y+h then hovered=v; break end
     end
-    if warehouse_hover then hovered={key="panel"} end
+    if panel_hover then hovered={key="panel"} end
     for _,v in ipairs(slots) do
         if mx>=v.x and my>=v.y and mx<v.x+qw*scale and my<v.y+qh*scale then hovered=v end
     end
-    if not hovered and mx>=ox and my>=oy+(model.popup and popupY or 0)*scale and mx<ox+187*scale and my<oy+72*scale then
+    if not hovered and mx>=ox and my>=oy+(model.popup and popupY or 0)*scale and mx<ox+pw*scale and my<oy+72*scale then
         hovered = {key="panel"}
     end
     if drag and model.revision~=drag.revision then drag=nil end
@@ -417,8 +511,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
     end
     for i,v in ipairs(slots) do
         if drop(v)=="place" then tint(green) end
-        GuiImage(gui,100+i,v.x,v.y,tile,1,scale)
-        if v.kind then sprite(v,130+i,v.x+qw*scale/2,v.y+qh*scale/2,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and 0.35 or 1)
+        GuiImage(gui,1000+i,v.x,v.y,tile,1,scale)
+        if v.kind then sprite(v,2000+i,v.x+qw*scale/2,v.y+qh*scale/2,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and 0.35 or 1)
         end
         if v.kind=="dose" then
             local remaining=v.remaining or model.maxUses
@@ -429,14 +523,16 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
     end
     local tip=stock_tip
     if source then
-        if source.key~="native" then sprite(source,160,mx,my,0.95) end
+        if source.key~="native" then sprite(source,3000,mx,my,0.95) end
         local action=hovered and drop(hovered)
         tip={action and action~="cancel_native" and tr("松开放置","Release to place") or tr("拖至对应空格","Drag to a matching slot")}
     elseif hovered and hovered.kind and hovered.key~="native" then
         tip=item_details(hovered,model,tr)
     end
     if tip then cursor_tip(tip,mx,my,sw,sh,scale) end
-    label(8,56,(model.status~="" and model.status) or tr("拖动物品以存取","Drag items to transfer"),172,muted)
+    if standalone or pw>=145 or model.capacity<=3 then
+        label(8,56,(model.status~="" and model.status) or tr("拖动物品以存取","Drag items to transfer"),pw-16,muted)
+    end
     if drag and InputIsMouseButtonJustUp(1) then
         local action, arg, safeSlot, storedId = drop(hovered)
         drag=nil
@@ -453,7 +549,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
 end
 
 function NHUI.draw(model, dispatch)
-    if not model.open or model.mode == "home" then drag,last_case_frame=nil,nil end
+    if not model.open then drag,last_case_frame=nil,nil end
     if not gui then gui = GuiCreate() end
     GuiStartFrame(gui)
     GuiZSet(gui, -80)
@@ -462,7 +558,7 @@ function NHUI.draw(model, dispatch)
     local function tr(zh, en) return model.lang == "zh" and zh or en end
     if not model.open then
         if not model.near then return end
-        local caption = tr("物品栏：仓库  [H] 工坊", "Inventory: stash  [H] Workshop")
+        local caption = tr("打开物品栏：仓库和工坊", "Open inventory for stash and workshop")
         local text_w = GuiGetTextDimensions(gui, caption)
         local x = math.floor((sw - text_w) / 2)
         local y = sh - 20
@@ -473,12 +569,16 @@ function NHUI.draw(model, dispatch)
         return
     end
 
-    local case = model.mode == "case" or model.mode == "container"
-    local pw, ph = case and 187 or panel_width, case and 72 or panel_height
-    local s = math.min(1, (sw - 10) / pw, (sh - 10) / ph)
-    if s <= 0 then return end
-    local ox = case and sw - pw*s - 5 or math.floor((sw - pw*s)/2)
-    local oy = case and sh - ph*s - 5 or math.floor((sh - ph*s)/2)
+    local at_home=model.near and model.mode=="case"
+    local pw,ph=187,72
+    local s=math.min(1,(sw-10)/(at_home and 310 or pw),(sh-10)/(at_home and 173 or ph))
+    if s<=0 then return end
+    local layout
+    if at_home then
+        layout=home_layout(sw,s,GuiGetImageDimensions(gui,tile))
+        pw=layout.secure
+    end
+    local ox,oy=sw-pw*s-5,sh-ph*s-5
     GuiZSetForNextWidget(gui, -79)
     GuiImageNinePiece(gui, 10, ox, oy, pw*s, ph*s, 1)
 
@@ -488,70 +588,6 @@ function NHUI.draw(model, dispatch)
         GuiText(gui, ox + x * s, oy + y * s, txt, s)
         if truncated then GuiTooltip(gui, tostring(value), "") end
     end
-    local function button(id, x, y, txt, color)
-        tint(color or gold)
-        local clicked = GuiButton(gui, id, ox + x * s, oy + y * s, txt, s)
-        return clicked
-    end
-    local next_action, param
-    local function command(id, x, y, txt, action, arg)
-        if button(id, x, y, txt) then next_action, param = action, arg end
-    end
-
-    if model.mode~="container" then
-        label(9, 5, case and tr("安全箱", "Secure case") or tr("藏身处", "Hideout"), case and 98 or 198, white)
-    end
-    if case then
-        draw_case(model,ox,oy,s,sw,sh,tr,label,dispatch)
-        return
-    end
-
-    command(11,252,5,tr("关闭","Close"),"close")
-    local tabs = {
-        { "orders", tr("生产", "Production") },
-    }
-    if model.debug then tabs[#tabs + 1] = { "samples", tr("测试物资", "Test supplies") } end
-    if tab == "samples" and not model.debug then tab = "orders" end
-    local tx = 9
-    if not case then
-        for i, t in ipairs(tabs) do
-            local active = tab == t[1]
-            local title = active and ("[" .. t[2] .. "]") or t[2]
-            if button(20 + i, tx, 24, title, active and gold or muted) then tab = t[1] end
-            tx = tx + GuiGetTextDimensions(gui, "[" .. t[2] .. "]", s) / s + 12
-        end
-    end
-
-    if tab == "orders" then
-        label(10, 42, tr("稳定传送液   500 单位", "Stable teleportatium   500 units"), 293)
-        label(10, 56, tr("每批投入不稳定传送液 250、黏液 250。", "One batch takes 250 unstable teleportatium and 250 slime."), 293, muted)
-        label(10, 71, tr("订单   ", "Order   ") .. tostring(model.order or ""), 293, green)
-        if not model.order_active then
-            local stock=model.ingredients
-            local a,b=NHStore.recipe.inputs[1],NHStore.recipe.inputs[2]
-            label(10,88,tr("库存：不稳定传送液 ","Stock: unstable teleportatium ")..compact(stock[a.name] or 0)
-                ..tr("，黏液 ",", slime ")..compact(stock[b.name] or 0),293,muted)
-            if model.batch_available then command(50,10,105,tr("从物料库存投料","Start batch from stock"),"order")
-            else label(10,105,tr("请在物料页卸入缺少的原料。","Unload the missing ingredients in Materials."),293,muted) end
-        end
-        local timing = model.reward_spent and tr("本局已结算，下次通关后成品进入物料库存。","Output goes to Materials on your next clear.")
-            or tr("完成普通结局后，成品进入物料库存。","Clear a normal ending to add the output to Materials.")
-        label(10, 122, timing, 293, muted)
-        if model.debug then
-            if model.reward_spent then
-                command(52, 10, 140, tr("测试：再次模拟通关", "Test: repeat simulation"), "simulate")
-                label(10, 154, tr("本局已结算，重复模拟不会追加奖励。", "Already settled. Repeating gives no extra reward."), 293, muted)
-            else
-                command(52, 10, 140, tr("测试：模拟本局通关", "Test: simulate clear"), "simulate")
-                label(10, 154, tr("模拟会用掉本局唯一一次通关奖励。", "Simulation spends this run's one clear reward."), 293, muted)
-            end
-        end
-    else
-        command(62, 10, 45, tr("生成测试魔杖与混合药瓶", "Spawn sample wand and mixed flask"), "preview_items")
-        label(10, 62, tr("拾取样品后打开原版物品栏，拖入仓库。", "Pick up a sample, open your inventory and drag it into the stash."), 293, muted)
-        command(60, 10, 89, tr("重发测试针剂包", "Reissue test pouch"), "restock")
-        label(10, 106, tr("替换当前针剂包，在安全箱放入两支激活剂。", "Replaces your pouch with two doses in the secure case."), 293, muted)
-    end
-    if model.status and model.status ~= "" then label(10, 175, model.status, 293, green) end
-    if next_action then dispatch(next_action, param) end
+    if model.mode=="case" then label(9,5,tr("安全箱","Secure case"),pw-16,white) end
+    draw_case(model,ox,oy,s,sw,sh,tr,label,dispatch,layout,pw)
 end

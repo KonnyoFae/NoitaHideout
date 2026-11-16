@@ -269,7 +269,6 @@ local function inventory_view()
     model.ingredients=state.materials
     model.cells,model.pouchCapacity,model.maxUses=state.pouch.cells,NHStore.pouchCapacity,NHStore.doseDurability
     model.order_active = state.order ~= false
-    model.order = state.order and tr("已投料，等待一次通关", "Paid; waiting for one clear") or tr("空闲", "Idle")
     model.reward_spent = state.rewardedThrough >= run_id
     model_cache = model
     return model
@@ -378,8 +377,29 @@ local function transfer_error(err, item)
     report(read_error or err)
 end
 
+local function workshop_action(player,action)
+    if not case_open or not GameIsInventoryOpen() or not near_home(player) then return end
+    if action == "order" then
+        commit_edit(NHStore.startOrder, "已扣除两种原料，订单已排入。", "Both ingredients consumed. Order queued.")
+    elseif ModSettingGet("noita_hideout.test_tools") ~= false then
+        if action == "simulate" then
+            if state.rewardedThrough >= run_id then
+                report(tr("本局通关奖励已经领取。", "This run's clear reward has been used."))
+            else complete() end
+        elseif action == "restock" then
+            commit_edit(NHStore.restock, "测试针剂包已重发，内有两支。", "Test pouch reissued with two doses.")
+        elseif action == "preview_items" then
+            local x, y = EntityGetTransform(player)
+            local wand, err = NHWand.sample(x - 9, y - 5)
+            if not wand then report(err); return end
+            local flask, problem = NHPotion.sample(x + 9, y - 5)
+            if not flask then EntityKill(wand); report(problem); return end
+            feedback(tr("扫帚杖和半瓶混合液已放在脚边。", "Sample broom and half-full flask dropped nearby."))
+        end
+    end
+end
+
 local function dispatch(player, action, index)
-    if action == "close" then close_panel(); return end
     if not opened or not active_run() then return end
     if case_open or popup then
         if action=="close_container" then
@@ -387,7 +407,10 @@ local function dispatch(player, action, index)
             if not case_open then close_panel() end
             return
         end
-        if type(index)~="table" then return end
+        if type(index)~="table" then
+            workshop_action(player,action)
+            return
+        end
         local container=index.container or "safe"
         if container~="safe" and container~="warehouse" and container~="docks" then return end
         if container~="safe" and not (case_open and GameIsInventoryOpen() and near_home(player)) then return end
@@ -495,26 +518,6 @@ local function dispatch(player, action, index)
         end
         if not ok then transfer_error(result,action=="place" and index.entity)
         else status="" end
-        return
-    end
-    if not near_home(player) then close_panel(); return end
-    if action == "order" then
-        commit_edit(NHStore.startOrder, "已扣除两种原料，订单已排入。", "Both ingredients consumed. Order queued.", index)
-    elseif ModSettingGet("noita_hideout.test_tools") ~= false then
-        if action == "simulate" then
-            if state.rewardedThrough >= run_id then
-                report(tr("本局通关奖励已经领取。", "This run's clear reward has been used."))
-            else complete() end
-        elseif action == "restock" then
-            commit_edit(NHStore.restock, "测试针剂包已重发，内有两支。", "Test pouch reissued with two doses.")
-        elseif action == "preview_items" then
-            local x, y = EntityGetTransform(player)
-            local wand, err = NHWand.sample(x - 9, y - 5)
-            if not wand then report(err); return end
-            local flask, problem = NHPotion.sample(x + 9, y - 5)
-            if not flask then EntityKill(wand); report(problem); return end
-            feedback(tr("扫帚杖和半瓶混合液已放在脚边。", "Sample broom and half-full flask dropped nearby."))
-        end
     end
 end
 
@@ -581,7 +584,7 @@ function OnWorldPostUpdate()
         if not ok then invalidate(); report(err); return end
     end
     local nearby = near_home(player)
-    local was_open = opened
+    local was_open,was_case_open = opened,case_open
     if popup and not popup_accessible(player) then
         popup=nil
         if not case_open then close_panel() end
@@ -592,11 +595,6 @@ function OnWorldPostUpdate()
         close_panel()
     elseif popup then
         if InputIsKeyJustDown(41) then close_panel() end
-    elseif opened then
-        local out_of_reach = not case_open and not nearby
-        if out_of_reach or InputIsKeyJustDown(11) then close_panel() end
-    elseif InputIsKeyJustDown(11) and nearby then -- H: spawn hideout
-        opened, case_open = true, nil
     elseif used then
         local item = NHNative.held(player)
         local kind = NHNative.kind(item)
@@ -608,14 +606,14 @@ function OnWorldPostUpdate()
     local model = opened and inventory_view() or {}
     if opened and (case_open or popup) then model.native_slots = native_slots(player) end
     model.popup = popup ~= nil
-    model.mode = case_open and "case" or (popup and "container" or "home")
+    model.mode = case_open and "case" or (popup and "container" or "closed")
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
 
     model.debug = opened and ModSettingGet("noita_hideout.test_tools") ~= false
     model.active = opened and find_stimulant(player) ~= nil
     NHUI.draw(model, function(action, index)
         -- Ignore transfers on the frame that opens the panel.
-        if was_open and opened then dispatch(player, action, index) end
+        if was_open and opened and (not case_open or was_case_open) then dispatch(player, action, index) end
     end)
 end
 

@@ -216,7 +216,9 @@ assert(state().pouch.doses==0 and #EntityGetWithTag("noita_hideout_dose")==1)
 OnPlayerDied()
 assert(state().closedThrough==1 and state().pouch.location=="lost")
 new_world()
-tick(11)
+assert(not tick(11,"restock").open and state().pouch.location=="lost")
+inventory_open=true
+tick()
 tick(nil,"restock")
 assert(state().runSerial==2 and state().pouch.location=="safe")
 function CellFactory_GetAllLiquids() return {"magic_liquid_teleportation"} end
@@ -230,7 +232,18 @@ s.materials={slime=250,magic_liquid_unstable_teleportation=250}
 s.nextItemId=s.nextItemId+1
 assert(NHStore.commit(s))
 boot()
-tick(11)
+inventory_open=true
+tick(nil,"order")
+assert(not state().order)
+entities[player].x=1200
+tick(nil,"order")
+assert(not state().order and state().materials.slime==250)
+entities[player].x=227
+inventory_open=false
+tick(nil,"order")
+assert(not state().order)
+inventory_open=true
+tick()
 tick(nil,"order")
 assert(state().order and not next(state().materials))
 ending=true
@@ -239,7 +252,8 @@ OnPlayerDied()
 assert(state().finished==1 and #state().warehouse==1 and state().materials.magic_liquid_teleportation==500 and state().pouch.doses==2)
 new_world()
 settings["noita_hideout.test_tools"]=false
-tick(11)
+inventory_open=true
+tick()
 tick(nil,"simulate")
 assert(state().rewardedThrough==2)
 settings["noita_hideout.test_tools"]=true

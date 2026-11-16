@@ -1,6 +1,6 @@
 local width, height = 427, 240
 local click, action, argument
-local drawn = {}
+local drawn,panels = {},{}
 local frame = 0
 local pointer = {x = 0, y = 0}
 function GameGetFrameNum() return frame end
@@ -10,7 +10,7 @@ function InputIsMouseButtonJustUp() return pointer.released == true end
 function GameGetCameraBounds() return 0, 0, width, height end
 function DEBUG_GetMouseWorld() return pointer.x, pointer.y end
 function GuiCreate() return {} end
-function GuiStartFrame() drawn = {} end
+function GuiStartFrame() drawn,panels = {},{} end
 function GuiGetScreenDimensions() return width, height end
 function GuiZSet() end
 function GuiZSetForNextWidget() end
@@ -18,6 +18,7 @@ local next_color,image_colors={},{}
 function GuiColorSetForNextWidget(_,r,g,b) next_color={r,g,b} end
 local tipbox
 function GuiImageNinePiece(_,id,x,y,w,h)
+    panels[id]={x=x,y=y,w=w,h=h}
     if id==200 then tipbox={x=x,y=y,w=w,h=h} end
 end
 local tiles={}
@@ -91,8 +92,8 @@ assert(cmd=="open_container" and arg.safeSlot==3)
 model.popup=true
 model.maxUses,model.pouchCapacity,model.cells=3,4,{{remaining=3,count=2}}
 render(model)
-for i=102,103 do assert(tiles[i].x-tiles[i-1].x==20) end -- case
-for i=105,107 do assert(tiles[i].x-tiles[i-1].x==20) end -- pouch
+for i=1002,1003 do assert(tiles[i].x-tiles[i-1].x==20) end -- case
+for i=1005,1007 do assert(tiles[i].x-tiles[i-1].x==20) end -- pouch
 point(cx+58,cy+30,"press")
 cmd,arg=point(148,28,"release")
 assert(cmd=="take_pouch" and arg.xslot==2 and arg.safeSlot==3)
@@ -132,9 +133,10 @@ print("Native inventory drag, spell row, exact slot, upgrade pages and close can
 
 -- Left warehouse, native tile pitch, automatic filing and materials tab.
 model.near,model.warehouse,model.warehouse_last=true,{},{}
+model.debug,model.batch_available,model.ingredients=true,true,{slime=300,magic_liquid_unstable_teleportation=500}
 render(model)
-local origin=tiles[104]
-assert(tiles[105].x-origin.x==20)
+local origin=tiles[1004]
+assert(tiles[1005].x-origin.x==20)
 local nextrow
 for _,t in pairs(tiles) do if t.x==origin.x and t.y==origin.y+20 then nextrow=t end end
 assert(nextrow)
@@ -147,16 +149,28 @@ point(origin.x+1,origin.y+1,"press")
 cmd,arg=point(298,28,"release")
 assert(cmd=="secure_withdraw" and arg.container=="warehouse" and arg.storedId==32 and arg.xslot==5)
 -- Each category pages independently and the next empty page remains writable.
-model.warehouse_last.spell=20
-render(model,73)
+local page_size=math.floor((panels[70].w-16)/20)*4
+model.warehouse_last.spell=page_size*6
+local item_panel,item_pager=panels[70],panels[299]
+render(model,301)
 point(198,28,"press")
 cmd,arg=point(origin.x+1,origin.y+1,"release")
-assert(cmd=="place" and arg.safeSlot==21)
+assert(cmd=="place" and arg.safeSlot==1+page_size)
+-- Directly select page 5; the arrows step from that selection.
+render(model,306)
+point(198,28,"press")
+cmd,arg=point(origin.x+1,origin.y+1,"release")
+assert(cmd=="place" and arg.safeSlot==4*page_size+1)
+render(model,300)
+render(model)
+assert(drawn["[4]"])
 model.docks,model.materials={},{}
 render(model,79)
 render(model)
 assert(drawn.Flask and drawn["Powder pouch"] and drawn.Empty)
-local flask,powder=tiles[104],tiles[105]
+assert(item_pager.x==panels[299].x and item_pager.y==panels[299].y)
+assert(item_panel.x==panels[70].x and item_panel.y==panels[70].y and item_panel.w==panels[70].w and item_panel.h==panels[70].h)
+local flask,powder=tiles[1004],tiles[1005]
 assert(powder.y==flask.y and powder.x>flask.x+20)
 local native_flask=native("tool",5,1,51,"potion")
 native_flask.dockSlot=1
@@ -177,17 +191,17 @@ render(model)
 local load_button=buttons[187]
 for n=2,9 do model.materials[n]={key="m"..n,name="M"..n,amount=n==2 and 1000 or 1250000,slot=1} end
 render(model)
-assert(drawn["1k"] and drawn["1.2M"] and drawn["1/2"] and buttons[188].x>load_button.x and buttons[188].y==load_button.y)
+assert(drawn["1k"] and drawn["1.2M"] and drawn["[1]"] and drawn["2"] and buttons[188].x>load_button.x and buttons[188].y==load_button.y)
 local button2=buttons[188]
 point(button2.x+1,button2.y+1)
 assert(drawn["M2  1000"])
-render(model,185)
+render(model,303)
 assert(drawn["M9"] and not drawn["M2"])
-render(model,184)
+render(model,300)
 point(flask.x+1,flask.y+1)
 assert(drawn["Flask  20/50"] and drawn["water  12"] and drawn["slime  8"])
-assert(image_colors[134][1]==128/255 and image_colors[134][2]==32/255 and image_colors[134][3]==16/255)
-assert(image_colors[131][1]==128/255)
+assert(image_colors[2004][1]==128/255 and image_colors[2004][2]==32/255 and image_colors[2004][3]==16/255)
+assert(image_colors[2001][1]==128/255)
 assert(tipbox.x>flask.x and tipbox.x<flask.x+20 and tipbox.x>=0 and tipbox.y>=0 and tipbox.x+tipbox.w<=width and tipbox.y+tipbox.h<=height)
 cmd,arg=point(load_button.x+1,load_button.y+1,"press")
 assert(cmd=="material_transfer" and arg.amount==1 and arg.material=="water")
@@ -211,8 +225,8 @@ assert(cmd=="secure_withdraw" and arg.container=="docks" and arg.storedId==123)
 model.warehouse.containers={model.docks[1]}
 render(model,77)
 render(model)
-assert(image_colors[134][1]==128/255)
-local first_tile=tiles[104]
+assert(image_colors[2004][1]==128/255)
+local first_tile=tiles[1004]
 point(first_tile.x+1,first_tile.y+1)
 assert(drawn["Flask  20/50"] and drawn["water  12"])
 render(model,71)
@@ -221,3 +235,47 @@ assert(drawn["[+] Stash"] and not drawn.Materials)
 model.near=false
 render(model)
 assert(not drawn["[+] Stash"])
+
+-- Three bottom panels stay separate at different widths, including the open pouch.
+model.near,model.popup=true,true
+render(model,71)
+for _,size in ipairs({{640,360},{427,240},{320,240}}) do
+    width,height=size[1],size[2]
+    render(model)
+    local stash,bench,secure,pouch=panels[70],panels[210],panels[10],panels[37]
+    assert(stash.x>=0 and stash.x+stash.w<bench.x and bench.x+bench.w<secure.x)
+    assert(secure.x+secure.w<=width and pouch.x>=bench.x+bench.w and pouch.y+pouch.h<secure.y)
+    assert(bench.y+bench.h==stash.y+stash.h and bench.y+bench.h==secure.y+secure.h)
+    assert(tiles[1002].x-tiles[1001].x==20 and tiles[1007].x+20<=pouch.x+pouch.w)
+end
+assert(render(model,214)=="order")
+assert(render(model,215)=="simulate")
+render(model,213)
+assert(render(model,216)=="preview_items")
+assert(render(model,217)=="restock")
+render(model,211)
+render(model)
+assert(drawn["[+] Hideout"] and panels[70] and panels[10] and not drawn.Workshop)
+render(model,211)
+model.debug=false
+render(model)
+assert(not render(model,217) and drawn.Workshop and not drawn["Reissue test pouch"])
+-- Return to the remembered spell page. Clamp it if the high slots disappear.
+render(model,76)
+render(model)
+assert(drawn["[4]"])
+model.warehouse_last.spell=1
+render(model)
+assert(drawn["[2]"])
+render(model,301)
+assert(drawn["[2]"])
+local bench=panels[210]
+point(198,28,"press")
+cmd,arg=point(bench.x+8,bench.y+75,"release")
+assert(cmd=="cancel_native" and arg.entity==44)
+model.near=false
+render(model)
+assert(not panels[210] and panels[10] and not panels[70])
+model.near,model.mode=true,"container"
+render(model)
+assert(not panels[210] and not panels[70])
