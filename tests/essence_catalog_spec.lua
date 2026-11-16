@@ -4,10 +4,17 @@ local counts = {}
 local total = 0
 for id, key in pairs(NHEssences.byAction) do
     assert(NHEssences.types[key], id)
+    local value = NHEssences.values[id]
+    assert(type(value) == "number" and value > 1 and value == math.floor(value), id)
     counts[key] = (counts[key] or 0) + 1
     total = total + 1
 end
 assert(total == 158 and #NHEssences.order == 17)
+for id in pairs(NHEssences.values) do assert(NHEssences.byAction[id], id) end
+local values = NHEssences.values
+assert(values.HEAL_BULLET == 175 and values.ANTIHEAL == 567 and values.REGENERATION_FIELD == 175)
+assert(values.BOMB == 375 and values.LIGHT_BULLET == 60)
+assert(values.LIGHT_BULLET_TRIGGER > values.LIGHT_BULLET and values.NUKE_GIGA > values.NUKE)
 local visited = {}
 for _, key in ipairs(NHEssences.order) do
     local label = NHEssences.types[key]

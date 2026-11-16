@@ -310,6 +310,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if not salvage or salvage.id~=salvage_target.id or not salvage.salvage_yield
             or (salvage_target.mode=="essence" and not salvage.essence) then salvage_target,salvage=nil,nil end
     end
+    local per_card=salvage and salvage_target.mode=="essence" and salvage.essence.per_card
     local category_nav,alchemy_nav
     if crafting and not selected and not salvage then
         category_nav,body=position_tabs(recipe_tabs,body)
@@ -324,7 +325,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     end
     local body_height=62
     if salvage then
-        body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)
+        body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)+(per_card and 13 or 0)
     elseif crafting and selected then
         body_height=68+12*#selected.inputs
         if catalyst_count>0 then body_height=body_height+13+12*catalyst_count end
@@ -429,6 +430,22 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         end
         if extract then
             amount,stock=salvage.essence.amount,salvage.essence.stock
+            if per_card then
+                local full=tr("每张满额","Per full card")
+                local detail=salvage.essence.basis
+                if detail then
+                    local cost_per_kit=model.essence_medkit_cost
+                    local kits=math.floor(per_card/cost_per_kit)
+                    detail=detail.."\n"..string.format(
+                        tr("每包 %d 精华，可制 %d 包，余 %d 精华。","%d essence per medkit\nMedkits ×%d, %d essence left."),
+                        cost_per_kit,kits,per_card%cost_per_kit)
+                else
+                    detail=tr("按原版满次数估算伤害或功能价值。\n无限次按 20 次计。超过 375 的部分\n按八分之一折算，整卡四舍五入。",
+                        "Priced by damage or utility at full charges.\nUnlimited spells use a 20-cast reference.\nValue above 375 counts at one eighth.\nThe total is rounded to the nearest unit.")
+                end
+                value_row(y,full,tostring(per_card),white,full,detail)
+                y=y+13
+            end
             value_row(y,salvage.essence.name,"+"..amount,green)
             value_row(y+12,tr("当前库存","In storage"),compact(stock),white,string.format("%.0f",stock))
         else
@@ -458,7 +475,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         label(body+14,show_outputs and selected.name or selected.name.." ×"..selected.output,available(selected) and green or white)
         value_row(body+27,tr("预计用时","Craft time"),time_text(selected.duration),white)
         local y=body+40
-        label(y,tr("物料  库存 / 所需","Materials  stock / cost"),muted)
+        label(y,tr("原料  库存 / 所需","Ingredients  stock / cost"),muted)
         for _,input in ipairs(selected.inputs) do
             y=y+12
             cost(y,input.name,input.available,input.amount,input.detail)

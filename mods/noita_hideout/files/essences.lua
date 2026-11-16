@@ -1,5 +1,29 @@
 -- Keys are stored in the hideout profile. Each action has a single primary essence.
-NHEssences = {order = {}, types = {}, byAction = {}}
+NHEssences = {order = {}, types = {}, byAction = {}, values = dofile("mods/noita_hideout/files/spell_values.lua")}
+
+-- Displayed HP, one unmodified target. Percentage healing is priced at 100 maximum HP.
+-- Round the full card once so fractional healing per hit is retained.
+local reference_hp = 100
+NHEssences.healingProfiles = {
+    HEAL_BULLET = {
+        amount = 20 * 8.75,
+        zh = "每次治疗 8.75 HP × 20 次。",
+        en = "8.75 HP per hit × 20 casts.",
+    },
+    ANTIHEAL = {
+        amount = math.floor(20 * (170 / 60) * 0.10 * reference_hp + 0.5),
+        zh = "以 100 最大 HP 计，20 次完整再生。\n每次先伤 30 HP，再恢复约 28.3 HP。\n精华按恢复部分结算。",
+        en = "20 full regeneration effects at 100 max HP.\nEach hit deals 30, then heals about 28.3 HP.\nExtraction values the healing component.",
+    },
+    REGENERATION_FIELD = {
+        amount = math.floor(2 * (reference_hp * 2 / 3 + 21) + 0.5),
+        zh = "以 100 最大 HP 计，在环心停留全程。\n每次约恢复最大 HP 的 2/3 加 21 HP，共 2 次。",
+        en = "Stay at the centre for both casts at 100 max HP.\nEach restores about 2/3 of max HP plus 21 HP.",
+    },
+}
+for id, profile in pairs(NHEssences.healingProfiles) do
+    NHEssences.values[id] = profile.amount
+end
 
 local function define(key, zh, en, actions)
     table.insert(NHEssences.order, key)

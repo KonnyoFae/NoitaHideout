@@ -510,6 +510,21 @@ render(model,240)
 render(model,244)
 action,param=render(model,214)
 assert(action=="craft" and param.id=="medical")
+do
+    local recipe={id="medkit_essence",category="medical",name="Medkit (healing essence)",output=1,duration=120,
+        ready=false,reason="Not enough workshop resources.",inputs={{name="Healing essence",available=29,amount=30}}}
+    table.insert(model.recipes,recipe)
+    render(model,240)
+    render(model,246)
+    assert(not render(model,214) and drawn["29 / 30"] and tips["Healing essence  29 / 30"])
+    assert(drawn[recipe.reason] or tips[recipe.reason])
+    recipe.ready,recipe.inputs[1].available=true,30
+    local order,request=render(model,214)
+    assert(drawn["30 / 30"] and order=="craft" and request.id=="medkit_essence")
+    render(model,240)
+    table.remove(model.recipes)
+    render(model,244)
+end
 model.order_active,model.order_name,model.order_remaining=true,"Medkit",65
 assert(not render(model,214) and drawn["Making: Medkit"] and drawn["1:05"])
 model.order_remaining=5
@@ -693,15 +708,34 @@ assert(action=="salvage" and param.id==32 and param.kind=="spell" and param.slot
 do
     local view=model.warehouse.spell[1]
     view.spell_uses=0
-    view.essence={key="essence_high_energy",name="High-energy essence",amount=3,stock=1000}
+    local bomb_value=NHEssences.values.BOMB
+    view.essence={key="essence_high_energy",name="High-energy essence",amount=3*bomb_value,stock=1000,per_card=bomb_value}
     pointer.right=true
     render(model)
     pointer.right=false
     render(model)
-    assert(drawn["[Essence]"] and drawn["Charges left"] and drawn["0"] and drawn["+3"] and drawn["1k"])
+    assert(drawn["[Essence]"] and drawn["Charges left"] and drawn["0"] and drawn["+"..(3*bomb_value)] and drawn["1k"])
+    assert(tips["Per full card"]:find("20-cast",1,true) and tips["Per full card"]:find("375",1,true))
+    local profile=NHEssences.healingProfiles.HEAL_BULLET
+    view.essence={key="essence_healing",name="Healing essence",amount=3*profile.amount,stock=1000,
+        per_card=profile.amount,basis=profile.en}
+    model.essence_medkit_cost=30
+    local old_width,old_height=width,height
+    for _,lang in ipairs({"en","zh"}) do
+        model.lang=lang
+        width,height=320,180
+        view.essence.basis=profile[lang]
+        render(model)
+        local explanation=tips[lang=="zh" and "每张满额" or "Per full card"]
+        assert(explanation:find(profile[lang],1,true) and explanation:find("30",1,true))
+        assert(explanation:find(tostring(math.floor(profile.amount/30)),1,true))
+        assert(drawn[tostring(profile.amount)] and drawn["+"..(3*profile.amount)])
+        assert(buttons[260] and panels[210].y>=0 and buttons[261].y<height)
+    end
+    width,height,model.lang=old_width,old_height,"en"
     assert(not render(model,263))
     render(model)
-    assert(drawn["[Scrap]"] and drawn["Arcane scrap +3"])
+    assert(drawn["[Scrap]"] and drawn["Arcane scrap +3"] and not tips["Per full card"])
     local command,request=render(model,260)
     assert(command=="salvage" and request.mode=="scrap")
     pointer.right=true

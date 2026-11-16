@@ -475,8 +475,9 @@ local alchemy=assert(has_project(catalog,"stable"))
 assert(alchemy.category=="alchemy" and alchemy.unlocked and not alchemy.ready and alchemy.reason)
 local reverse=assert(has_project(catalog,"reverse_stable"))
 assert(reverse.category=="alchemy" and reverse.unlocked and #reverse.inputs==1 and #reverse.outputs==2)
-local expected_category={medical="medical",injector="medical",grenade="weapons",pouch="equipment"}
-for _,id in ipairs({"medical","injector","grenade","pouch"}) do
+local expected_category={medical="medical",medkit_essence="medical",injector="medical",injector_essence="medical",
+    grenade="weapons",grenade_essence="weapons",pouch="equipment"}
+for _,id in ipairs({"medical","medkit_essence","injector","injector_essence","grenade","grenade_essence","pouch"}) do
     local locked=assert(has_project(catalog,id))
     assert(locked.category==expected_category[id] and not locked.unlocked and not locked.ready)
     assert(locked.facility_name and locked.reason:find(locked.facility_name,1,true))
@@ -551,6 +552,7 @@ tick(nil,"buy_upgrade",{id="salvage",level=0})
 local unlocked=tick()
 assert(unlocked.salvage_enabled and unlocked.warehouse.spell[1].salvage_yield==1)
 assert(unlocked.warehouse.spell[1].essence.key==NHEssences.byAction.BOMB and unlocked.warehouse.spell[1].spell_uses==3)
+assert(unlocked.warehouse.spell[1].essence.per_card==NHEssences.values.BOMB)
 entities[player].x=900
 tick(nil,"salvage",salvage)
 entities[player].x=227
@@ -559,21 +561,37 @@ tick(nil,"salvage",salvage)
 assert(state().resources.arcane_scrap==1 and not tick().warehouse.spell)
 do
     local key=NHEssences.byAction.HEAL_BULLET
+    local profile=NHEssences.healingProfiles.HEAL_BULLET
+    local medkit=assert(has_project(tick().recipes,"medkit_essence"))
+    assert(medkit.unlocked and not medkit.ready and medkit.reason=="Not enough workshop resources.")
+    assert(#medkit.inputs==1 and medkit.inputs[1].available==0 and medkit.inputs[1].amount==30)
+    assert(medkit.inputs[1].name==NHEssences.types[key].en)
+    for _,test in ipairs({{"grenade_essence","essence_high_energy",30},{"injector_essence","essence_fire",180}}) do
+        local recipe=assert(has_project(tick().recipes,test[1]))
+        assert(recipe.unlocked and not recipe.ready and recipe.reason==medkit.reason)
+        assert(#recipe.inputs==1 and recipe.inputs[1].name==NHEssences.types[test[2]].en)
+        assert(recipe.inputs[1].available==0 and recipe.inputs[1].amount==test[3])
+    end
     for expected,uses in ipairs({0,2,20}) do
         local view=stash_spell("HEAL_BULLET",uses)
-        assert(view.spell_uses==uses and view.essence.key==key and view.essence.amount==1 and view.essence.stock==expected-1)
+        local stock=(expected-1)*profile.amount
+        assert(view.spell_uses==uses and view.essence.key==key and view.essence.amount==profile.amount and view.essence.stock==stock)
+        assert(view.essence.per_card==profile.amount and view.essence.basis==profile.en)
         local request={id=view.id,kind="spell",slot=1,mode="essence"}
         tick(nil,"salvage",request)
         tick(nil,"salvage",request)
-        assert(state().resources[key]==expected and state().resources.arcane_scrap==1 and not tick().warehouse.spell)
+        assert(state().resources[key]==expected*profile.amount and state().resources.arcane_scrap==1 and not tick().warehouse.spell)
     end
     boot()
     local balances=tick().essences
     assert(#balances==17)
     for _,balance in ipairs(balances) do
-        assert(balance.amount==(balance.key==key and 3 or 0))
+        assert(balance.amount==(balance.key==key and 3*profile.amount or 0))
         assert(balance.name==NHEssences.types[balance.key].en)
     end
+    medkit=assert(has_project(tick().recipes,"medkit_essence"))
+    assert(medkit.ready and medkit.inputs[1].available==3*profile.amount)
+    assert(tick().essence_medkit_cost==medkit.inputs[1].amount)
     local previous=GameTextGetTranslatedOrNot
     function GameTextGetTranslatedOrNot(key)
         if key=="$action_teleport_closer" then return "Homebringer Teleport Bolt" end

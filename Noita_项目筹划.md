@@ -65,15 +65,15 @@
 
 后续按基础和进阶档次扩充医疗物品、激活剂及投掷道具。基础档使用散装物料，进阶档可额外消耗相应的法术精华。法术精华也可作为制造其他法术的材料，成品散装法术直接进入法术仓库。
 
-拆解台按法术的 action ID 确定主精华。「治疗魔弹」（`HEAL_BULLET`）给治疗精华，「炸弹」（`BOMB`）给高能精华。后续高级医疗配方可消耗治疗精华，进阶投掷物可消耗高能精华。设计法术回造成本时应考虑一张成品卡可再拆回 1 个精华。
+拆解台按法术的 action ID 确定主精华与单张回收量。「治疗魔弹」（`HEAL_BULLET`）给 175 个治疗精华，「炸弹」（`BOMB`）给 375 个高能精华。今后为散装法术制定回造配方时，主精华成本至少覆盖该成品的实际回收额，触发变体和高阶法术分别定价。
 
-从 0.19.0 起，158 张散装法术分属 17 类精华。每张按 1 个主精华结算，零次数、部分使用、满次数和无限次等价，堆叠按张数计。玩家也可改选每张 1 个奥术碎片。确认后只结算所选产物，精华在仓库独立分页显示。制作法术与道具的具体配方费用待定。
+0.20.0 的 158 张散装法术分属 17 类精华。有限次数卡按满次数定价，无限次数卡按 20 次的效用估值。每张卡的剩余次数不影响回收价，堆叠按报价乘张数。治疗法术按完整恢复量折算，百分比以 100 最大生命为基准。其他法术按原版伤害或单次功能估值，整卡超过 375 的部分按 1/8 折算。玩家也可选择每张 1 个奥术碎片。两种回收方式择一结算。
 
 ### 法术精华调查与配方草案
 
 按本机原版法术表的类型筛选，共 122 张投射物、45 张静态投射物。触发、双触发和定时版本各占一个 ID。中文 Wiki 的页面直连返回 403，可检索的中文条目和英文总表用于核对范围，逐卡效果取自本机 `data.wak` 的 `data/scripts/gun/gun_actions.lua`、对应实体和效果脚本，名称取自 `data/translations/common.csv`。本机游戏版本指纹为 `9dbd52ced019a643169a2db02f46c77f8766c6e5`。[中文法术列表](https://noita.wiki.gg/zh/wiki/%E6%B3%95%E6%9C%AF) · [Wiki 按类型统计](https://noita.wiki.gg/wiki/Spells) · [逐卡分类索引](#原版法术逐卡分类)
 
-**后续制造可先从治疗、酸液和高能入手。** 治疗魔弹与活力之环会提供同一种精华，两张卡的回造配方可分别定价。酸液球与酸云共用的酸液精华适合用于酸液投掷物。炸弹、不稳晶体和死亡十字都给高能精华，可作为爆破投掷物的材料。
+**已经接入的消耗端。** 治疗精华 30 个制造一个总恢复量 30 HP 的医疗包。高能精华 30 个制造一枚魔法手雷，折算依据为直击 17.5 与爆炸 12.5。火焰精华 180 个制造一支耐火激活剂，三次注射分别提供一分钟耐火时间。后续可依同一尺度为高级医疗、酸液投掷物和法术回造定价。
 
 | 待验证的操作 | 拆解台或工坊的建议行为 |
 | --- | --- |
@@ -211,78 +211,78 @@ Noita 的 Falling Everything Engine 负责像素材料模拟、区块加载、�
 
 ## 原版法术逐卡分类
 
-下表逐项列出 167 个已注册的法术 ID。158 张已接入 17 种精华的拆解，另有 9 张特殊卡可回收普通碎片。表中「静态」指原版静态投射物类型。精华归属已落地，合成副料和回造顺序属于后续配方建议。「陨石雨」「蠕虫雨」旁保留了游戏显示的芬兰语名称。两张同名的「汇聚之光」可按 `LASER` 和 `GLOWING_BOLT` 区分。
+下表逐项列出 167 个已注册的法术 ID。**ID 后括号内的数字为 0.20.0 单张法术的精华产量。** 158 张已接入 17 种精华的拆解，另有 9 张特殊卡可回收普通碎片。表中「静态」指原版静态投射物类型。合成副料和回造顺序属于后续配方建议。「陨石雨」「蠕虫雨」旁保留了游戏显示的芬兰语名称。两张同名的「汇聚之光」可按 `LASER` 和 `GLOWING_BOLT` 区分。
 
 ### 医疗、元素和爆破（59 张）
 
 | 建议归属 | 原版类型 | 游戏内名称与 action ID | 主要效果与回造取舍 |
 | --- | --- | --- | --- |
-| 治疗 | 投射物 | 治疗魔弹 `HEAL_BULLET` | 命中后直接回血。 |
-| 治疗 | 投射物 | 致命治愈 `ANTIHEAL` | 先伤害，再持续回血。合成价应体现延迟和风险。 |
-| 治疗 | 静态 | 活力之环 `REGENERATION_FIELD` | 在范围内赋予再生，适合较高档的治疗配方。 |
-| 酸液 | 投射物 | 酸液球 `ACIDSHOT` | 发射酸蚀球并生成酸液。 |
-| 酸液 | 静态 | 酸云 `CLOUD_ACID` | 持续降下酸液。 |
-| 高能 | 投射物 | 炸弹 `BOMB`、炸药 `DYNAMITE` | 常规爆炸物。炸弹适合作为基础来源。 |
-| 高能 | 投射物 | 魔法飞弹 `ROCKET`、大型魔法飞弹 `ROCKET_TIER_2`、巨型魔法飞弹 `ROCKET_TIER_3`、召唤飞弹 `MISSILE` | 飞行后爆炸。尺寸改变威力。 |
-| 高能 | 投射物 | 火焰弹 `GRENADE`、带有触发的火焰弹 `GRENADE_TRIGGER`、大型火焰弹 `GRENADE_TIER_2`、巨型火焰弹 `GRENADE_TIER_3`、怪异火焰弹 `GRENADE_ANTI`、坠落弹 `GRENADE_LARGE` | 爆炸弹体。触发型另携带后续法术。 |
-| 高能 | 投射物 | 不稳晶体 `MINE`、带有触发的不稳晶体 `MINE_DEATH_TRIGGER`、休眠晶体 `PIPE_BOMB`、带有触发的休眠晶体 `PIPE_BOMB_DEATH_TRIGGER` | 两类晶体的引爆条件不同，分别学会和制作。 |
-| 高能 | 投射物 | 召唤鹿诱饵 `EXPLODING_DEER`、鸭群 `EXPLODING_DUCKS` | 鹿诱饵或鸭群的标志性结果是爆炸。召唤作为合成副条件。 |
-| 高能 | 投射物 | 闪烁炸弹 `GLITTER_BOMB`、烟火！ `FIREWORK` | 投掷后爆裂、迸出碎片或烟火。不同烟火颜色共用同一回收结果。 |
-| 高能 | 投射物 | 丙烷罐 `PROPANE_TANK`、炸弹矿车 `BOMB_CART`、召唤炸药箱 `TNTBOX`、召唤大号炸药箱 `TNTBOX_BIG` | 罐、矿车和箱子携带爆炸物。 |
-| 高能 | 投射物 | 汇聚之光 `GLOWING_BOLT`、死亡十字 `DEATH_CROSS`、巨大死亡十字 `DEATH_CROSS_BIG` | 汇聚后爆炸或延迟爆炸。用 ID 区分同名的汇聚之光。 |
-| 高能 | 投射物 | 神圣炸弹 `BOMB_HOLY`、巨型神圣炸弹 `BOMB_HOLY_GIGA`、核弹 `NUKE`、巨型核弹 `NUKE_GIGA` | 高破坏力和大范围附效，回造列为后期独立配方。 |
-| 高能 | 静态 | 爆炸 `EXPLOSION`、魔法爆炸 `EXPLOSION_LIGHT`、盛大场面 `PURPLE_EXPLOSION_FIELD` | 原地爆炸、保留地形的爆炸、区域内连续爆炸。 |
-| 高能 | 静态 | 陨石雨（Meteorisade） `METEOR_RAIN` | 大量陨石造成连续爆炸。火焰是合成副属性。 |
-| 火焰 | 投射物 | 火焰喷射器 `FLAMETHROWER`、火焰炸弹 `FIREBOMB`、黑焰之道 `DARKFLAME` | 喷火、播撒火焰或留下黑焰。 |
-| 火焰 | 投射物 | 火球 `FIREBALL`、陨石 `METEOR` | 燃烧兼爆炸。合成可另收高能精华。 |
-| 火焰 | 静态 | 火焰爆炸 `FIRE_BLAST` | 原地爆发火焰。 |
-| 雷电 | 投射物 | 闪电弹 `LIGHTNING`、球状闪电 `BALL_LIGHTNING`、雷霆放射 `THUNDERBALL` | 发射闪电、球状闪电或反复放电的投射物。 |
-| 雷电 | 静态 | 雷霆爆炸 `THUNDER_BLAST`、雷霆之环 `ELECTROCUTION_FIELD`、投射物雷电领域 `PROJECTILE_THUNDER_FIELD` | 雷爆、电击区域、令进入领域的投射物产生雷爆。 |
-| 雷电 | 静态 | 雷云 `CLOUD_THUNDER` | 雷云兼有降雨，以放电为主，回造可另收水。 |
-| 冰冻 | 投射物 | 冰球 `ICEBALL`、冰冷凝视 `FREEZING_GAZE` | 投射后使目标冻结。 |
-| 冰冻 | 静态 | 静止之环 `FREEZE_FIELD` | 使区域内目标冻结。 |
-| 毒素 | 投射物 | 粘液球 `SLIMEBALL`、毒雾 `MIST_RADIOACTIVE` | 产生易消散的毒性淤泥或毒性淤泥雾。 |
-| 毒素 | 静态 | 毒素爆炸 `POISON_BLAST` | 产生毒液。与上一行共享精华，回造可按毒液和淤泥分别收料。 |
+| 治疗 | 投射物 | 治疗魔弹 `HEAL_BULLET`（175） | 命中后直接回血。 |
+| 治疗 | 投射物 | 致命治愈 `ANTIHEAL`（567） | 先伤害，再持续回血。合成价应体现延迟和风险。 |
+| 治疗 | 静态 | 活力之环 `REGENERATION_FIELD`（175） | 在范围内赋予再生，适合较高档的治疗配方。 |
+| 酸液 | 投射物 | 酸液球 `ACIDSHOT`（403） | 发射酸蚀球并生成酸液。 |
+| 酸液 | 静态 | 酸云 `CLOUD_ACID`（448） | 持续降下酸液。 |
+| 高能 | 投射物 | 炸弹 `BOMB`（375）、炸药 `DYNAMITE`（453） | 常规爆炸物。炸弹适合作为基础来源。 |
+| 高能 | 投射物 | 魔法飞弹 `ROCKET`（553）、大型魔法飞弹 `ROCKET_TIER_2`（546）、巨型魔法飞弹 `ROCKET_TIER_3`（519）、召唤飞弹 `MISSILE`（516） | 飞行后爆炸。尺寸改变威力。 |
+| 高能 | 投射物 | 火焰弹 `GRENADE`（578）、带有触发的火焰弹 `GRENADE_TRIGGER`（581）、大型火焰弹 `GRENADE_TIER_2`（578）、巨型火焰弹 `GRENADE_TIER_3`（634）、怪异火焰弹 `GRENADE_ANTI`（555）、坠落弹 `GRENADE_LARGE`（973） | 爆炸弹体。触发型另携带后续法术。 |
+| 高能 | 投射物 | 不稳晶体 `MINE`（516）、带有触发的不稳晶体 `MINE_DEATH_TRIGGER`（518）、休眠晶体 `PIPE_BOMB`（672）、带有触发的休眠晶体 `PIPE_BOMB_DEATH_TRIGGER`（674） | 两类晶体的引爆条件不同，分别学会和制作。 |
+| 高能 | 投射物 | 召唤鹿诱饵 `EXPLODING_DEER`（453）、鸭群 `EXPLODING_DUCKS`（1078） | 鹿诱饵或鸭群的标志性结果是爆炸。召唤作为合成副条件。 |
+| 高能 | 投射物 | 闪烁炸弹 `GLITTER_BOMB`（418）、烟火！ `FIREWORK`（500） | 投掷后爆裂、迸出碎片或烟火。不同烟火颜色共用同一回收结果。 |
+| 高能 | 投射物 | 丙烷罐 `PROPANE_TANK`（734）、炸弹矿车 `BOMB_CART`（403）、召唤炸药箱 `TNTBOX`（563）、召唤大号炸药箱 `TNTBOX_BIG`（703） | 罐、矿车和箱子携带爆炸物。 |
+| 高能 | 投射物 | 汇聚之光 `GLOWING_BOLT`（300）、死亡十字 `DEATH_CROSS`（516）、巨大死亡十字 `DEATH_CROSS_BIG`（428） | 汇聚后爆炸或延迟爆炸。用 ID 区分同名的汇聚之光。 |
+| 高能 | 投射物 | 神圣炸弹 `BOMB_HOLY`（423）、巨型神圣炸弹 `BOMB_HOLY_GIGA`（533）、核弹 `NUKE`（431）、巨型核弹 `NUKE_GIGA`（522） | 高破坏力和大范围附效，回造列为后期独立配方。 |
+| 高能 | 静态 | 爆炸 `EXPLOSION`（500）、魔法爆炸 `EXPLOSION_LIGHT`（563）、盛大场面 `PURPLE_EXPLOSION_FIELD`（553） | 原地爆炸、保留地形的爆炸、区域内连续爆炸。 |
+| 高能 | 静态 | 陨石雨（Meteorisade） `METEOR_RAIN`（508） | 大量陨石造成连续爆炸。火焰是合成副属性。 |
+| 火焰 | 投射物 | 火焰喷射器 `FLAMETHROWER`（506）、火焰炸弹 `FIREBOMB`（200）、黑焰之道 `DARKFLAME`（628） | 喷火、播撒火焰或留下黑焰。 |
+| 火焰 | 投射物 | 火球 `FIREBALL`（434）、陨石 `METEOR`（478） | 燃烧兼爆炸。合成可另收高能精华。 |
+| 火焰 | 静态 | 火焰爆炸 `FIRE_BLAST`（378） | 原地爆发火焰。 |
+| 雷电 | 投射物 | 闪电弹 `LIGHTNING`（641）、球状闪电 `BALL_LIGHTNING`（469）、雷霆放射 `THUNDERBALL`（396） | 发射闪电、球状闪电或反复放电的投射物。 |
+| 雷电 | 静态 | 雷霆爆炸 `THUNDER_BLAST`（516）、雷霆之环 `ELECTROCUTION_FIELD`（413）、投射物雷电领域 `PROJECTILE_THUNDER_FIELD`（418） | 雷爆、电击区域、令进入领域的投射物产生雷爆。 |
+| 雷电 | 静态 | 雷云 `CLOUD_THUNDER`（422） | 雷云兼有降雨，以放电为主，回造可另收水。 |
+| 冰冻 | 投射物 | 冰球 `ICEBALL`（434）、冰冷凝视 `FREEZING_GAZE`（628） | 投射后使目标冻结。 |
+| 冰冻 | 静态 | 静止之环 `FREEZE_FIELD`（403） | 使区域内目标冻结。 |
+| 毒素 | 投射物 | 粘液球 `SLIMEBALL`（360）、毒雾 `MIST_RADIOACTIVE`（388） | 产生易消散的毒性淤泥或毒性淤泥雾。 |
+| 毒素 | 静态 | 毒素爆炸 `POISON_BLAST`（418） | 产生毒液。与上一行共享精华，回造可按毒液和淤泥分别收料。 |
 
 ### 弹体、空间、造物和状态（99 张）
 
 | 建议归属 | 原版类型 | 游戏内名称与 action ID | 主要效果与回造取舍 |
 | --- | --- | --- | --- |
-| 魔弹 | 投射物 | 火花弹 `LIGHT_BULLET`、带有触发的火花弹 `LIGHT_BULLET_TRIGGER`、带有双重触发的火花弹 `LIGHT_BULLET_TRIGGER_2`、带有定时的火花弹 `LIGHT_BULLET_TIMER` | 直射、碰撞触发、双触发或定时载荷。共用精华，各自回造。 |
-| 魔弹 | 投射物 | 魔法箭 `BULLET`、带有触发的魔法箭 `BULLET_TRIGGER`、带有定时的魔法箭 `BULLET_TIMER` | 魔法箭本体及其载荷变体。 |
-| 魔弹 | 投射物 | 魔法弹 `HEAVY_BULLET`、带有触发的魔法弹 `HEAVY_BULLET_TRIGGER`、带有定时的魔法弹 `HEAVY_BULLET_TIMER` | 魔法弹本体及其载荷变体。 |
-| 魔弹 | 投射物 | 能量球 `SLOW_BULLET`、带有触发的能量球 `SLOW_BULLET_TRIGGER`、带有定时的能量球 `SLOW_BULLET_TIMER` | 飞行较慢的能量球系列。 |
-| 魔弹 | 投射物 | 分裂弹 `SPITTER`、带有定时的分裂弹 `SPITTER_TIMER`、大型分裂弹 `SPITTER_TIER_2`、带有定时的大型分裂弹 `SPITTER_TIER_2_TIMER`、巨型分裂弹 `SPITTER_TIER_3`、带有定时的巨型分裂弹 `SPITTER_TIER_3_TIMER` | 短射程分裂弹，按大小、定时分别回造。 |
-| 魔弹 | 投射物 | 泡泡火花 `BUBBLESHOT`、带有触发的泡泡火花 `BUBBLESHOT_TRIGGER`、能量球体 `BOUNCY_ORB`、带有定时的能量球体 `BOUNCY_ORB_TIMER`、弹跳爆发 `RUBBER_BALL` | 弹跳类投射物。泡泡火花不会提供水属性。 |
-| 魔弹 | 投射物 | 花粉 `POLLEN`、螺旋魔弹 `SPIRAL_SHOT`、连环魔弹 `CHAIN_BOLT` | 追踪花粉、螺旋弹或在目标间跳跃的连环弹。 |
-| 魔弹 | 投射物 | 三联魔弹 `BUCKSHOT`、扩张之球 `EXPANDING_ORB`、侵扰 `INFESTATION` | 散射、成长或成群的魔法投射物。 |
-| 切削 | 投射物 | 碟状投射物 `DISC_BULLET`、巨型碟状投射物 `DISC_BULLET_BIG`、召唤终结锯刃 `DISC_BULLET_BIGGER`、箭矢 `ARROW`、闪耀之枪 `LANCE`、链锯 `CHAINSAW` | 切割、穿刺或近距锯切。 |
-| 切削 | 投射物 | 挖掘魔弹 `DIGGER`、挖掘爆破 `POWERDIGGER`、光明穿凿 `LUMINOUS_DRILL`、带有定时的光明穿凿 `LASER_LUMINOUS_DRILL` | 以开掘、穿凿地形为主要用途，光明穿凿可另收光束精华。 |
-| 切削 | 投射物 | 电浆切割器 `LASER_EMITTER_CUTTER` | 用电浆切割地形，回造可另收光束精华。 |
-| 切削 | 投射物 | 地震 `CRUMBLING_EARTH` | 地震引发地形坍塌，列高阶地形配方。 |
-| 光束 | 投射物 | 汇聚之光 `LASER`、强烈汇聚之光 `MEGALASER`、电浆束 `LASER_EMITTER`、电浆束十字 `LASER_EMITTER_FOUR` | 定向汇聚光束、电浆束和十字电浆束。 |
-| 力场 | 投射物 | 强气流 `AIR_BULLET`、飞钩 `HOOK` | 气流推动物体、飞钩牵引施法者，均按施力归类。 |
-| 力场 | 投射物 | 魔法护卫 `MAGIC_SHIELD`、大型魔法护卫 `BIG_MAGIC_SHIELD` | 分别发出四枚、八枚绕身攻击的护卫投射物。 |
-| 力场 | 静态 | 水平屏障 `WALL_HORIZONTAL`、垂直屏障 `WALL_VERTICAL`、方形屏障 `WALL_SQUARE` | 布下伤害穿越者的水平、垂直或方形屏障。 |
-| 力场 | 静态 | 遮蔽之环 `SHIELD_FIELD` | 能量盾可阻挡投射物。 |
-| 位移 | 投射物 | 传送魔弹 `TELEPORT_PROJECTILE`、小传送魔弹 `TELEPORT_PROJECTILE_SHORT`、返回 `TELEPORT_PROJECTILE_STATIC` | 传送自己、短程传送、延时返回原位。 |
-| 位移 | 投射物 | 交换者 `SWAPPER_PROJECTILE`、“归家”传送魔弹 `TELEPORT_PROJECTILE_CLOSER` | 与目标换位或将其拉近。 |
-| 位移 | 静态 | 位移之环 `TELEPORTATION_FIELD` | 令区域内目标传送。 |
-| 引力 | 投射物 | 黑洞 `BLACK_HOLE`、带有死亡触发的黑洞 `BLACK_HOLE_DEATH_TRIGGER`、白洞 `WHITE_HOLE` | 运动中的黑白洞消除地形，兼具吸引或排斥。 |
-| 引力 | 静态 | 巨大黑洞 `BLACK_HOLE_BIG`、巨大白洞 `WHITE_HOLE_BIG`、终结黑洞 `BLACK_HOLE_GIGA`、终结白洞 `WHITE_HOLE_GIGA` | 巨型与终结黑白洞具备大范围地形效果，回造单独解锁。 |
-| 引力 | 静态 | 投射物重力领域 `PROJECTILE_GRAVITY_FIELD`、真空场 `VACUUM_ENTITIES` | 聚拢投射物或其他实体，按控制目标分别回造。 |
-| 引力 | 静态 | 粉末真空场 `VACUUM_POWDER`、液体真空场 `VACUUM_LIQUID` | 吸入并再释放已有粉末或液体，库存按引力结算。 |
-| 召唤 | 投射物 | 召唤鱼类 `FISH`、蠕虫发射器 `WORM_SHOT`、召唤岩石精灵 `PEBBLE` | 召鱼、发射蠕虫或召出能自主行动的岩石精灵。 |
-| 召唤 | 投射物 | 召唤触手 `TENTACLE`、带有定时的触手 `TENTACLE_TIMER`、怪异传送门 `TENTACLE_PORTAL` | 伸出近战触手或生成持续发射触手的传送门。 |
-| 召唤 | 投射物 | 召唤蛋 `SUMMON_EGG` | 孵化友好生物。无论孵出什么，回收种类固定。 |
-| 召唤 | 投射物 | 多刺孢子荚 `SPORE_POD` | 孢子荚附着后生长并放出尖刺。 |
-| 召唤 | 静态 | 召唤苍蝇群 `SWARM_FLY`、召唤萤火虫群 `SWARM_FIREBUG`、召唤黄蜂群 `SWARM_WASP`、召唤友好苍蝇 `FRIEND_FLY`、蠕虫雨（Matosade） `WORM_RAIN` | 召出相应的生物或虫群。 |
-| 造物 | 投射物 | 岩石 `SUMMON_ROCK`、胶球 `GLUE_SHOT` | 生成岩块，或发射会铺开胶水的投射物。 |
-| 造物 | 投射物 | 烈酒云雾 `MIST_ALCOHOL`、粘液雾 `MIST_SLIME`、血雾 `MIST_BLOOD` | 释放酒气、黏液雾或血雾。具体介质用于回造定型。 |
-| 造物 | 静态 | 烈酒爆炸 `ALCOHOL_BLAST`、雨云 `CLOUD_WATER`、油脂之云 `CLOUD_OIL`、血云 `CLOUD_BLOOD` | 爆发酒精，或降下水、油、血。回造按实际物料收费。 |
-| 变形 | 静态 | 变形之环 `POLYMORPH_FIELD`、不稳变形之环 `CHAOS_POLYMORPH_FIELD`、墨东姆托 `MASS_POLYMORPH` | 使生物变羊或发生不稳定变形。墨东姆托属于大范围配方。 |
-| 变形 | 静态 | 投射物转化领域 `PROJECTILE_TRANSMUTATION_FIELD` | 将进入区域的投射物变为小生物。 |
-| 强化 | 静态 | 激情之环 `BERSERK_FIELD`、浮力之环 `LEVITATION_FIELD` | 分别赋予狂暴、浮力状态。可作为两类激活剂的研究方向。 |
+| 魔弹 | 投射物 | 火花弹 `LIGHT_BULLET`（60）、带有触发的火花弹 `LIGHT_BULLET_TRIGGER`（80）、带有双重触发的火花弹 `LIGHT_BULLET_TRIGGER_2`（165）、带有定时的火花弹 `LIGHT_BULLET_TIMER`（80） | 直射、碰撞触发、双触发或定时载荷。共用精华，各自回造。 |
+| 魔弹 | 投射物 | 魔法箭 `BULLET`（200）、带有触发的魔法箭 `BULLET_TRIGGER`（220）、带有定时的魔法箭 `BULLET_TIMER`（220） | 魔法箭本体及其载荷变体。 |
+| 魔弹 | 投射物 | 魔法弹 `HEAVY_BULLET`（255）、带有触发的魔法弹 `HEAVY_BULLET_TRIGGER`（275）、带有定时的魔法弹 `HEAVY_BULLET_TIMER`（275） | 魔法弹本体及其载荷变体。 |
+| 魔弹 | 投射物 | 能量球 `SLOW_BULLET`（315）、带有触发的能量球 `SLOW_BULLET_TRIGGER`（335）、带有定时的能量球 `SLOW_BULLET_TIMER`（335） | 飞行较慢的能量球系列。 |
+| 魔弹 | 投射物 | 分裂弹 `SPITTER`（150）、带有定时的分裂弹 `SPITTER_TIMER`（170）、大型分裂弹 `SPITTER_TIER_2`（250）、带有定时的大型分裂弹 `SPITTER_TIER_2_TIMER`（270）、巨型分裂弹 `SPITTER_TIER_3`（300）、带有定时的巨型分裂弹 `SPITTER_TIER_3_TIMER`（320） | 短射程分裂弹，按大小、定时分别回造。 |
+| 魔弹 | 投射物 | 泡泡火花 `BUBBLESHOT`（100）、带有触发的泡泡火花 `BUBBLESHOT_TRIGGER`（120）、能量球体 `BOUNCY_ORB`（200）、带有定时的能量球体 `BOUNCY_ORB_TIMER`（220）、弹跳爆发 `RUBBER_BALL`（60） | 弹跳类投射物。泡泡火花不会提供水属性。 |
+| 魔弹 | 投射物 | 花粉 `POLLEN`（200）、螺旋魔弹 `SPIRAL_SHOT`（300）、连环魔弹 `CHAIN_BOLT`（516） | 追踪花粉、螺旋弹或在目标间跳跃的连环弹。 |
+| 魔弹 | 投射物 | 三联魔弹 `BUCKSHOT`（278）、扩张之球 `EXPANDING_ORB`（516）、侵扰 `INFESTATION`（300） | 散射、成长或成群的魔法投射物。 |
+| 切削 | 投射物 | 碟状投射物 `DISC_BULLET`（378）、巨型碟状投射物 `DISC_BULLET_BIG`（484）、召唤终结锯刃 `DISC_BULLET_BIGGER`（516）、箭矢 `ARROW`（100）、闪耀之枪 `LANCE`（416）、链锯 `CHAINSAW`（255） | 切割、穿刺或近距锯切。 |
+| 切削 | 投射物 | 挖掘魔弹 `DIGGER`（240）、挖掘爆破 `POWERDIGGER`（388）、光明穿凿 `LUMINOUS_DRILL`（403）、带有定时的光明穿凿 `LASER_LUMINOUS_DRILL`（406） | 以开掘、穿凿地形为主要用途，光明穿凿可另收光束精华。 |
+| 切削 | 投射物 | 电浆切割器 `LASER_EMITTER_CUTTER`（478） | 用电浆切割地形，回造可另收光束精华。 |
+| 切削 | 投射物 | 地震 `CRUMBLING_EARTH`（418） | 地震引发地形坍塌，列高阶地形配方。 |
+| 光束 | 投射物 | 汇聚之光 `LASER`（305）、强烈汇聚之光 `MEGALASER`（628）、电浆束 `LASER_EMITTER`（448）、电浆束十字 `LASER_EMITTER_FOUR`（568） | 定向汇聚光束、电浆束和十字电浆束。 |
+| 力场 | 投射物 | 强气流 `AIR_BULLET`（160）、飞钩 `HOOK`（300） | 气流推动物体、飞钩牵引施法者，均按施力归类。 |
+| 力场 | 投射物 | 魔法护卫 `MAGIC_SHIELD`（408）、大型魔法护卫 `BIG_MAGIC_SHIELD`（488） | 分别发出四枚、八枚绕身攻击的护卫投射物。 |
+| 力场 | 静态 | 水平屏障 `WALL_HORIZONTAL`（408）、垂直屏障 `WALL_VERTICAL`（408）、方形屏障 `WALL_SQUARE`（488） | 布下伤害穿越者的水平、垂直或方形屏障。 |
+| 力场 | 静态 | 遮蔽之环 `SHIELD_FIELD`（416） | 能量盾可阻挡投射物。 |
+| 位移 | 投射物 | 传送魔弹 `TELEPORT_PROJECTILE`（403）、小传送魔弹 `TELEPORT_PROJECTILE_SHORT`（378）、返回 `TELEPORT_PROJECTILE_STATIC`（360） | 传送自己、短程传送、延时返回原位。 |
+| 位移 | 投射物 | 交换者 `SWAPPER_PROJECTILE`（418）、“归家”传送魔弹 `TELEPORT_PROJECTILE_CLOSER`（388） | 与目标换位或将其拉近。 |
+| 位移 | 静态 | 位移之环 `TELEPORTATION_FIELD`（429） | 令区域内目标传送。 |
+| 引力 | 投射物 | 黑洞 `BLACK_HOLE`（300）、带有死亡触发的黑洞 `BLACK_HOLE_DEATH_TRIGGER`（303）、白洞 `WHITE_HOLE`（300） | 运动中的黑白洞消除地形，兼具吸引或排斥。 |
+| 引力 | 静态 | 巨大黑洞 `BLACK_HOLE_BIG`（478）、巨大白洞 `WHITE_HOLE_BIG`（478）、终结黑洞 `BLACK_HOLE_GIGA`（703）、终结白洞 `WHITE_HOLE_GIGA`（703） | 巨型与终结黑白洞具备大范围地形效果，回造单独解锁。 |
+| 引力 | 静态 | 投射物重力领域 `PROJECTILE_GRAVITY_FIELD`（381）、真空场 `VACUUM_ENTITIES`（428） | 聚拢投射物或其他实体，按控制目标分别回造。 |
+| 引力 | 静态 | 粉末真空场 `VACUUM_POWDER`（388）、液体真空场 `VACUUM_LIQUID`（388） | 吸入并再释放已有粉末或液体，库存按引力结算。 |
+| 召唤 | 投射物 | 召唤鱼类 `FISH`（160）、蠕虫发射器 `WORM_SHOT`（391）、召唤岩石精灵 `PEBBLE`（403） | 召鱼、发射蠕虫或召出能自主行动的岩石精灵。 |
+| 召唤 | 投射物 | 召唤触手 `TENTACLE`（378）、带有定时的触手 `TENTACLE_TIMER`（381）、怪异传送门 `TENTACLE_PORTAL`（403） | 伸出近战触手或生成持续发射触手的传送门。 |
+| 召唤 | 投射物 | 召唤蛋 `SUMMON_EGG`（130） | 孵化友好生物。无论孵出什么，回收种类固定。 |
+| 召唤 | 投射物 | 多刺孢子荚 `SPORE_POD`（403） | 孢子荚附着后生长并放出尖刺。 |
+| 召唤 | 静态 | 召唤苍蝇群 `SWARM_FLY`（280）、召唤萤火虫群 `SWARM_FIREBUG`（384）、召唤黄蜂群 `SWARM_WASP`（416）、召唤友好苍蝇 `FRIEND_FLY`（428）、蠕虫雨（Matosade） `WORM_RAIN`（418） | 召出相应的生物或虫群。 |
+| 造物 | 投射物 | 岩石 `SUMMON_ROCK`（180）、胶球 `GLUE_SHOT`（280） | 生成岩块，或发射会铺开胶水的投射物。 |
+| 造物 | 投射物 | 烈酒云雾 `MIST_ALCOHOL`（300）、粘液雾 `MIST_SLIME`（300）、血雾 `MIST_BLOOD`（220） | 释放酒气、黏液雾或血雾。具体介质用于回造定型。 |
+| 造物 | 静态 | 烈酒爆炸 `ALCOHOL_BLAST`（391）、雨云 `CLOUD_WATER`（391）、油脂之云 `CLOUD_OIL`（422）、血云 `CLOUD_BLOOD`（270） | 爆发酒精，或降下水、油、血。回造按实际物料收费。 |
+| 变形 | 静态 | 变形之环 `POLYMORPH_FIELD`（350）、不稳变形之环 `CHAOS_POLYMORPH_FIELD`（422）、墨东姆托 `MASS_POLYMORPH`（448） | 使生物变羊或发生不稳定变形。墨东姆托属于大范围配方。 |
+| 变形 | 静态 | 投射物转化领域 `PROJECTILE_TRANSMUTATION_FIELD`（396） | 将进入区域的投射物变为小生物。 |
+| 强化 | 静态 | 激情之环 `BERSERK_FIELD`（450）、浮力之环 `LEVITATION_FIELD`（394） | 分别赋予狂暴、浮力状态。可作为两类激活剂的研究方向。 |
 
 ### 暂留普通碎片回收（9 张）
 

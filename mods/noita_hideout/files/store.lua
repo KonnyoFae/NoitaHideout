@@ -515,6 +515,10 @@ local function catalyticBatch(id,zh,en,ingredient,catalyst,product)
         materials={[product]=250},count=250}
 end
 
+local medkit={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"}
+local fireInjector={kind="dose",remaining=3,count=1}
+local magicGrenade={kind="grenade",name="$nh_hideout_grenade",icon="mods/noita_hideout/files/items/grenade.png"}
+
 -- Inputs and the paid order are committed together. Only loose stock is spendable.
 NHStore.recipes={
     alchemyBatch("stable","稳定传送液","Teleportatium","magic_liquid_teleportation",
@@ -564,12 +568,21 @@ NHStore.recipes={
         inputs={{name="radioactive_liquid",amount=250},{name="blood_worm",amount=250},{name="fungi",amount=250}},
         materials={void_liquid=500},count=500,
         noteZh="原版列出两份液体产物，每批回收 500。",noteEn="The vanilla reaction yields two parts of liquid. This batch recovers 500."},
-    {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",inputs={{name="water",amount=100},{name="blood",amount=50}},
-        item={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"}},
+    {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",
+        inputs={{name="water",amount=100},{name="blood",amount=50}},item=medkit},
+    {id="medkit_essence",category="medical",facility="medical",zh="医疗包（治疗精华）",en="Medkit (healing essence)",
+        inputs={},resources={essence_healing=30},item=medkit,
+        noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
     {id="injector",category="medical",facility="injector",zh="耐火激活剂",en="Fire injector",inputs={{name="water",amount=100},{name="lava",amount=25}},
-        item={kind="dose",remaining=3,count=1}},
+        item=fireInjector},
+    {id="injector_essence",category="medical",facility="injector",zh="耐火激活剂（火焰精华）",en="Fire injector (fire essence)",
+        inputs={},resources={essence_fire=180},item=fireInjector,
+        noteZh="每支可使用 3 次，每次获得 60 秒火焰免疫。",noteEn="Three injections per item. Each grants 60 seconds of fire immunity."},
     {id="grenade",category="weapons",facility="grenade",zh="魔法手雷",en="Magic grenade",inputs={{name="sand",amount=100},{name="slime",amount=50}},
-        item={kind="grenade",name="$nh_hideout_grenade",icon="mods/noita_hideout/files/items/grenade.png"}},
+        item=magicGrenade},
+    {id="grenade_essence",category="weapons",facility="grenade",zh="魔法手雷（高能精华）",en="Magic grenade (high-energy essence)",
+        inputs={},resources={essence_high_energy=30},item=magicGrenade,
+        noteZh="单次投掷，基础直击伤害 17.5，爆炸伤害 12.5。",noteEn="Single use. Base damage is 17.5 on impact and 12.5 from the explosion."},
     {id="pouch",category="equipment",facility="injector",zh="空针剂包",en="Empty injector pouch",
         inputs={{name="slime",amount=50}},emptyContainers=1,item={kind="pouch"}},
 }
@@ -736,6 +749,9 @@ function NHStore.canStartBatch(state,recipe)
     recipe=recipe or NHStore.recipe
     if recipe.facility and NHStore.level(state,recipe.facility)==0 then return false,"Facility is locked." end
     if state.order then return false,"Another order is active." end
+    for key,amount in pairs(recipe.resources or {}) do
+        if (state.resources[key] or 0)<amount then return false,"Not enough workshop resources." end
+    end
     local delivery=recipe.materials
     local held
     if recipe.catalysts then
@@ -766,6 +782,13 @@ function NHStore.canStartBatch(state,recipe)
     return false,"Material storage is full."
 end
 
+local function deductStock(stock,costs)
+    for key,amount in pairs(costs) do
+        local remaining=stock[key]-amount
+        stock[key]=remaining>0 and remaining or nil
+    end
+end
+
 function NHStore.startOrder(state,id)
     local recipe=findRecipe(id or "stable")
     if not recipe then return false,"Unknown recipe." end
@@ -776,10 +799,8 @@ function NHStore.startOrder(state,id)
         if not ok then return false,reason end
     end
     local output={item=recipe.item,slot=slot,materials=delivery}
-    for name,amount in pairs(payment) do
-        local left=state.materials[name]-amount
-        state.materials[name]=left>0 and left or nil
-    end
+    deductStock(state.materials,payment)
+    if recipe.resources then deductStock(state.resources,recipe.resources) end
     state.order={id=state.finished+1,recipe=recipe.id,progress=0,required=NHStore.productionFrames(recipe),output=output,catalysts=held}
     return true
 end
@@ -793,8 +814,9 @@ function NHStore.salvageYield(item,mode)
         if not whole(amount) or amount<1 then return end
         if mode=="essence" then
             local resource=NHEssences.byAction[card.id]
-            if resource then return amount,resource end
-            return
+            if not resource then return end
+            local perCard=NHEssences.values[card.id]
+            return amount*perCard,resource
         end
         return amount,"arcane_scrap"
     end

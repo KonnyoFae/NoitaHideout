@@ -55,6 +55,7 @@ local error_translations = {
     ["Could not create packed perk."] = "未能生成特质物品。",
     ["Another order is active."] = "工坊已有一张在制订单。",
     ["Not enough bulk ingredients."] = "物料库存中的原料不足。",
+    ["Not enough workshop resources."] = "仓库中的制造资源不足。",
     ["Missing catalyst."] = "物料库中缺少所需的催化样品。",
     ["Invalid gold transfer."] = "无法识别这笔存取操作。",
     ["Invalid gold amount."] = "请输入有效的金币数额。",
@@ -370,7 +371,9 @@ local function inventory_view()
             local count,key=NHStore.salvageYield(entry.item,"essence")
             if count then
                 local kind=NHEssences.types[key]
-                view.essence={key=key,name=tr(kind.zh,kind.en),amount=count,stock=state.resources[key] or 0}
+                local profile=NHEssences.healingProfiles[card.id]
+                view.essence={key=key,name=tr(kind.zh,kind.en),amount=count,stock=state.resources[key] or 0,
+                    per_card=NHEssences.values[card.id],basis=profile and tr(profile.zh,profile.en)}
             end
         end
         warehouse_slot(entry.item.kind,entry.slot or i,view)
@@ -435,6 +438,11 @@ local function inventory_view()
             end
             table.insert(view.inputs,{name=name,amount=input.amount,detail=detail,available=NHStore.ingredientStock(state,input)})
         end
+        for key,amount in pairs(recipe.resources or {}) do
+            local kind=NHEssences.types[key]
+            table.insert(view.inputs,{name=tr(kind.zh,kind.en),amount=amount,available=state.resources[key] or 0})
+        end
+        if recipe.id=="medkit_essence" then model.essence_medkit_cost=recipe.resources.essence_healing end
         local held=state.order and state.order.recipe==recipe.id and state.order.catalysts
         for _,sample in ipairs(recipe.catalysts or {}) do
             table.insert(view.catalysts,{name=NHPotion.materialName(sample.name,lang),amount=sample.amount,
