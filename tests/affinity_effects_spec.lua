@@ -108,16 +108,20 @@ do
 end
 for tier,threshold in ipairs({0,10,40,100}) do
     points=threshold
-    local pet,clock=companion("minotaur")
-    NHCompanions.update(pet)
-    local shield=EntityGetAllChildren(player,"nh_companion_shield")[1]
-    if tier==1 then assert(not shield)
-    else
-        assert(shield and entities[shield].parts.EnergyShieldComponent.recharge_speed==({0,0.08,0.15,0.22})[tier])
-        assert(entities[shield].parts.GameEffectComponent.frames==70)
+    local pet,clock
+    for _,id in ipairs({"minotaur","dragon"}) do
+        pet,clock=companion(id)
+        NHCompanions.update(pet)
+        local shield=EntityGetAllChildren(player,"nh_companion_shield")[1]
+        if tier==1 then assert(not shield)
+        else
+            assert(shield and entities[shield].parts.EnergyShieldComponent.recharge_speed==({0,0.08,0.15,0.22})[tier])
+            assert(entities[shield].parts.GameEffectComponent.frames==70)
+        end
+        local effect=id=="dragon" and "effect_protection_fire" or "effect_protection_melee"
+        assert(#EntityGetAllChildren(player,"nh_companion_"..effect)==1)
+        expire(pet,clock)
     end
-    assert(#EntityGetAllChildren(player,"nh_companion_effect_protection_melee")==1)
-    expire(pet,clock)
 
     for _,id in ipairs({"dryad","flower_fairy"}) do
         pet,clock=companion(id)
@@ -130,15 +134,18 @@ for tier,threshold in ipairs({0,10,40,100}) do
         if id=="dryad" then assert(#EntityGetAllChildren(player,"nh_companion_effect_protection_radioactivity")==1) end
         expire(pet,clock)
     end
-    pet,clock=companion("griffin")
-    flight.mFlyingTimeLeft=0
-    for _=1,10 do NHCompanions.update(pet) end
-    assert(math.abs(flight.mFlyingTimeLeft-4*({0,0.05,0.10,0.15})[tier])<0.00001)
-    assert(#EntityGetAllChildren(player,"nh_companion_effect_faster_levitation")==1)
-    flight.mFlyingTimeLeft=3.99
-    for _=1,10 do NHCompanions.update(pet) end
-    assert(flight.mFlyingTimeLeft==(tier==1 and 3.99 or 4))
-    expire(pet,clock)
+    for _,id in ipairs({"griffin","bee"}) do
+        pet,clock=companion(id)
+        flight.mFlyingTimeLeft=0
+        for _=1,10 do NHCompanions.update(pet) end
+        assert(math.abs(flight.mFlyingTimeLeft-4*({0,0.05,0.10,0.15})[tier])<0.00001)
+        local effect=id=="bee" and "effect_movement_faster" or "effect_faster_levitation"
+        assert(#EntityGetAllChildren(player,"nh_companion_"..effect)==1)
+        flight.mFlyingTimeLeft=3.99
+        for _=1,10 do NHCompanions.update(pet) end
+        assert(flight.mFlyingTimeLeft==(tier==1 and 3.99 or 4))
+        expire(pet,clock)
+    end
 
     local rewards
     pet,clock,rewards=companion("flower_fairy")

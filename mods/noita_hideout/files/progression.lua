@@ -34,6 +34,10 @@ define("farmland","expansion","田地","Farmland",4,{{"farm_soil",150},{"water",
 define("agri_equipment","expansion","农业设备","Farm equipment",1,{{"farm_sand",300},{"water",200}},
     {effect={"种植香料与激活草药","Grow spices and stimulating herbs"}})
 define("livestock","expansion","畜牧设备","Livestock pens",3,{{"farm_sand",200},{"water",150}})
+define("beehive","expansion","蜂箱","Beehive",1,{{"fiber",12},{"slime",75},{"sugar",8}},
+    {effect={"可购入女王蜂，定期采集糖分与香料","House a queen bee to produce sugar and spices"}})
+define("dragon_nest","expansion","龙巢","Dragon nest",1,{{"farm_sand",400},{"gunpowder",100},{"oil",150}},
+    {effect={"可购入龙蛋，孵化后定期带回金币与物品","Hatch a dragon to bring back gold and items"}})
 
 local material_groups={
     farm_sand={alternatives={"sand","sandstone","sandstone_surface"}},
@@ -43,12 +47,13 @@ local material_groups={
 local material_names={
     water={"水","Water"},sand={"沙","Sand"},slime={"黏液","Slime"},oil={"油","Oil"},
     gunpowder={"火药","Gunpowder"},arcane_scrap={"奥术碎片","Arcane scrap"},
+    fiber={"纤维","Fiber"},sugar={"糖分","Sugar"},
     empty_container={"仓库空容器","Empty containers in storage"},container_scrap={"容器碎片","Container scrap"},
     farm_sand={"沙与砂岩（合计）","Sand and sandstone (total)"},
     farm_soil={"泥土","Soil"},
 }
 local function inventory(s,key)
-    if key=="arcane_scrap" or key=="container_scrap" then return s.resources end
+    if key=="arcane_scrap" or key=="container_scrap" or NHFarm.crops[key] then return s.resources end
     return s.materials
 end
 

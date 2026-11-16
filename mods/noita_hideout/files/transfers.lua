@@ -30,7 +30,7 @@ local function commit(s, changed)
     if not ok then return nil, err end
     s.revision, s.nextItemId = changed.revision, changed.nextItemId
     s.docks = changed.docks
-    s.summons = changed.summons
+    s.summons, s.dragonLoot = changed.summons, changed.dragonLoot
     s.warehouse, s.safe, s.transit = changed.warehouse, changed.safe, changed.transit
     return true
 end

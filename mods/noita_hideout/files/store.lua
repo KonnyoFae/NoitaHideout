@@ -8,6 +8,7 @@ NHInjectors=dofile("mods/noita_hideout/files/injectors.lua")
 NHMedkits=dofile("mods/noita_hideout/files/medkits.lua")
 NHSurgeryKits=dofile("mods/noita_hideout/files/surgery_kits.lua")
 NHThrowables=dofile("mods/noita_hideout/files/throwables.lua")
+NHDragonLoot=dofile("mods/noita_hideout/files/dragon_loot.lua")
 dofile("mods/noita_hideout/files/farming.lua")
 dofile("mods/noita_hideout/files/essences.lua")
 dofile("mods/noita_hideout/files/pouches.lua")
@@ -184,6 +185,7 @@ local function validate(s)
     assert(type(s.bankWalletNet)=="number" and whole(math.abs(s.bankWalletNet)),"Invalid wallet transfer total")
     assert(type(s.checkpoints)=="table","Invalid Holy Mountain checkpoints")
     NHCompanions.validate(s,whole)
+    NHDragonLoot.validate(s,whole)
     NHAffinity.validate(s,whole)
     for key,visited in pairs(s.checkpoints) do
         assert(type(key)=="string" and key~="" and visited==true,"Invalid Holy Mountain checkpoint")
@@ -488,6 +490,7 @@ function NHStore.commit(state)
         for k, v in pairs(state) do next_state[k] = v end
         next_state.revision = saved.revision + 1
         NHCompanions.stageDelivery(next_state)
+        NHDragonLoot.stageDelivery(next_state)
         validate(next_state)
         local payload = encode(next_state)
         local raw = "NH1:" .. checksum(payload) .. ":" .. payload
@@ -502,7 +505,7 @@ function NHStore.commit(state)
     end)
     if not ok then return nil, tostring(result) end
     state.revision,state.nextItemId=result.revision,result.nextItemId
-    state.warehouse,state.summons=result.warehouse,result.summons
+    state.warehouse,state.summons,state.dragonLoot=result.warehouse,result.summons,result.dragonLoot
     return true
 end
 
@@ -734,6 +737,8 @@ NHStore.shopGoods={
     supplyGood("injector","injector",160),
     {id="chick",animal="chick",zh="小鸡",en="Chick",category="livestock",price=120,quantity=1},
     {id="calf",animal="calf",zh="牛犊",en="Calf",category="livestock",price=240,quantity=1},
+    {id="queen_bee",animal="queen_bee",zh="女王蜂",en="Queen bee",category="livestock",price=480,quantity=1},
+    {id="dragon_egg",animal="dragon_egg",zh="龙蛋",en="Dragon egg",category="livestock",price=3000,quantity=1},
 }
 
 function NHStore.canBuyGood(state,good)

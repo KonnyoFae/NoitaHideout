@@ -1056,7 +1056,7 @@ local function testShop()
     assert(wallet.money==400 and not state().materials.water)
     tick(nil,"bank_transfer",{direction="deposit",amount=320})
     local view=tick()
-    assert(view.bankGold==320 and view.walletGold==80 and #view.shopGoods==8)
+    assert(view.bankGold==320 and view.walletGold==80 and #view.shopGoods==10)
     assert(has_project(view.shopGoods,"medkit").category=="supplies")
     entities[player].x=900
     buy("water")
@@ -1405,6 +1405,41 @@ end
 testLivestockController()
 print("Controller: pens, staggered maturity, passive produce and card deposits, long trips and reload passed.")
 
+local function testSpecialLivestock()
+    settings,flags={},{}
+    new_world()
+    local s=state()
+    s.resources={fiber=12,sugar=8}
+    s.materials={slime=75,sandstone=400,gunpowder=100,oil=150}
+    assert(NHStore.creditGold(s,3480) and NHStore.commit(s))
+    boot()
+    inventory_open=true
+    local view=tick()
+    assert(not has_project(view.shopGoods,"queen_bee").ready and not has_project(view.shopGoods,"dragon_egg").ready)
+    tick(nil,"buy_upgrade",{id="beehive",level=0})
+    tick(nil,"buy_upgrade",{id="dragon_nest",level=0})
+    local bee=assert(has_project(tick().shopGoods,"queen_bee"))
+    local egg=assert(has_project(tick().shopGoods,"dragon_egg"))
+    assert(bee.ready and egg.ready and bee.price==480 and egg.price==3000)
+    tick(nil,"shop_buy",{id=bee.id,pen=bee.pen})
+    tick(nil,"shop_buy",{id=egg.id,pen=egg.pen})
+    assert(state().bankGold==0 and #tick().farm.pens==2)
+    local firstTreasure=state().farm.pens[egg.pen].nextAt
+    inventory_open=false
+    entities[player].x=400
+    advance(firstTreasure-1-NHFarm.observe(state(),frame))
+    assert(state().bankGold==0 and state().resources.sugar==20 and state().resources.spice==8)
+    tick()
+    s=state()
+    assert(s.bankGold==150 and #s.warehouse+NHDragonLoot.pendingCount(s)>=1)
+    assert(s.farm.pens[egg.pen].nextAt==firstTreasure+NHLivestock.species.dragon_egg.period)
+    local treasureSeed=s.dragonLoot.seed
+    boot()
+    tick()
+    assert(state().bankGold==150 and state().dragonLoot.seed==treasureSeed)
+end
+testSpecialLivestock()
+
 local function testCardSupplies()
     settings,flags={},{}
     new_world()
@@ -1437,12 +1472,35 @@ local function testCardSupplies()
     end
     for _,species in ipairs(NHCompanions.order) do assert(seen[species]) end
     assert(view.warehouse.equipment[1].kind=="card_wallet")
-    assert(#state().warehouse==5 and view.warehouse_capacity.collection==48)
+    assert(seen.bee and seen.dragon and #state().warehouse==#NHCompanions.order+1 and view.warehouse_capacity.collection==48)
     boot()
-    assert(#state().warehouse==5)
+    assert(#state().warehouse==#NHCompanions.order+1)
+    tick()
+    local lastPet
+    for _,species in ipairs({"bee","dragon"}) do
+        local row
+        for _,item in ipairs(state().warehouse) do
+            if item.item.species==species then row=item; break end
+        end
+        tick(nil,"use_inventory",{container="warehouse",kind="summon_card",species=species,storedId=row.id,
+            slot=row.slot,count=2,remaining=80})
+        local pets=EntityGetAllChildren(player,"noita_hideout_companion")
+        assert(#pets==1 and (not lastPet or not EntityGetIsAlive(lastPet)))
+        local clock=EntityGetFirstComponentIncludingDisabled(pets[1],"VariableStorageComponent","nh_companion_clock")
+        assert(ComponentGetValue2(clock,"value_string")==species)
+        local full,worn=0,0
+        for _,entry in ipairs(state().warehouse) do
+            if entry.item.species==species then
+                if entry.item.remaining==79 then worn=worn+1 end
+                if entry.item.remaining==80 then full=full+1 end
+            end
+        end
+        assert(full==1 and worn==1)
+        lastPet=pets[1]
+    end
 end
 testCardSupplies()
-print("Controller: test-only supplies, failed delivery, four independent card stacks and card wallet passed.")
+print("Controller: test-only supplies, failed delivery, all six independent card stacks and card wallet passed.")
 
 local function testCompanionSwitch()
     settings,flags={},{}

@@ -1129,6 +1129,44 @@ testLivestockPanel("en")
 testLivestockPanel("zh")
 print("UI: youngstock shop, pen timers and passive produce deposits in both languages passed.")
 
+local function testSpecialPens(lang)
+    model.lang,width,height=lang,320,180
+    local stock={profile=1,levels={beehive=1,dragon_nest=1},resources={},bankGold=3480,
+        farm={time=0,plots={}},warehouse={},pouches={},nextItemId=1}
+    model.shopGoods={}
+    for _,id in ipairs({"queen_bee","dragon_egg"}) do
+        local animal=NHLivestock.species[id]
+        model.shopGoods[#model.shopGoods+1]={id=id,category="livestock",name=animal.young[lang=="zh" and 1 or 2],
+            price=id=="queen_bee" and 480 or 3000,quantity=1,ready=true,pen=animal.offset}
+    end
+    model.farm=NHFarm.view(stock,lang,0)
+    for i,good in ipairs(model.shopGoods) do
+        render(model,223)
+        render(model,440)
+        render(model,450+i)
+        render(model)
+        assert(drawn["3%"] and (i==1 or drawn["5%"] and drawn["92%"]))
+        assert(drawn[i==1 and "5 / 2" or "150 / 1"])
+        reveal(model,444)
+        render(model,444)
+        render(model)
+        assert(drawn[tostring(good.price)] and drawn["3%"])
+        reveal(model,258)
+        local action,arg=render(model,258)
+        assert(action=="shop_buy" and arg.id==good.id and arg.pen==good.pen)
+    end
+    NHLivestock.deliver(stock,"dragon_egg",8,0)
+    stock.dragonLoot={seed=1,pending={spell_BOMB=3}}
+    model.farm=NHFarm.view(stock,lang,0)
+    render(model,223)
+    render(model,452)
+    render(model)
+    local pending=lang=="zh" and "已找到，待入库" or "Found, awaiting space"
+    assert((drawn[pending] or tips[pending]) and drawn["3"] and drawn["8:00"] and drawn["13:00"])
+end
+testSpecialPens("zh")
+testSpecialPens("en")
+
 local function testCardWalletPanel()
     width,height,model.lang,model.debug=640,360,"en",true
     model.perkCapacity,model.packablePerk=0,nil
@@ -1164,6 +1202,12 @@ local function testCardWalletPanel()
     assert(tiles[1007].x-tiles[1004].x==60)
     point(tiles[1006].x+1,tiles[1006].y+1)
     assert(drawn["Affinity 100/100"] and drawn["Restores 15% flight fuel per second"])
+    model.cells[3],affinity.bee=card(nil,"bee",80),100
+    point(tiles[1006].x+1,tiles[1006].y+1)
+    assert(drawn[NHCompanions.cardIcon("bee")] and drawn["Faster movement"] and drawn["Restores 15% flight fuel per second"])
+    model.cells[3],affinity.dragon=card(nil,"dragon",80),100
+    point(tiles[1006].x+1,tiles[1006].y+1)
+    assert(drawn[NHCompanions.cardIcon("dragon")] and drawn["Fire immunity"] and drawn["Projectile shield at 100% of normal recharge"])
     model.lang="zh"
     render(model)
     point(tiles[1009].x+1,tiles[1009].y+1)

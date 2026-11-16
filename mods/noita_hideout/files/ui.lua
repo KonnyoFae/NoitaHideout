@@ -230,14 +230,14 @@ local function item_details(slot,model,tr)
         lines[#lines+1]=nextTier and (affinity..tr("   下一阶段 ","   Next at ")..nextTier) or affinity
         if slot.species=="dryad" then
             lines[#lines+1]=tr("毒泥免疫","Toxic sludge immunity")
-        elseif slot.species=="minotaur" then
-            lines[#lines+1]=tr("近战免疫","Melee immunity")
+        elseif slot.species=="minotaur" or slot.species=="dragon" then
+            lines[#lines+1]=slot.species=="dragon" and tr("火焰免疫","Fire immunity") or tr("近战免疫","Melee immunity")
             if bonus.shieldRecharge>0 then
                 local rate=math.floor(100*bonus.shieldRecharge/NHCompanions.bonuses[3].shieldRecharge+0.5)
                 lines[#lines+1]=string.format(tr("飞弹护盾 · 原版充能速度的 %d%%","Projectile shield at %d%% of normal recharge"),rate)
             end
-        elseif slot.species=="griffin" then
-            lines[#lines+1]=tr("加快飞行上升速度","Faster levitation")
+        elseif slot.species=="griffin" or slot.species=="bee" then
+            lines[#lines+1]=slot.species=="bee" and tr("提高移动速度","Faster movement") or tr("加快飞行上升速度","Faster levitation")
             if bonus.flightPercent>0 then
                 lines[#lines+1]=string.format(tr("每秒恢复 %d%% 飞行能量","Restores %d%% flight fuel per second"),bonus.flightPercent)
             end
@@ -470,37 +470,65 @@ local function draw_farm(farm,y,tr,button,label,value_row,dispatch)
     end
 end
 
+local forage_rows={
+    queen_bee={{"蜂娘卡","Bee card","3%"}},
+    dragon_egg={{"法术、容器或消耗品","Spell, flask or supply","92%"},{"其他召唤卡","Other summon card","5%"},{"龙娘卡","Dragon card","3%"}},
+}
+
+local function show_forage(species,y,tr,value_row)
+    for _,reward in ipairs(forage_rows[species] or {}) do
+        value_row(y,tr(reward[1],reward[2]),reward[3],muted)
+        y=y+13
+    end
+    return y
+end
+
+local function current_pen(farm)
+    if selected_pen then
+        for _,pen in ipairs(farm.pens) do
+            if pen.id==selected_pen then return pen end
+        end
+    end
+end
+
 local function draw_livestock(farm,y,tr,button,label,value_row)
     if #farm.pens==0 then
         if button(442,6,y,tr("去扩建畜牧设备","Build livestock pens")) then tab,selected_entry="expansion","livestock" end
         return
     end
-    local pen=selected_pen and farm.pens[selected_pen]
+    local pen=current_pen(farm)
     if not pen then
         for i,p in ipairs(farm.pens) do
             local text=p.title.."   "..(p.name or tr("空闲","Empty"))
             if p.name then text=text.."   "..(p.blocked and tr("库存已满","Storage full") or time_text(p.remaining)) end
-            if button(450+i,6,y+(i-1)*13,text) then selected_pen=i end
+            if button(450+i,6,y+(i-1)*13,text) then selected_pen=p.id end
         end
         return
     end
     if button(443,6,y,tr("< 栏舍","< Pens")) then selected_pen=nil; return end
     label(y+14,pen.title.." · "..(pen.name or tr("空闲","Empty")),white)
-    value_row(y+28,pen.product.." / "..tr("肉","Meat"),pen.amount.." / "..pen.meat,white,
-        tr("成年后每轮产量","Yield per adult cycle"))
+    value_row(y+28,pen.yieldLabel,pen.yieldValue,white,tr("每轮产出","Yield per cycle"))
     value_row(y+41,tr("产出间隔","Cycle time"),time_text(pen.period),white)
+    local next_y=show_forage(pen.species,y+56,tr,value_row)
+    if pen.species=="dragon_egg" and (farm.dragonPending or 0)>0 then
+        value_row(next_y,tr("已找到，待入库","Found, awaiting space"),compact(farm.dragonPending),gold)
+        next_y=next_y+13
+    end
     if not pen.name then
-        value_row(y+56,tr("成长时间","Growth time"),time_text(pen.growth),white)
-        if button(444,6,y+70,tr("购买","Buy ")..pen.young) then
+        if pen.growth>0 then
+            value_row(next_y,tr("成长时间","Growth time"),time_text(pen.growth),white)
+            next_y=next_y+14
+        end
+        if button(444,6,next_y,tr("购买","Buy ")..pen.young) then
             tab,shop_category,selected_entry="shop","livestock",pen.species
         end
     elseif not pen.grown then
-        value_row(y+56,tr("距离成年","Time to adulthood"),time_text(pen.remaining),white)
-        value_row(y+69,tr("首次自动入库","First deposit"),time_text(pen.remaining+pen.period),white)
+        value_row(next_y,pen.species=="dragon_egg" and tr("距离孵化","Time to hatch") or tr("距离成年","Time to adulthood"),time_text(pen.remaining),white)
+        value_row(next_y+13,tr("首次自动入库","First deposit"),time_text(pen.remaining+pen.period),white)
     elseif pen.blocked then
-        label(y+56,tr("畜产库存已满","Produce storage full"),muted)
+        label(next_y,pen.species=="dragon_egg" and tr("存钱罐已满","Bank full") or tr("畜产库存已满","Produce storage full"),muted)
     else
-        value_row(y+56,tr("下次自动入库","Next deposit"),time_text(pen.remaining),white)
+        value_row(next_y,tr("下次自动入库","Next deposit"),time_text(pen.remaining),white)
     end
 end
 
@@ -589,8 +617,11 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
     elseif salvage then
         body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)+(per_card and 13 or 0)
     elseif ranching then
+        local pen=current_pen(model.farm)
         if livestock_page=="produce" then body_height=13*(1+#model.farm.produce)+5
-        elseif selected_pen and model.farm.pens[selected_pen] then body_height=84
+        elseif pen then
+            body_height=84+13*#(forage_rows[pen.species] or {})
+            if pen.species=="dragon_egg" and (model.farm.dragonPending or 0)>0 then body_height=body_height+13 end
         else body_height=13*math.max(1,#model.farm.pens)+5 end
     elseif farming then
         local farm=model.farm
@@ -607,7 +638,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         elseif selected.note then body_height=body_height+13 end
         if model.order_active and selected.unlocked==false then body_height=body_height+13 end
     elseif shopping and selected then
-        body_height=86+(NHLivestock.species[selected.id] and 39 or 0)
+        body_height=86+(NHLivestock.species[selected.id] and 39 or 0)+13*#(forage_rows[selected.id] or {})
     elseif selected then body_height=80+12*#selected.costs
     elseif menu then
         body_height=5+13*math.max(1,math.min(#menu,entries_per_page))
@@ -912,11 +943,14 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         value_row(body+53,tr("价格","Price"),string.format("%.0f",selected.price),gold)
         local confirm_y=body+70
         if animal then
-            local resource=NHLivestock.resources[animal.product]
-            value_row(confirm_y,tr("成长时间","Growth time"),time_text(animal.growth/60),white)
-            value_row(confirm_y+13,tr("产出间隔","Cycle time"),time_text(animal.period/60),white)
-            value_row(confirm_y+26,tr(resource.zh,resource.en).." / "..tr("肉","Meat"),animal.amount.." / "..animal.meat,white)
-            confirm_y=confirm_y+39
+            if animal.growth>0 then
+                value_row(confirm_y,selected.id=="dragon_egg" and tr("孵化时间","Incubation") or tr("成长时间","Growth time"),time_text(animal.growth/60),white)
+                confirm_y=confirm_y+13
+            end
+            value_row(confirm_y,tr("产出间隔","Cycle time"),time_text(animal.period/60),white)
+            local name,value=NHLivestock.yieldText(selected.id,model.lang)
+            value_row(confirm_y+13,name,value,white,tr("每轮产出","Yield per cycle"))
+            confirm_y=show_forage(selected.id,confirm_y+26,tr,value_row)
         end
         if available(selected) then
             if button(258,6,confirm_y,tr("确认购买","Confirm purchase"),green) then
@@ -1001,7 +1035,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         label(body+17,tr("在脚边拾取样品","Pick up the samples at your feet"),muted)
         if button(217,6,body+33,tr("重发测试针剂包","Reissue test pouch"),gold,
             tr("替换现有针剂包，内含两支激活剂。","Replace the current pouch with two doses.")) then dispatch("restock") end
-        if button(480,6,body+49,tr("领取四种召唤卡","Claim four summon cards"),gold) then
+        if button(480,6,body+49,tr("领取全部召唤卡","Claim all summon cards"),gold,
+            tr("每位伙伴各一张满耐久卡。","One full-charge card for each companion.")) then
             folded,warehouse_tab,warehouse_pages.collection=false,"collection",1
             dispatch("test_cards")
         end

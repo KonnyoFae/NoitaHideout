@@ -12,6 +12,7 @@ dofile("mods/noita_hideout/files/store.lua")
 dofile("mods/noita_hideout/files/potion.lua")
 local state=assert(NHStore.load())
 NHStore.newRun(state)
+assert(NHCompanions.rewardText({"dragon"},"zh",state):find("龙娘",1,true))
 state.levels.farmland=1
 state.summons={farm=31,livestock=62,pending={}}
 assert(NHFarm.plant(state,{plot=1,token=0,crop="fiber"},0))
@@ -29,6 +30,13 @@ local batch=NHCompanions.reward(before,"livestock",40)
 local total=0
 for _=1,40 do total=total+#NHCompanions.reward(one,"livestock",1) end
 assert(total==#batch and before.summons.livestock==one.summons.livestock)
+before.summons.beehive,one.summons.beehive=31,31
+local batchBees=NHCompanions.reward(before,"beehive",100)
+local oneBees=0
+for _=1,100 do oneBees=oneBees+#NHCompanions.reward(one,"beehive",1) end
+assert(#batchBees>0 and #batchBees==oneBees and before.summons.beehive==one.summons.beehive)
+for _,id in ipairs(batchBees) do assert(id=="bee") end
+assert(before.summons.farm==one.summons.farm and before.summons.livestock==one.summons.livestock)
 
 -- Used cards each occupy a slot. Capturing another species at capacity queues
 -- its reward; full copies of an already stored species still join their stack.
@@ -75,9 +83,21 @@ assert(NHCompanions.grantSet(state))
 local full=state.warehouse[2].item
 assert(full.species=="dryad" and full.remaining==80 and state.warehouse[1].item.remaining==2)
 state.summons.pending.dryad=4000000000
+state.summons.beehive=654
 assert(NHStore.commit(state))
 state=assert(NHStore.load())
-assert(state.warehouse[2].item.count==4000000001 and #state.warehouse==5 and not next(state.summons.pending))
+assert(state.warehouse[2].item.count==4000000001 and #state.warehouse==7 and not next(state.summons.pending))
+assert(state.summons.beehive==654)
+for _,id in ipairs({"bee","dragon"}) do
+    local found=false
+    for _,row in ipairs(state.warehouse) do
+        if row.item.species==id then
+            found=true
+            assert(row.item.remaining==80 and row.item.icon==NHCompanions.cardIcon(id))
+        end
+    end
+    assert(found)
+end
 assert(not NHCompanions.validCard({species="dryad",remaining=79,count=2}))
 assert(not NHCompanions.validCard({species="dryad",remaining=80,count=0}))
 
@@ -234,7 +254,7 @@ EntityAddChild(player,vanilla)
 local food=EntityLoad("mods/noita_hideout/files/effect_food_levitation.xml",0,0)
 EntityAddTag(food,"noita_hideout_effect_food_levitation")
 EntityAddChild(player,food)
-for _,species in ipairs({"dryad","flower_fairy","minotaur","griffin"}) do
+for _,species in ipairs(NHCompanions.order) do
     held=assert(adapter.restore({kind="summon_card",species=species,remaining=3},0,0))
     assert(NHCompanions.use(player,held,"en"))
     assert(adapter.capture(held).remaining==2 and not EntityGetIsAlive(last))
@@ -276,6 +296,59 @@ assert(entities[replacement].components.VariableStorageComponentnh_companion_clo
 assert(EntityGetIsAlive(vanilla) and EntityGetIsAlive(food))
 assert(NHCompanions.use(player,held,"en") and not EntityGetIsAlive(held))
 assert(not EntityGetIsAlive(replacement) and #EntityGetAllChildren(player,"noita_hideout_companion")==1)
+for _,species in ipairs({"bee","dragon"}) do
+    entities[player].x=0
+    targets={}
+    target(65,10,0)
+    local previousShots,previousGifts=#shots,#gifts
+    assert(NHCompanions.summon(player,species,"zh",function() return true end))
+    local companion=spawned[#spawned]
+    NHCompanions.update(companion)
+    local shot=entities[shots[#shots]].components.ProjectileComponent
+    assert(#shots==previousShots+1 and shot.damage==NHCompanions.species[species].damage and shot.mWhoShot==player)
+    targets={}
+    entities[companion].components.VariableStorageComponentnh_gifts.value_int=4
+    for _=1,300 do
+        entities[player].x=entities[player].x+1
+        NHCompanions.update(companion)
+    end
+    assert(#gifts==previousGifts+1 and gifts[#gifts]==NHCompanions.species[species].gift)
+end
+-- Check the actual Noita entity/card links and shipped PNG dimensions. The
+-- source sheets remain archived with the project and must match the animation.
+local function bytes(path)
+    local file=assert(io.open(path,"rb"))
+    local contents=file:read("*a")
+    file:close()
+    return contents
+end
+local function png(path,width,height)
+    local data=bytes(path)
+    assert(data:sub(2,4)=="PNG" and data:sub(13,16)=="IHDR",path)
+    local function dimension(offset)
+        local a,b,c,d=data:byte(offset,offset+3)
+        return ((a*256+b)*256+c)*256+d
+    end
+    assert(dimension(17)==width and dimension(21)==height,path)
+    return data
+end
+local portraits={}
+for _,id in ipairs({"bee","dragon"}) do
+    local base="mods/noita_hideout/files/"
+    local sprite=base.."companions/"..id.."_idle"
+    local source="resources/"..id.."/sprite-fusion-animation-idle-bounce-smooth-loop/spritesheet.png"
+    assert(png(sprite..".png",512,64)==bytes(source))
+    local animation=bytes(sprite..".xml")
+    assert(animation:find(sprite..".png",1,true) and animation:find('frame_count="8"',1,true))
+    assert(animation:find('frame_wait="0.125"',1,true) and animation:find('loop="1"',1,true))
+    assert(bytes(base.."companions/"..id..".xml"):find(sprite..".xml",1,true))
+    local card=bytes(base.."items/card_"..id..".xml")
+    assert(card:find('ui_sprite="'..NHCompanions.cardIcon(id)..'"',1,true))
+    assert(card:find('uses_remaining="80"',1,true) and card:find("card_"..id.."_world.png",1,true))
+    portraits[id]=png(NHCompanions.cardIcon(id),16,17)
+    png(base.."items/card_"..id.."_world.png",10,13)
+end
+assert(portraits.bee~=portraits.dragon)
 print("Summon rewards, card durability, replacement rollback, source-scoped auras, travel gifts and expiration passed.")
 
 local quick=create(0,0)

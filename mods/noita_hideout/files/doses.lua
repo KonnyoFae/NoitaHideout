@@ -35,7 +35,7 @@ local function commit(state, changed)
     if not ok then return nil, err end
     state.revision, state.nextItemId = changed.revision, changed.nextItemId
     state.warehouse = changed.warehouse
-    state.summons = changed.summons
+    state.summons, state.dragonLoot = changed.summons, changed.dragonLoot
     state.safe = changed.safe
     state.pouches, state.issuedDoses = changed.pouches, changed.issuedDoses
     return true

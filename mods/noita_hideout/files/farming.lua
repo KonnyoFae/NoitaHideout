@@ -156,15 +156,10 @@ function NHFarm.sync(state,now)
             end
         end
     end
-    local animalBatches=NHLivestock.settle(state,elapsed)
+    local awards=crops>0 and NHCompanions.reward(state,"farm",crops) or {}
+    local animalBatches,animalAwards=NHLivestock.settle(state,elapsed)
+    for _,id in ipairs(animalAwards) do awards[#awards+1]=id end
     local produced=crops+animalBatches>0
-    local awards
-    if crops>0 then awards=NHCompanions.reward(state,"farm",crops) end
-    if animalBatches>0 then
-        local ranchAwards=NHCompanions.reward(state,"livestock",animalBatches)
-        if not awards then awards=ranchAwards
-        else for _,id in ipairs(ranchAwards) do awards[#awards+1]=id end end
-    end
     return advanced or produced,produced,awards
 end
 
@@ -202,7 +197,9 @@ end
 function NHFarm.view(state,lang,now)
     local view={plots={},crops={},equipment=NHStore.level(state,"agri_equipment")>0}
     now=math.max(now,state.farm.time)
-    view.pens,view.produce=NHLivestock.view(state,lang,now)
+    local livestockRates
+    view.pens,view.produce,livestockRates=NHLivestock.view(state,lang,now)
+    view.dragonPending=NHDragonLoot.pendingCount(state)
     local fieldCounts={}
     for id=1,NHStore.level(state,"farmland") do
         local plot=state.farm.plots[id] or {token=0}
@@ -215,7 +212,11 @@ function NHFarm.view(state,lang,now)
         local kind=NHFarm.crops[id]
         view.crops[#view.crops+1]={id=id,name=lang=="zh" and kind.zh or kind.en,amount=kind.amount,
             duration=kind.frames/60,unlocked=not kind.equipment or view.equipment,stock=state.resources[id] or 0,
-            perMinute=(fieldCounts[id] or 0)*kind.amount*3600/kind.frames}
+            perMinute=(fieldCounts[id] or 0)*kind.amount*3600/kind.frames+(livestockRates[id] or 0)}
+    end
+    for _,row in ipairs(view.produce) do
+        local crop=NHFarm.crops[row.id]
+        if crop then row.perMinute=row.perMinute+(fieldCounts[row.id] or 0)*crop.amount*3600/crop.frames end
     end
     return view
 end

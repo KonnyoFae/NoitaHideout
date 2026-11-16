@@ -1,0 +1,10 @@
+<Entity name="$nh_card_bee" tags="noita_hideout_summon_card,nh_companion_bee,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/card_bee_world.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/card_bee_world.png" offset_x="5" offset_y="6" />
+        <ItemComponent item_name="$nh_card_bee" ui_description="$nh_card_bee_desc" uses_remaining="80"
+            ui_sprite="mods/noita_hideout/files/items/card_bee.png" />
+        <UIInfoComponent name="$nh_card_bee" />
+        <AbilityComponent ui_name="$nh_card_bee" />
+    </Base>
+</Entity>

@@ -1,11 +1,13 @@
-NHCompanions={durability=80,order={"dryad","flower_fairy","minotaur","griffin"}}
+NHCompanions={durability=80,order={"dryad","flower_fairy","minotaur","griffin","bee","dragon"}}
 local items="mods/noita_hideout/files/items/"
 local pets="mods/noita_hideout/files/companions/"
 NHCompanions.species={
     dryad={zh="树精",en="Dryad",gift="bread",effect="effect_protection_radioactivity",damage=0.22},
     flower_fairy={zh="花妖",en="Flower fairy",gift="bandage",damage=0.16},
-    minotaur={zh="米诺陶少女",en="Minotaur maiden",gift="bandage",effect="effect_protection_melee",damage=0.32},
-    griffin={zh="狮鹫少女",en="Griffin maiden",gift="sugar_cube",effect="effect_faster_levitation",damage=0.24},
+    minotaur={zh="米诺陶少女",en="Minotaur maiden",gift="bandage",effect="effect_protection_melee",bonus="shield",damage=0.32},
+    griffin={zh="狮鹫少女",en="Griffin maiden",gift="sugar_cube",effect="effect_faster_levitation",bonus="flight",damage=0.24},
+    bee={zh="蜂娘",en="Bee maiden",gift="sugar_cube",effect="effect_movement_faster",bonus="flight",damage=0.20},
+    dragon={zh="龙娘",en="Dragon maiden",gift="grenade",effect="effect_protection_fire",bonus="shield",damage=0.36},
 }
 -- Shield recharge uses the native EnergyShieldComponent scale (0.22 on the perk shield).
 NHCompanions.bonuses={
@@ -14,7 +16,8 @@ NHCompanions.bonuses={
     [2]={fairySeconds=3,dryadSeconds=9,shieldRecharge=0.15,flightPercent=10,giftSeconds=20},
     [3]={fairySeconds=2,dryadSeconds=6,shieldRecharge=0.22,flightPercent=15,giftSeconds=15},
 }
-local families={farm={"dryad","flower_fairy"},livestock={"minotaur","griffin"}}
+local families={farm={"dryad","flower_fairy"},livestock={"minotaur","griffin"},beehive={"bee"}}
+local seedOffsets={farm=126,livestock=7918,beehive=15836}
 local modulus=2147483647
 
 function NHCompanions.cardIcon(id)
@@ -149,7 +152,8 @@ function NHCompanions.stageDelivery(state)
     if not book or not next(book.pending) then return end
     local pending={}
     for id,n in pairs(book.pending) do pending[id]=n end
-    state.summons={farm=book.farm,livestock=book.livestock,pending=pending}
+    state.summons={pending=pending}
+    for source in pairs(families) do state.summons[source]=book[source] end
     local rows={}
     for i,row in ipairs(state.warehouse) do rows[i]=row end
     state.warehouse=rows
@@ -176,14 +180,14 @@ function NHCompanions.reward(state,source,units)
     local seed=book[source]
     if not seed then
         local world=StatsGetValue and tonumber(StatsGetValue("world_seed")) or 0
-        seed=1+(world%modulus+state.profile*15485863+(source=="farm" and 126 or 7918))%(modulus-1)
+        seed=1+(world%modulus+state.profile*15485863+seedOffsets[source])%(modulus-1)
     end
     local found={}
     for _=1,units do
         seed=seed*48271%modulus
         if seed%100<3 then
-            seed=seed*48271%modulus
-            local id=family[1+seed%2]
+            if #family>1 then seed=seed*48271%modulus end
+            local id=family[1+seed%#family]
             book.pending[id]=(book.pending[id] or 0)+1
             found[#found+1]=id
         end
@@ -198,7 +202,7 @@ function NHCompanions.rewardText(ids,lang,state)
     for _,id in ipairs(ids) do names[#names+1]=NHCompanions.species[id][lang=="zh" and "zh" or "en"] end
     local zh=lang=="zh"
     local message=(zh and "获得召唤卡：" or "Summon cards: ")..table.concat(names,zh and "、" or ", ")
-    if next(state.summons.pending) then
+    if (state.summons and next(state.summons.pending)) or (NHDragonLoot and NHDragonLoot.pendingCards(state)>0) then
         return message..(zh and "。藏品库已满，腾出栏位后自动入库。" or ". Waiting for a free collection slot.")
     end
     return message

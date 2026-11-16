@@ -59,11 +59,11 @@ local function support(player,id,spec,bonus,x,y,age)
             local hp,maximum=ComponentGetValue2(model,"hp"),ComponentGetValue2(model,"max_hp")
             if hp>0 and hp<maximum then ComponentSetValue2(model,"hp",math.min(hp+0.04,maximum)) end
         end
-    elseif id=="minotaur" and bonus.shieldRecharge>0 then
+    elseif spec.bonus=="shield" and bonus.shieldRecharge>0 then
         local aura=refreshAura(player,"nh_companion_shield",root.."companions/shield.xml",x,y)
         local shield=aura and EntityGetFirstComponentIncludingDisabled(aura,"EnergyShieldComponent")
         if shield then ComponentSetValue2(shield,"recharge_speed",bonus.shieldRecharge) end
-    elseif id=="griffin" and bonus.flightPercent>0 and age%60==0 then
+    elseif spec.bonus=="flight" and bonus.flightPercent>0 and age%60==0 then
         local character=EntityGetFirstComponentIncludingDisabled(player,"CharacterDataComponent")
         if character then
             local fuel,maximum=ComponentGetValue2(character,"mFlyingTimeLeft"),ComponentGetValue2(character,"fly_time_max")
