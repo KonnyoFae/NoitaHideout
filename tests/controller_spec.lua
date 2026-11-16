@@ -1216,27 +1216,38 @@ local function testFarmController()
     assert(not state().farm.plots[1])
     local sow=quote("fiber")
     tick(nil,"farm_plant",sow)
-    local harvest=quote("fiber")
-    tick(nil,"farm_harvest",harvest)
+    local switch=quote("grain")
     assert(not state().resources.fiber and state().farm.plots[1].crop=="fiber")
     local before=advance(360).farm.plots[1].remaining
     boot()
     assert(tick().farm.plots[1].remaining==before,"reloading retains partial growth")
 
     entities[player].x=227+81
-    assert(not advance(NHFarm.crops.fiber.frames).near)
-    tick(nil,"farm_harvest",harvest)
+    inventory_open=false
+    fail_commit=true
+    advance(NHFarm.crops.fiber.frames)
+    assert(not state().resources.fiber,"a failed deposit must keep the batch due")
+    fail_commit=false
+    boot()
+    assert(not tick().near and state().resources.fiber==6)
+    local nextAt=state().farm.plots[1].readyAt
+    inventory_open=true
+    tick()
+    tick(nil,"farm_plant",switch)
     entities[player].x=227
     inventory_open=false
-    tick(nil,"farm_harvest",harvest)
+    tick(nil,"farm_plant",switch)
     inventory_open=true
-    assert(tick(nil,"farm_harvest",harvest).farm.plots[1].ready)
-    assert(not state().resources.fiber,"out-of-range, closed and inventory-opening inputs cannot harvest")
-    tick(nil,"farm_harvest",harvest)
-    tick(nil,"farm_harvest",harvest)
+    tick(nil,"farm_plant",switch)
+    assert(state().farm.plots[1].crop=="fiber","field settings require an open hideout inventory")
+    tick(nil,"farm_plant",switch)
     tick(nil,"farm_plant",sow)
     view=tick()
-    assert(view.farm.crops[1].stock==6 and not view.farm.plots[1].crop and not state().materials.fiber)
+    assert(view.farm.plots[1].crop=="grain" and state().farm.plots[1].readyAt==nextAt)
+    view=advance(view.farm.plots[1].remaining*60)
+    assert(state().resources.grain==6 and state().farm.plots[1].readyAt==nextAt+NHFarm.crops.grain.frames)
+    assert(view.farm.crops[1].stock==6 and not state().materials.fiber)
+    assert(has_project(view.recipes,"bread").ready,"the open workshop must see a passive deposit immediately")
     local bandage=has_project(view.recipes,"bandage")
     local kit=has_project(view.recipes,"field_medkit")
     assert(bandage.ready and bandage.inputs[1].available==6 and bandage.inputs[1].amount==2)
@@ -1253,9 +1264,16 @@ local function testFarmController()
     view=advance(state().order.required)
     assert(view.warehouse.supplies[1].kind=="medkit" and view.warehouse.supplies[1].remaining==3)
     assert(not state().resources.herb and has_project(view.recipes,"field_medkit").inputs[2].available==0)
+    advance(125)
+    local elapsed=NHFarm.observe(state(),frame)
+    local deadline=state().farm.plots[1].readyAt
+    OnPausedChanged(true,false)
+    assert(state().farm.time==elapsed)
+    new_world()
+    assert(NHFarm.observe(state(),frame)==elapsed and state().farm.plots[1].readyAt==deadline)
 end
 testFarmController()
-print("Controller: farmland expansion, field access, save/continue, harvesting and the bandage-to-medkit chain passed.")
+print("Controller: passive field deposits, retry, crop switching, live workshop stock and crafting passed.")
 
 do
     settings,flags={},{}
@@ -1323,25 +1341,27 @@ local function testLivestockController()
     tick(nil,"shop_buy",{id="calf",pen=2})
     assert(state().bankGold==40 and state().farm.pens[2].born>=600)
     local young=tick().farm.pens[1]
-    assert(young.name=="Chick" and not young.grown and not young.canCollect)
+    assert(young.name=="Chick" and not young.grown)
     entities[player].x=227+81
+    inventory_open=false
+    tick()
     advance(300*60)
-    tick(nil,"collect_livestock",{pen=1,nextAt=young.nextAt})
-    assert(not state().resources.egg)
-    entities[player].x=227
-    local adult=tick().farm.pens[1]
-    assert(adult.name=="Hen" and adult.canCollect and adult.count==1)
-    tick(nil,"collect_livestock",{pen=1,nextAt=adult.nextAt})
-    assert(tick().status:find("Summon cards",1,true))
-    tick(nil,"collect_livestock",{pen=1,nextAt=adult.nextAt})
-    assert(state().resources.egg==2 and state().resources.meat==1)
+    assert(state().resources.egg==2 and state().resources.meat==1 and not state().resources.milk)
     assert(#state().warehouse==1 and state().warehouse[1].item.kind=="summon_card")
+    entities[player].x=227
+    inventory_open=true
+    local adult=tick().farm.pens[1]
+    assert(adult.name=="Hen" and adult.grown and adult.remaining>0)
+    assert(tick().status:find("Summon cards",1,true))
+    local longTrip=5*NHLivestock.species.chick.period
+    advance(longTrip)
+    assert(state().resources.egg==12 and state().resources.milk==6 and state().resources.meat==12)
     boot()
     local farm=tick().farm
-    assert(farm.produce[1].stock==2 and not farm.pens[1].canCollect and not farm.pens[2].canCollect)
+    assert(farm.produce[1].stock==12 and farm.pens[1].remaining>0 and farm.pens[2].remaining>0)
 end
 testLivestockController()
-print("Controller: pens, savings payments, staggered maturity, range checks and single collection passed.")
+print("Controller: pens, staggered maturity, passive produce and card deposits, long trips and reload passed.")
 
 local function testCardSupplies()
     settings,flags={},{}

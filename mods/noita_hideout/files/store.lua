@@ -33,7 +33,7 @@ local function fresh(profile)
         runSerial = 0, closedThrough = 0, checkpoints = {},
         nextItemId = 1, materials = {}, docks = {}, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true, collectionSlots=true,
         pouches = {},
-        order = false, finished = 0, levels = {}, storageBase = {}, resources = {}, farm={time=0,plots={}}, bankGold = 0, bankWalletNet = 0,
+        order = false, finished = 0, levels = {}, storageBase = {}, resources = {}, farm={time=0,plots={},passive=true}, bankGold = 0, bankWalletNet = 0,
     }
     s.starterPouchId=NHPouches.create(s,"safe",2,2)
     return s
@@ -404,6 +404,7 @@ local function unpack_slot(raw)
         s.collectionSlots=true
     end
     if s.farm==nil then s.farm={time=0,plots={}} end
+    NHFarm.adopt(s.farm)
     if not s.sharedSlots then
         s.safeCapacity = NHStore.safeCapacity(s)+1
         s.sharedSlots = true

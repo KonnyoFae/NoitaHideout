@@ -71,8 +71,6 @@ local error_translations = {
     ["Livestock equipment is required."] = "请先扩建畜牧设备。",
     ["No matching pen is free."] = "这种幼畜的栏舍已满。",
     ["Livestock collection changed."] = "栏舍已变化，请重新选择。",
-    ["No livestock produce is ready."] = "畜产尚未备好。",
-    ["Crop is still growing."] = "作物尚未成熟。",
     ["Missing catalyst."] = "物料库中缺少所需的催化样品。",
     ["Invalid gold transfer."] = "无法识别这笔存取操作。",
     ["Invalid gold amount."] = "请输入有效的金币数额。",
@@ -261,9 +259,10 @@ local function update_workshop(player,frame,farm_time)
     if not draft then return false end
     local changed,done=NHStore.advanceProduction(draft,{run=run_id,orderId=order and order.id or false,
         progress=elapsed,checkpoint=pending_visit})
-    local farm_changed=farm_due and NHFarm.sync(draft,farm_time)
+    local farm_changed,produced,cards
+    if farm_due then farm_changed,produced,cards=NHFarm.sync(draft,farm_time) end
     if changed or farm_changed or affinity_due then
-        if not save(draft,not done) then return false end
+        if not save(draft,not done and not produced) then return false end
         if done and pending_visit and elapsed<order.required then
             feedback(tr("圣山加速完成了订单，成品已入库。","Holy Mountain boost completed the order. Output delivered."))
         elseif done then feedback(tr("订单完成，成品已入库。","Order complete. Output delivered to storage."))
@@ -271,6 +270,7 @@ local function update_workshop(player,frame,farm_time)
             feedback(string.format(tr("首次抵达圣山，生产加速 %d 秒。","Holy Mountain reached. Production advanced by %d seconds."),
                 NHStore.checkpointFrames/60))
         end
+        if cards and #cards>0 then feedback(NHCompanions.rewardText(cards,lang,state)) end
     elseif draft.revision~=state.revision then
         state,model_cache=draft,nil
     end
@@ -660,36 +660,15 @@ local function workshop_action(player,action,index)
             commit_edit(function(draft) return NHStore.buyGood(draft,index,now) end,
                 "购买成功，幼畜已送入栏舍。","Purchased and delivered to the pen.")
         else commit_edit(NHStore.buyGood,"购买成功，商品已入库。","Purchased and delivered to storage.",index) end
-    elseif action=="collect_livestock" and type(index)=="table" then
-        local now=NHFarm.observe(state,GameGetFrameNum())
-        local cards
-        if commit_edit(function(draft)
-            local changed,result=NHLivestock.collect(draft,index,now)
-            if changed then cards=result end
-            return changed,result
-        end) then
-            local msg=tr("畜产已入库。","Animal produce stored.")
-            if #cards>0 then msg=msg.." "..NHCompanions.rewardText(cards,lang,state) end
-            feedback(msg)
-        end
     elseif action=="buy_upgrade" and type(index)=="table" then
         commit_edit(NHStore.buyUpgrade,"建设完成。","Construction complete.",index)
-    elseif (action=="farm_plant" or action=="farm_harvest") and type(index)=="table" then
+    elseif action=="farm_plant" and type(index)=="table" then
         local frame=GameGetFrameNum()
         local now=NHFarm.observe(state,frame)
-        local planting=action=="farm_plant"
-        local edit=planting and NHFarm.plant or NHFarm.harvest
-        local rewards
-        if commit_edit(function(draft)
-            local ok,result=edit(draft,index,now)
-            if ok and not planting then rewards=result end
-            return ok,result
-        end,
-            planting and "已播种。" or "已收获，农产已入库。",planting and "Crop planted." or "Harvest stored.") then
+        if commit_edit(function(draft) return NHFarm.plant(draft,index,now) end) then
+            local crop=NHFarm.crops[index.crop]
+            feedback(string.format(tr("田地 %d 下轮产出%s。","Field %d will produce %s next."),index.plot,tr(crop.zh,crop.en)))
             NHFarm.observe(state,frame)
-            if rewards and #rewards>0 then
-                feedback(NHCompanions.rewardText(rewards,lang,state))
-            end
         end
     elseif action=="salvage" and type(index)=="table" then
         if index.mode=="essence" then
@@ -730,8 +709,7 @@ local function dispatch(player, action, index)
             return
         end
         if type(index)~="table" or action=="buy_upgrade" or action=="craft" or action=="salvage"
-            or action=="bank_transfer" or action=="shop_buy" or action=="farm_plant" or action=="farm_harvest"
-            or action=="collect_livestock" then
+            or action=="bank_transfer" or action=="shop_buy" or action=="farm_plant" then
             workshop_action(player,action,index)
             return
         end
@@ -970,10 +948,13 @@ end
 
 function OnPausedChanged(is_paused,is_inventory_pause)
     -- The pause menu can start a fresh world before the next regular checkpoint.
-    if is_paused and not is_inventory_pause and active_run() and NHAffinity.changed(state) then
-        local draft=active_draft()
-        if draft then save(draft,true) end
-    end
+    if not is_paused or is_inventory_pause or not active_run() then return end
+    local now=NHFarm.observe(state,GameGetFrameNum())
+    if now<=state.farm.time and not NHFarm.due(state,now) and not NHAffinity.changed(state) then return end
+    local draft=active_draft()
+    if not draft then return end
+    local _,produced,cards=NHFarm.sync(draft,now)
+    if save(draft,not produced) and cards and #cards>0 then feedback(NHCompanions.rewardText(cards,lang,state)) end
 end
 
 local function current_player()

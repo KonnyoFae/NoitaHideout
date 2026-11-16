@@ -24,10 +24,9 @@ end
 assert(NHStore.commit(state))
 state=assert(NHStore.load())
 now=NHFarm.observe(state,180*60)
+assert(NHFarm.sync(state,now) and not NHFarm.sync(state,now))
 for slot,crop in ipairs(plots) do
-    local request={plot=slot,crop=crop,token=state.farm.plots[slot].token}
-    assert(NHFarm.harvest(state,request,now))
-    assert(not NHFarm.harvest(state,request,now))
+    assert(state.farm.plots[slot].crop==crop and state.farm.plots[slot].readyAt>now)
     assert(state.resources[crop]==NHFarm.crops[crop].amount and not state.materials[crop])
 end
 assert(#state.warehouse==0)

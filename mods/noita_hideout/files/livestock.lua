@@ -1,5 +1,4 @@
 NHLivestock={
-    maxBatches=4,
     resources={egg={zh="蛋",en="Eggs"},milk={zh="奶",en="Milk"},meat={zh="肉",en="Meat"}},
     species={
         chick={young={"小鸡","Chick"},adult={"母鸡","Hen"},pen={"鸡舍","Coop"},offset=1,
@@ -21,16 +20,6 @@ function NHLivestock.validate(state,whole)
     end
 end
 
--- Each animal pauses when its pen holds four complete batches. Other animals
--- and the fields on the same gameplay clock may continue to grow.
-function NHLivestock.horizon(farm)
-    local limit=farm.time
-    for _,animal in pairs(farm.pens or {}) do
-        limit=math.max(limit,animal.nextAt+(NHLivestock.maxBatches-1)*NHLivestock.species[animal.kind].period)
-    end
-    return limit
-end
-
 function NHLivestock.freePen(state,species)
     local level=NHStore.level(state,"livestock")
     if level==0 then return nil,"Livestock equipment is required." end
@@ -49,29 +38,29 @@ function NHLivestock.deliver(state,species,slot,now)
     state.farm.pens[slot]={kind=species,born=birth,nextAt=birth+kind.growth+kind.period}
 end
 
-local function batches(animal,kind,now)
-    return math.min(NHLivestock.maxBatches,math.max(0,1+math.floor((now-animal.nextAt)/kind.period)))
-end
-
-local function hasSpace(state,kind,count)
-    return kind.amount*count<=NHStore.maxResourceAmount-(state.resources[kind.product] or 0)
-        and kind.meat*count<=NHStore.maxResourceAmount-(state.resources.meat or 0)
-end
-
-function NHLivestock.collect(state,request,now)
-    local animal=type(request)=="table" and (state.farm.pens or {})[request.pen]
-    if not animal or animal.nextAt~=request.nextAt then return false,"Livestock collection changed." end
+function NHLivestock.batches(state,animal,now)
     local kind=NHLivestock.species[animal.kind]
-    now=math.max(now,state.farm.time)
-    local count=batches(animal,kind,now)
-    if count==0 then return false,"No livestock produce is ready." end
-    if not hasSpace(state,kind,count) then return false,"Resource storage is full." end
-    NHFarm.sync(state,now)
-    state.resources[kind.product]=(state.resources[kind.product] or 0)+kind.amount*count
-    state.resources.meat=(state.resources.meat or 0)+kind.meat*count
-    if count==NHLivestock.maxBatches then animal.nextAt=state.farm.time+kind.period
-    else animal.nextAt=animal.nextAt+count*kind.period end
-    return true,NHCompanions.reward(state,"livestock",count)
+    local productSpace=math.floor((NHStore.maxResourceAmount-(state.resources[kind.product] or 0))/kind.amount)
+    local meatSpace=math.floor((NHStore.maxResourceAmount-(state.resources.meat or 0))/kind.meat)
+    return NHFarm.batches(now,animal.nextAt,kind.period,math.min(productSpace,meatSpace))
+end
+
+function NHLivestock.settle(state,now)
+    local total=0
+    for slot=1,NHStore.level(state,"livestock")*2 do
+        local animal=state.farm.pens and state.farm.pens[slot]
+        if animal and now>=animal.nextAt then
+            local kind=NHLivestock.species[animal.kind]
+            local count=NHLivestock.batches(state,animal,now)
+            if count>0 then
+                state.resources[kind.product]=(state.resources[kind.product] or 0)+kind.amount*count
+                state.resources.meat=(state.resources.meat or 0)+kind.meat*count
+                animal.nextAt=animal.nextAt+count*kind.period
+                total=total+count
+            end
+        end
+    end
+    return total
 end
 
 function NHLivestock.view(state,lang,now)
@@ -88,10 +77,9 @@ function NHLivestock.view(state,lang,now)
             local adultAt=animal.born+kind.growth
             pen.grown=now>=adultAt
             pen.name=pen.grown and kind.adult[language] or pen.young
-            pen.count=batches(animal,kind,now)
             pen.nextAt=animal.nextAt
-            pen.canCollect=pen.count>0 and hasSpace(state,kind,pen.count)
-            local target=pen.grown and animal.nextAt+pen.count*kind.period or adultAt
+            pen.blocked=now>=animal.nextAt and NHLivestock.batches(state,animal,now)==0
+            local target=pen.grown and animal.nextAt or adultAt
             pen.remaining=math.max(0,math.ceil((target-now)/60))
         end
         pens[slot]=pen

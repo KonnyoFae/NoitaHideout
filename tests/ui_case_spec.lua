@@ -24,6 +24,7 @@ end
 local tiles={}
 function GuiImage(_,id,x,y,sprite)
     image_colors[id],next_color=next_color,{}
+    drawn[sprite]=true
     if sprite=="data/ui_gfx/inventory/quick_inventory_box.png" then tiles[id]={x=x,y=y} end
 end
 function GuiTooltip(_,title,body) tips[title]=body or "" end
@@ -873,43 +874,44 @@ local function testFarmPanel(lang)
     render(model,421)
     render(model)
     assert(buttons[436] and panels[210].y>=0 and buttons[436].y<height)
-    render(model,436)
-    render(model)
-    assert(not buttons[414] and drawn["5:00"],"advanced crop can be inspected before the equipment is built")
-    render(model,413)
-    render(model,431)
-    render(model)
-    assert(green_button(414) and drawn["2:00"] and drawn["+6"] and drawn["13"])
-    local action,request=render(model,414)
+    assert(not render(model,436),"locked farm equipment prevents selecting an advanced crop")
+    local lockedTip=lang=="zh" and "激活草药  +3 / 5:00   库存 0   需要农业设备"
+        or "Stimulating herbs  +3 / 5:00   In storage 0   Needs farming equipment"
+    assert(tips[lockedTip])
+    local action,request=render(model,431)
     assert(action=="farm_plant" and request.plot==1 and request.crop=="fiber" and request.token==0)
     assert(NHFarm.plant(stock,request,0))
     model.farm=NHFarm.view(stock,lang,60)
     render(model)
-    assert(drawn["1:59"] and not buttons[415] and not buttons[414])
-    model.farm=NHFarm.view(stock,lang,7200)
-    model.farm.crops[1].stock=NHStore.maxResourceAmount
-    assert(not render(model,415) and not buttons[415])
+    assert(drawn["1:59"] and green_button(431) and not render(model,431),"clicking the planted crop is a no-op")
+    action,request=render(model,432)
+    assert(action=="farm_plant" and request.plot==1 and request.crop=="herb" and request.token==1)
+    assert(NHFarm.plant(stock,request,60))
+    model.farm=NHFarm.view(stock,lang,60)
+    render(model)
+    assert(drawn["1:59"] and green_button(432) and not green_button(431))
+    assert(NHFarm.sync(stock,7200))
     model.farm=NHFarm.view(stock,lang,7200)
     render(model)
-    assert(green_button(415) and drawn["0:00"])
-    action,request=render(model,415)
-    assert(action=="farm_harvest" and request.plot==1 and request.crop=="fiber" and request.token==1)
-    assert(NHFarm.harvest(stock,request,7200))
-    model.farm=NHFarm.view(stock,lang,7200)
+    assert(not buttons[415] and drawn["3:00"] and green_button(432) and buttons[436].y<height)
+    model.farm.plots[1].blocked=true
+    render(model)
+    local full=lang=="zh" and "农产库存已满" or "Crop storage full"
+    assert(drawn[full] or tips[full])
     render(model,411)
     render(model)
-    assert(drawn["19"] and drawn["0"] and not buttons[414] and not buttons[415])
+    assert(drawn["13"] and drawn["4"] and drawn["0"] and not buttons[415])
     for _,crop in ipairs(model.farm.crops) do assert(drawn[crop.name] or tips[crop.name]) end
     assert(panels[210].y>=0)
 end
 testFarmPanel("en")
 testFarmPanel("zh")
-print("UI: farming navigation, stock ledger, advanced crop lock and timed sowing/harvest in both languages passed.")
+print("UI: one-click planting and crop switching, equipment lock, passive deposits and stock in both languages passed.")
 
 local function testLivestockPanel(lang)
     width,height,model.lang,model.near=320,180,lang,true
     pointer={x=0,y=0}
-    local stock={levels={livestock=1},resources={egg=21},farm={time=0,plots={}}}
+    local stock={profile=1,levels={livestock=1},resources={egg=21},farm={time=0,plots={}},warehouse={},pouches={},nextItemId=1}
     model.shopGoods={{id="chick",category="livestock",name="Chick",price=120,quantity=1,ready=true,pen=1}}
     model.farm=NHFarm.view(stock,lang,0)
     render(model,223)
@@ -928,15 +930,21 @@ local function testLivestockPanel(lang)
     render(model,223)
     render(model,451)
     render(model)
-    assert(drawn["3:00"] and not buttons[445])
+    assert(drawn["3:00"] and drawn["5:00"] and not buttons[445])
+    model.farm=NHFarm.view(stock,lang,180*60)
+    render(model)
+    assert(drawn["2:00"] and not buttons[445])
+    assert(NHFarm.sync(stock,300*60))
     model.farm=NHFarm.view(stock,lang,300*60)
     render(model)
-    assert(green_button(445) and drawn["1 / 4"] and buttons[445].y<height)
-    action,request=render(model,445)
-    assert(action=="collect_livestock" and request.pen==1 and request.nextAt==300*60)
+    assert(drawn["2:00"] and not buttons[445],"adult pen shows next automatic deposit")
+    model.farm.pens[1].blocked=true
+    render(model)
+    local full=lang=="zh" and "畜产库存已满" or "Produce storage full"
+    assert(drawn[full] or tips[full])
     render(model,441)
     render(model)
-    assert(drawn["21"] and panels[210].y>=0)
+    assert(drawn["23"] and drawn["1"] and panels[210].y>=0)
     stock.levels.livestock,stock.farm.pens=0,nil
     model.farm=NHFarm.view(stock,lang,0)
     render(model,440)
@@ -945,7 +953,7 @@ local function testLivestockPanel(lang)
 end
 testLivestockPanel("en")
 testLivestockPanel("zh")
-print("UI: youngstock shop, pen timers, stock and collection in both languages passed.")
+print("UI: youngstock shop, pen timers and passive produce deposits in both languages passed.")
 
 local function testCardWalletPanel()
     width,height,model.lang,model.debug=640,360,"en",true
@@ -955,13 +963,16 @@ local function testCardWalletPanel()
     local function card(id,species,remaining,count)
         return {id=id,kind="summon_card",name=species,species=species,remaining=remaining,count=count}
     end
-    model.warehouse.collection={card(201,"dryad",80,9754),card(202,"flower_fairy",3)}
+    model.warehouse.collection={card(201,"dryad",80,9754),card(202,"flower_fairy",3),card(203,"minotaur",80)}
     local affinity={dryad=10,flower_fairy=40,griffin=100}
     model.affinityPoints=function(id) return affinity[id] or 0 end
     model.warehouse.equipment={model.secure_loot[1]}
     render(model,213)
     assert(render(model,480)=="test_cards")
     render(model)
+    for _,id in ipairs({"dryad","flower_fairy","minotaur"}) do
+        assert(drawn[NHCompanions.cardIcon(id)],"collection cards use the species portrait without a saved icon")
+    end
     local first=tiles[1004]
     point(first.x+1,first.y+1)
     assert(drawn["Dryad"] and drawn["Count 9754"] and drawn["Durability 80/80"])
@@ -975,6 +986,7 @@ local function testCardWalletPanel()
     model.walletId,model.walletCapacity,model.pouchName,model.popup=95,4,"Card wallet #95",true
     model.cells={card(nil,"dryad",80,3),card(nil,"dryad",79),card(nil,"griffin",80)}
     render(model)
+    assert(drawn[NHCompanions.cardIcon("griffin")],"wallet cells use the species portrait")
     assert(tiles[1007].x-tiles[1004].x==60)
     point(tiles[1006].x+1,tiles[1006].y+1)
     assert(drawn["Affinity 100/100"] and drawn["Restores 15% flight fuel per second"])

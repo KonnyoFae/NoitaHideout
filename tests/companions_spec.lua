@@ -15,12 +15,11 @@ NHStore.newRun(state)
 state.levels.farmland=1
 state.summons={farm=31,livestock=62,pending={}}
 assert(NHFarm.plant(state,{plot=1,token=0,crop="fiber"},0))
-local request={plot=1,token=1,crop="fiber"}
-local ok,awards=NHFarm.harvest(state,request,120*60)
-assert(ok and #awards==1 and awards[1]=="dryad" and state.resources.fiber==6)
+local ok,produced,awards=NHFarm.sync(state,120*60)
+assert(ok and produced and #awards==1 and awards[1]=="dryad" and state.resources.fiber==6)
 assert(state.warehouse[1].item.kind=="summon_card" and NHStore.category("summon_card")=="collection")
 assert(state.warehouse[1].item.remaining==80)
-assert(not NHFarm.harvest(state,request,120*60) and #state.warehouse==1)
+assert(not NHFarm.sync(state,120*60) and #state.warehouse==1)
 local graze=NHCompanions.reward(state,"livestock",1)
 assert(#graze==1 and graze[1]=="griffin")
 assert(NHStore.commit(state))

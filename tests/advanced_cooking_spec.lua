@@ -23,24 +23,12 @@ assert(NHStore.buyGood(state,{id="calf"},now) and state.bankGold==0)
 local function plant(slot,crop)
     assert(NHFarm.plant(state,{plot=slot,token=(state.farm.plots[slot] or {}).token or 0,crop=crop},now))
 end
-local function harvest(slot)
-    local plot=state.farm.plots[slot]
-    assert(NHFarm.harvest(state,{plot=slot,token=plot.token,crop=plot.crop},now))
-end
 plant(1,"grain")
 plant(2,"spice")
 plant(3,"herb")
 plant(4,"sugar")
-now=NHFarm.observe(state,300*60)
-for slot=1,4 do harvest(slot) end
-plant(1,"grain")
-plant(2,"spice")
 now=NHFarm.observe(state,600*60)
-harvest(1)
-harvest(2)
-for pen,animal in ipairs(state.farm.pens) do
-    assert(NHLivestock.collect(state,{pen=pen,nextAt=animal.nextAt},now))
-end
+assert(NHFarm.sync(state,now) and not NHFarm.sync(state,now))
 assert(state.resources.egg==6 and state.resources.milk==2 and state.resources.meat==5)
 assert(NHStore.commit(state))
 state=assert(NHStore.load())
@@ -60,7 +48,7 @@ for _,food in ipairs({"herb_flatbread","spice_cake","milk_omelet","spiced_stew"}
     end
     assert(found==1)
 end
-assert(state.resources.spice==1 and state.resources.herb==2 and state.resources.grain==5 and state.resources.sugar==2)
+assert(state.resources.spice==1 and state.resources.herb==10 and state.resources.grain==11 and state.resources.sugar==14)
 assert(state.resources.egg==4 and not state.resources.milk and state.resources.meat==3)
 assert(not NHStore.startOrder(state,"milk_omelet") and state.resources.egg==4)
 assert(NHStore.commit(state))

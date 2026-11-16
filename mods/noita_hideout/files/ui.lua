@@ -18,7 +18,7 @@ local recipe_category="alchemy"
 local alchemy_mode="synthesis"
 local shop_category="materials"
 local selected_entry,salvage_target
-local farm_page,selected_plot,selected_crop="plots",nil,nil
+local farm_page,selected_plot="plots",nil
 local livestock_page,selected_pen="pens",nil
 local work_tabs={
     {key="orders",id=212,zh="工坊",en="Workshop"},
@@ -47,7 +47,7 @@ local shop_tabs={
 }
 local farm_tabs={
     {key="plots",id=410,zh="田地",en="Plots"},
-    {key="stock",id=411,zh="农产库存",en="Harvest stock"},
+    {key="stock",id=411,zh="农产库存",en="Crop stock"},
 }
 local livestock_tabs={
     {key="pens",id=440,zh="栏舍",en="Pens"},
@@ -339,50 +339,37 @@ local function draw_farm(farm,y,tr,button,label,value_row,dispatch)
             local crop=crops[entry.crop]
             local state=tr("空闲","Empty")
             if crop then
-                state=(entry.ready and tr("成熟","Ready") or time_text(entry.remaining)).."  "..crop.name
+                state=crop.name.."  "..(entry.blocked and tr("库存已满","Storage full") or time_text(entry.remaining))
             end
             local title=string.format(tr("田 %d","Plot %d"),i).."   "..state
-            if button(420+i,6,y+(i-1)*13,title,entry.ready and green or white) then
-                selected_plot,selected_crop=i,nil
-            end
+            if button(420+i,6,y+(i-1)*13,title) then selected_plot=i end
         end
         return
     end
-    local crop=crops[plot.crop or selected_crop]
-    if button(413,6,y,(plot.crop or not crop) and tr("< 田地","< Plots") or tr("< 作物","< Crops")) then
-        if plot.crop or not crop then selected_plot=nil end
-        selected_crop=nil
-        return
-    end
+    if button(413,6,y,tr("< 田地","< Plots")) then selected_plot=nil; return end
+    local crop=crops[plot.crop]
     local title=string.format(tr("田 %d","Plot %d"),plot.id)
-    if not crop then
-        label(y+14,title..tr(" · 选择作物"," · Choose crop"),white)
-        for i,choice in ipairs(farm.crops) do
-            if button(430+i,6,y+27+(i-1)*13,choice.name,choice.unlocked and gold or muted) then selected_crop=choice.id end
-        end
-        return
+    label(y+14,title.." · "..(crop and crop.name or tr("选择作物","Choose crop")),white)
+    local choices_y=y+28
+    if crop then
+        if plot.blocked then label(y+28,tr("农产库存已满","Crop storage full"),muted)
+        else value_row(y+28,tr("下次自动入库","Next deposit"),time_text(plot.remaining),white) end
+        choices_y=y+42
     end
-    label(y+14,title.." · "..crop.name,white)
-    local eta=plot.crop and plot.remaining or crop.duration
-    value_row(y+28,plot.crop and tr("距离成熟","Time left") or tr("生长时间","Grow time"),time_text(eta),white)
-    value_row(y+41,tr("每次收获","Harvest yield"),"+"..crop.amount,green)
-    value_row(y+54,tr("农产库存","In storage"),compact(crop.stock),white,string.format("%.0f",crop.stock))
-    if plot.crop then
-        if not plot.ready then label(y+69,tr("生长中","Growing"),muted)
-        elseif crop.amount>NHStore.maxResourceAmount-crop.stock then label(y+69,tr("农产库存已满","Storage full"),muted)
-        elseif button(415,6,y+69,tr("收获入库","Harvest crop"),green) then
-            dispatch("farm_harvest",{plot=plot.id,token=plot.token,crop=crop.id})
-            selected_plot,selected_crop=nil,nil
+    for i,choice in ipairs(farm.crops) do
+        local active=plot.crop==choice.id
+        local name=(active and "["..choice.name.."]" or choice.name).."  +"..choice.amount
+        local detail=choice.name.."  +"..choice.amount.." / "..time_text(choice.duration).."   "
+            ..tr("库存 ","In storage ")..string.format("%.0f",choice.stock)
+        if not choice.unlocked then detail=detail.."   "..tr("需要农业设备","Needs farming equipment") end
+        if button(430+i,6,choices_y+(i-1)*13,name,active and green or choice.unlocked and gold or muted,detail)
+            and choice.unlocked and not active then
+            dispatch("farm_plant",{plot=plot.id,token=plot.token,crop=choice.id})
         end
-    elseif not crop.unlocked then
-        label(y+69,tr("需要农业设备","Needs farming equipment"),muted)
-    elseif button(414,6,y+69,tr("确认播种","Plant crop"),green) then
-        dispatch("farm_plant",{plot=plot.id,token=plot.token,crop=crop.id})
-        selected_crop=nil
     end
 end
 
-local function draw_livestock(farm,y,tr,button,label,value_row,dispatch)
+local function draw_livestock(farm,y,tr,button,label,value_row)
     if livestock_page=="produce" then
         for i,entry in ipairs(farm.produce) do
             value_row(y+(i-1)*13,entry.name,compact(entry.stock),entry.stock>0 and green or muted,
@@ -398,8 +385,8 @@ local function draw_livestock(farm,y,tr,button,label,value_row,dispatch)
     if not pen then
         for i,p in ipairs(farm.pens) do
             local text=p.title.."   "..(p.name or tr("空闲","Empty"))
-            if p.count and p.count>0 then text=text.." ×"..p.count end
-            if button(450+i,6,y+(i-1)*13,text,p.canCollect and green or white) then selected_pen=i end
+            if p.name then text=text.."   "..(p.blocked and tr("库存已满","Storage full") or time_text(p.remaining)) end
+            if button(450+i,6,y+(i-1)*13,text) then selected_pen=i end
         end
         return
     end
@@ -415,15 +402,11 @@ local function draw_livestock(farm,y,tr,button,label,value_row,dispatch)
         end
     elseif not pen.grown then
         value_row(y+56,tr("距离成年","Time to adulthood"),time_text(pen.remaining),white)
+        value_row(y+69,tr("首次自动入库","First deposit"),time_text(pen.remaining+pen.period),white)
+    elseif pen.blocked then
+        label(y+56,tr("畜产库存已满","Produce storage full"),muted)
     else
-        value_row(y+56,tr("暂存轮数","Batches ready"),pen.count.." / "..NHLivestock.maxBatches,pen.count>0 and green or white)
-        if pen.count<NHLivestock.maxBatches then value_row(y+69,tr("下次产出","Next batch"),time_text(pen.remaining),white)
-        else label(y+69,tr("栏舍暂存已满","Pen storage full"),muted) end
-        if pen.canCollect then
-            if button(445,6,y+84,tr("领取全部畜产","Collect all produce"),green) then
-                dispatch("collect_livestock",{pen=pen.id,nextAt=pen.nextAt})
-            end
-        elseif pen.count>0 then label(y+84,tr("畜产库存已满","Produce storage full"),muted) end
+        value_row(y+56,tr("下次自动入库","Next deposit"),time_text(pen.remaining),white)
     end
 end
 
@@ -506,15 +489,14 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)+(per_card and 13 or 0)
     elseif ranching then
         if livestock_page=="produce" then body_height=13*#model.farm.produce+5
-        elseif selected_pen and model.farm.pens[selected_pen] then body_height=100
+        elseif selected_pen and model.farm.pens[selected_pen] then body_height=84
         else body_height=13*math.max(1,#model.farm.pens)+5 end
     elseif farming then
         local farm=model.farm
         local plot=selected_plot and farm.plots[selected_plot]
         if farm_page=="stock" then body_height=13*#farm.crops+5
         elseif not plot then body_height=13*math.max(1,#farm.plots)+5
-        elseif not plot.crop and not selected_crop then body_height=27+13*#farm.crops+5
-        else body_height=85 end
+        else body_height=(plot.crop and 42 or 28)+13*#farm.crops+2 end
     elseif crafting and selected then
         body_height=68+12*#selected.inputs
         if catalyst_count>0 then body_height=body_height+13+12*catalyst_count end
@@ -561,7 +543,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if button(t.id,t.x,t.y,t.name,t.key==tab and gold or muted) then
             tab,selected_entry,salvage_target=t.key,nil,nil
             selected_pen=nil
-            selected_plot,selected_crop=nil,nil
+            selected_plot=nil
             return hover
         end
     end
@@ -569,7 +551,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         local current=ranching and livestock_page or farming and farm_page or (shopping and shop_category or recipe_category)
         if button(t.id,t.x,t.y,t.name,t.key==current and gold or muted) then
             if ranching then livestock_page,selected_pen=t.key,nil
-            elseif farming then farm_page,selected_plot,selected_crop=t.key,nil,nil
+            elseif farming then farm_page,selected_plot=t.key,nil
             elseif shopping then shop_category=t.key else recipe_category=t.key end
             selected_entry=nil
             return hover
@@ -653,7 +635,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         else label(y+26,tr("库存已满","Storage full"),muted) end
         if button(261,6,y+38,tr("取消","Cancel")) then salvage_target=nil end
     elseif ranching then
-        draw_livestock(model.farm,body,tr,button,label,value_row,dispatch)
+        draw_livestock(model.farm,body,tr,button,label,value_row)
     elseif farming then
         draw_farm(model.farm,body,tr,button,label,value_row,dispatch)
     elseif crafting and selected then
@@ -1138,7 +1120,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         end
     end
     local function sprite(v,id,x,y,alpha)
-        local image = v.icon
+        local image = v.kind=="summon_card" and v.species and NHCompanions.cardIcon(v.species) or v.icon
         if type(image) ~= "string" or not image:match("%.png$") then image=icons[v.kind] end
         if not image then
             GuiText(gui,x-2*scale,y-4*scale,"?",scale)

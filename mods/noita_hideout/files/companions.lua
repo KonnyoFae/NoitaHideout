@@ -17,8 +17,12 @@ NHCompanions.bonuses={
 local families={farm={"dryad","flower_fairy"},livestock={"minotaur","griffin"}}
 local modulus=2147483647
 
+function NHCompanions.cardIcon(id)
+    return items.."card_"..id..".png"
+end
+
 local function card(id,remaining)
-    return {kind="summon_card",species=id,remaining=remaining,name="$nh_card_"..id,icon=items.."card_"..id..".png"}
+    return {kind="summon_card",species=id,remaining=remaining,name="$nh_card_"..id,icon=NHCompanions.cardIcon(id)}
 end
 
 function NHCompanions.withCount(item,count)
@@ -164,7 +168,7 @@ function NHCompanions.grantSet(state)
 end
 
 -- One persistent roll per successful crop or animal production cycle, in the
--- same transaction as its produce. Batched collection has the same odds.
+-- same transaction as its produce, even when multiple batches are due.
 function NHCompanions.reward(state,source,units)
     local family=assert(families[source])
     local book=state.summons or {pending={}}
