@@ -1440,6 +1440,58 @@ local function testSpecialLivestock()
 end
 testSpecialLivestock()
 
+local function testGelPoolProduction()
+    settings,flags={},{}
+    new_world()
+    local s=state()
+    s.materials={slime=250,water=150,soil=60,soil_lush=40}
+    s.levels.farmland=1
+    s.farm.plots[1]={token=1,crop="grain",readyAt=NHFarm.crops.grain.frames}
+    assert(NHStore.commit(s))
+    boot()
+    inventory_open=true
+    local view=tick()
+    assert(has_project(view.progression.expansion,"gel_pool").canBuy)
+    advance(210)
+    tick(nil,"buy_upgrade",{id="gel_pool",level=0})
+    s=state()
+    local pool=assert(s.farm.pens[9])
+    assert(pool.born==NHFarm.observe(s,frame) and pool.born>=210 and pool.nextAt==pool.born+240*60)
+    assert(not next(s.materials) and not s.resources.herb and not s.resources.fiber)
+    -- Both independent rolls win at the first deadline.
+    s.gelBonus={seed=100,pending={}}
+    s.summons={gel_pool=100,pending={}}
+    assert(NHStore.commit(s))
+    boot()
+    inventory_open=false
+    entities[player].x=400
+    advance(pool.nextAt-NHFarm.observe(s,frame)-1)
+    assert(not state().resources.herb and not state().resources.spice)
+    tick()
+    s=state()
+    assert(s.resources.herb==4 and s.resources.fiber==6 and s.resources.spice==1)
+    local dose,card
+    for _,row in ipairs(s.warehouse) do
+        if row.item.kind=="dose" then dose=row end
+        if row.item.species=="slime" then card=row end
+    end
+    assert(dose and dose.item.remaining==3 and card and card.item.remaining==80)
+    boot()
+    entities[player].x=227
+    inventory_open=true
+    tick()
+    assert(state().resources.spice==1 and state().farm.pens[9].nextAt==pool.nextAt+240*60)
+    local pouch=starter()
+    tick(nil,"open_container",{pouchId=pouch.id,safeSlot=pouch.slot,container="safe"})
+    tick(nil,"pack_dose",{pouchId=pouch.id,container="warehouse",safeSlot=dose.slot,targetCell=4})
+    local cell=assert(starter().cells[4])
+    assert(cell.remaining==3 and (cell.subtype or "fire")==dose.item.subtype)
+    tick(nil,"use_inventory",{container="pouch",pouchId=pouch.id,cell=4,kind="dose",
+        count=1,remaining=3,subtype=dose.item.subtype})
+    assert(starter().cells[4].remaining==2)
+end
+testGelPoolProduction()
+
 local function testCardSupplies()
     settings,flags={},{}
     new_world()
@@ -1472,12 +1524,12 @@ local function testCardSupplies()
     end
     for _,species in ipairs(NHCompanions.order) do assert(seen[species]) end
     assert(view.warehouse.equipment[1].kind=="card_wallet")
-    assert(seen.bee and seen.dragon and #state().warehouse==#NHCompanions.order+1 and view.warehouse_capacity.collection==48)
+    assert(seen.slime and #state().warehouse==#NHCompanions.order+1 and view.warehouse_capacity.collection==48)
     boot()
     assert(#state().warehouse==#NHCompanions.order+1)
     tick()
     local lastPet
-    for _,species in ipairs({"bee","dragon"}) do
+    for _,species in ipairs({"bee","dragon","slime"}) do
         local row
         for _,item in ipairs(state().warehouse) do
             if item.item.species==species then row=item; break end
@@ -1500,7 +1552,7 @@ local function testCardSupplies()
     end
 end
 testCardSupplies()
-print("Controller: test-only supplies, failed delivery, all six independent card stacks and card wallet passed.")
+print("Controller: test-only supplies, failed delivery, all companion card stacks and card wallet passed.")
 
 local function testCompanionSwitch()
     settings,flags={},{}

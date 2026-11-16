@@ -12,6 +12,8 @@ NHLivestock={
         dragon_egg={young={"龙蛋","Dragon egg"},adult={"寻宝龙","Treasure dragon"},pen={"龙巢","Dragon nest"},
             facility="dragon_nest",locked="Dragon nest is required.",offset=8,
             growth=480*60,period=300*60,yields={{"gold",150},{"loot",1}}},
+        gel_pool={adult={"生产中","Producing"},pen={"凝胶池","Gel pool"},facility="gel_pool",offset=9,
+            growth=0,period=240*60,yields={{"herb",4},{"fiber",6}}},
     },
 }
 
@@ -22,6 +24,8 @@ local function penSpecies(state,slot)
         if NHStore.level(state,"beehive")>0 then return "queen_bee" end
     elseif slot==8 then
         if NHStore.level(state,"dragon_nest")>0 then return "dragon_egg" end
+    elseif slot==9 then
+        if NHStore.level(state,"gel_pool")>0 then return "gel_pool" end
     elseif slot>=1 and slot<=2*NHStore.level(state,"livestock") then
         return slot%2==1 and "chick" or "calf"
     end
@@ -29,6 +33,9 @@ end
 
 function NHLivestock.validate(state,whole)
     local pens=state.farm.pens
+    if NHStore.level(state,"gel_pool")>0 then
+        assert(type(pens)=="table" and pens[9] and pens[9].kind=="gel_pool","Missing gel pool production clock")
+    end
     if pens==nil then return end
     assert(type(pens)=="table","Invalid livestock pens")
     for slot,animal in pairs(pens) do
@@ -41,7 +48,7 @@ end
 
 function NHLivestock.freePen(state,species)
     local kind=NHLivestock.species[species]
-    if not kind then return nil,"Unknown shop item." end
+    if not kind or not kind.young then return nil,"Unknown shop item." end
     local level=NHStore.level(state,kind.facility or "livestock")
     if level==0 then return nil,kind.locked or "Livestock equipment is required." end
     local pens=state.farm.pens or {}
@@ -54,6 +61,7 @@ end
 
 function NHLivestock.deliver(state,species,slot,now)
     NHFarm.sync(state,now or state.farm.time)
+    state.farm.time=math.max(state.farm.time,now or state.farm.time)
     local birth=state.farm.time
     local kind=NHLivestock.species[species]
     state.farm.pens=state.farm.pens or {}
@@ -74,9 +82,9 @@ function NHLivestock.batches(state,animal,now)
 end
 
 function NHLivestock.settle(state,now)
-    local total,ranch,hives=0,0,0
+    local total,ranch,hives,gel=0,0,0,0
     local finds={}
-    for slot=1,8 do
+    for slot=1,9 do
         local animal=state.farm.pens and state.farm.pens[slot]
         if animal and now>=animal.nextAt then
             local kind=NHLivestock.species[animal.kind]
@@ -91,6 +99,7 @@ function NHLivestock.settle(state,now)
                 animal.nextAt=animal.nextAt+count*kind.period
                 total=total+count
                 if kind.facility=="beehive" then hives=hives+count
+                elseif kind.facility=="gel_pool" then gel=gel+count
                 elseif not kind.facility then ranch=ranch+count end
             end
         end
@@ -100,6 +109,10 @@ function NHLivestock.settle(state,now)
     end
     if hives>0 then
         for _,id in ipairs(NHCompanions.reward(state,"beehive",hives)) do finds[#finds+1]=id end
+    end
+    if gel>0 then
+        NHGelPool.award(state,gel)
+        for _,id in ipairs(NHCompanions.reward(state,"gel_pool",gel)) do finds[#finds+1]=id end
     end
     return total,finds
 end
@@ -121,7 +134,7 @@ function NHLivestock.view(state,lang,now)
         local kind=NHLivestock.species[species]
         local title=kind.pen[language]
         if not kind.facility then title=title.." "..math.ceil(slot/2) end
-        local pen={id=slot,species=species,title=title,young=kind.young[language],growth=kind.growth/60,period=kind.period/60}
+        local pen={id=slot,species=species,title=title,young=kind.young and kind.young[language],growth=kind.growth/60,period=kind.period/60}
         pen.yieldLabel,pen.yieldValue=NHLivestock.yieldText(species,lang)
         local animal=(state.farm.pens or {})[slot]
         if animal then
@@ -132,6 +145,9 @@ function NHLivestock.view(state,lang,now)
                 for _,part in ipairs(kind.yields) do
                     perMinute[part[1]]=(perMinute[part[1]] or 0)+part[2]*cyclesPerMinute
                 end
+                if species=="gel_pool" then
+                    perMinute.spice=(perMinute.spice or 0)+cyclesPerMinute*NHGelPool.bonusChance/100
+                end
             end
             pen.name=pen.grown and kind.adult[language] or pen.young
             pen.nextAt=animal.nextAt
@@ -141,12 +157,16 @@ function NHLivestock.view(state,lang,now)
         end
         pens[#pens+1]=pen
     end
-    for slot=1,8 do
+    for slot=1,9 do
         local species=penSpecies(state,slot)
         if species then addPen(slot,species) end
     end
     local produce,ids={},{"egg","milk","meat"}
-    if NHStore.level(state,"beehive")>0 then ids[#ids+1]="sugar"; ids[#ids+1]="spice" end
+    local hive=NHStore.level(state,"beehive")>0
+    local pool=NHStore.level(state,"gel_pool")>0
+    if hive then ids[#ids+1]="sugar" end
+    if hive or pool then ids[#ids+1]="spice" end
+    if pool then ids[#ids+1]="herb"; ids[#ids+1]="fiber" end
     if NHStore.level(state,"dragon_nest")>0 then ids[#ids+1]="gold" end
     for _,id in ipairs(ids) do
         local resource=NHFarm.crops[id] or NHLivestock.resources[id]

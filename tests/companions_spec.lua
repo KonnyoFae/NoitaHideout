@@ -30,12 +30,15 @@ local batch=NHCompanions.reward(before,"livestock",40)
 local total=0
 for _=1,40 do total=total+#NHCompanions.reward(one,"livestock",1) end
 assert(total==#batch and before.summons.livestock==one.summons.livestock)
-before.summons.beehive,one.summons.beehive=31,31
-local batchBees=NHCompanions.reward(before,"beehive",100)
-local oneBees=0
-for _=1,100 do oneBees=oneBees+#NHCompanions.reward(one,"beehive",1) end
-assert(#batchBees>0 and #batchBees==oneBees and before.summons.beehive==one.summons.beehive)
-for _,id in ipairs(batchBees) do assert(id=="bee") end
+for _,source in ipairs({{"beehive","bee"},{"gel_pool","slime"}}) do
+    local facility,companion=unpack(source)
+    before.summons[facility],one.summons[facility]=31,31
+    local batchCards=NHCompanions.reward(before,facility,100)
+    local singleCards=0
+    for _=1,100 do singleCards=singleCards+#NHCompanions.reward(one,facility,1) end
+    assert(#batchCards>0 and #batchCards==singleCards and before.summons[facility]==one.summons[facility])
+    for _,id in ipairs(batchCards) do assert(id==companion) end
+end
 assert(before.summons.farm==one.summons.farm and before.summons.livestock==one.summons.livestock)
 
 -- Used cards each occupy a slot. Capturing another species at capacity queues
@@ -84,11 +87,12 @@ local full=state.warehouse[2].item
 assert(full.species=="dryad" and full.remaining==80 and state.warehouse[1].item.remaining==2)
 state.summons.pending.dryad=4000000000
 state.summons.beehive=654
+state.summons.gel_pool=912
 assert(NHStore.commit(state))
 state=assert(NHStore.load())
-assert(state.warehouse[2].item.count==4000000001 and #state.warehouse==7 and not next(state.summons.pending))
-assert(state.summons.beehive==654)
-for _,id in ipairs({"bee","dragon"}) do
+assert(state.warehouse[2].item.count==4000000001 and #state.warehouse==1+#NHCompanions.order and not next(state.summons.pending))
+assert(state.summons.beehive==654 and state.summons.gel_pool==912)
+for _,id in ipairs({"bee","dragon","slime"}) do
     local found=false
     for _,row in ipairs(state.warehouse) do
         if row.item.species==id then
@@ -296,7 +300,7 @@ assert(entities[replacement].components.VariableStorageComponentnh_companion_clo
 assert(EntityGetIsAlive(vanilla) and EntityGetIsAlive(food))
 assert(NHCompanions.use(player,held,"en") and not EntityGetIsAlive(held))
 assert(not EntityGetIsAlive(replacement) and #EntityGetAllChildren(player,"noita_hideout_companion")==1)
-for _,species in ipairs({"bee","dragon"}) do
+for _,species in ipairs({"bee","dragon","slime"}) do
     entities[player].x=0
     targets={}
     target(65,10,0)
@@ -333,13 +337,15 @@ local function png(path,width,height)
     return data
 end
 local portraits={}
-for _,id in ipairs({"bee","dragon"}) do
+for _,id in ipairs({"bee","dragon","slime"}) do
     local base="mods/noita_hideout/files/"
     local sprite=base.."companions/"..id.."_idle"
     local source="resources/"..id.."/sprite-fusion-animation-idle-bounce-smooth-loop/spritesheet.png"
-    assert(png(sprite..".png",512,64)==bytes(source))
+    local frameSize=id=="slime" and 65 or 64
+    assert(png(sprite..".png",8*frameSize,frameSize)==bytes(source))
     local animation=bytes(sprite..".xml")
     assert(animation:find(sprite..".png",1,true) and animation:find('frame_count="8"',1,true))
+    assert(animation:find('frame_width="'..frameSize..'"',1,true) and animation:find('frame_height="'..frameSize..'"',1,true))
     assert(animation:find('frame_wait="0.125"',1,true) and animation:find('loop="1"',1,true))
     assert(bytes(base.."companions/"..id..".xml"):find(sprite..".xml",1,true))
     local card=bytes(base.."items/card_"..id..".xml")
@@ -348,7 +354,7 @@ for _,id in ipairs({"bee","dragon"}) do
     portraits[id]=png(NHCompanions.cardIcon(id),16,17)
     png(base.."items/card_"..id.."_world.png",10,13)
 end
-assert(portraits.bee~=portraits.dragon)
+assert(portraits.bee~=portraits.dragon and portraits.slime~=portraits.dragon and portraits.slime~=portraits.bee)
 print("Summon rewards, card durability, replacement rollback, source-scoped auras, travel gifts and expiration passed.")
 
 local quick=create(0,0)

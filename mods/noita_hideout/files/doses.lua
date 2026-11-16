@@ -36,6 +36,7 @@ local function commit(state, changed)
     state.revision, state.nextItemId = changed.revision, changed.nextItemId
     state.warehouse = changed.warehouse
     state.summons, state.dragonLoot = changed.summons, changed.dragonLoot
+    state.gelBonus,state.resources=changed.gelBonus,changed.resources
     state.safe = changed.safe
     state.pouches, state.issuedDoses = changed.pouches, changed.issuedDoses
     return true

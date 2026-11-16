@@ -2,9 +2,16 @@ local M={}
 local modulus=2147483647
 
 -- These keys identify the exact discovery in the save, even if its warehouse is full.
+-- Keep 0.32 discoveries readable. New cards use a separate key space:
+-- "slime" already means the flask of slime in an old nest's pending stock.
+local cardSpecies={dryad="dryad",flower_fairy="flower_fairy",minotaur="minotaur",griffin="griffin",bee="bee",dragon="dragon"}
 local cardPool={}
 for _,species in ipairs(NHCompanions.order) do
-    if species~="dragon" then cardPool[#cardPool+1]=species end
+    if species~="dragon" then
+        local key=cardSpecies[species] and species or "card_"..species
+        cardSpecies[key]=species
+        cardPool[#cardPool+1]=key
+    end
 end
 local spells={"spell_LIGHT_BULLET","spell_LIGHT_BULLET_TRIGGER","spell_BULLET","spell_SPITTER",
     "spell_BOMB","spell_ICEBALL","spell_CLOUD_WATER","spell_DISC_BULLET"}
@@ -36,7 +43,7 @@ end
 local templates={}
 local function itemFor(key)
     if kinds[key]=="card" then
-        return NHCompanions.withCount({species=key,remaining=NHCompanions.durability},1)
+        return NHCompanions.withCount({species=cardSpecies[key],remaining=NHCompanions.durability},1)
     end
     if kinds[key]=="container" then
         local powder=key=="sand" or key=="gunpowder"
@@ -99,7 +106,7 @@ function M.award(state,periods)
                 book.seed=advance(book.seed)
                 local key=group.keys[1+book.seed%#group.keys]
                 book.pending[key]=(book.pending[key] or 0)+1
-                if group.kind=="card" then awards[#awards+1]=key end
+                if group.kind=="card" then awards[#awards+1]=cardSpecies[key] end
                 break
             end
         end

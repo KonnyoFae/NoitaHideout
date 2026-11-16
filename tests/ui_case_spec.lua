@@ -1167,6 +1167,47 @@ end
 testSpecialPens("zh")
 testSpecialPens("en")
 
+local function testGelPool(lang)
+    model.lang,width,height=lang,320,180
+    local zh=lang=="zh"
+    local stock={profile=1,levels={},resources={},bankGold=0,farm={time=0,plots={}},warehouse={},pouches={},nextItemId=1}
+    local original=model.progression
+    model.progression=NHStore.progressMenu(profile,lang)
+    model.farm=NHFarm.view(stock,lang,0)
+    render(model,223)
+    render(model,440)
+    render(model)
+    reveal(model,446)
+    render(model,446)
+    render(model)
+    local title=zh and "凝胶池" or "Gel pool"
+    assert(buttons[240] and (drawn[title] or tips[title]))
+    stock.levels.gel_pool=1
+    stock.farm.pens={[9]={kind="gel_pool",born=0,nextAt=240*60}}
+    model.farm=NHFarm.view(stock,lang,0)
+    render(model,223)
+    render(model,451)
+    render(model)
+    local bonus=zh and "香料 + 激活剂" or "Spice + injector"
+    local card=zh and "凝胶少女卡" or "Gel maiden card"
+    assert(tips[bonus] and tips[bonus]:find(zh and "消耗品库" or "supplies",1,true))
+    assert(tips[card] and tips[card]:find(zh and "独立" or "separately",1,true))
+    assert(drawn["4 / 6"] and drawn["4:00"] and drawn["30%"] and drawn["3%"] and not buttons[444])
+    model.farm.gelPending,model.farm.gelSpicePending=3,2
+    render(model)
+    local meds=zh and "待入库激活剂" or "Injectors awaiting space"
+    local spices=zh and "待入库香料" or "Spice awaiting space"
+    assert((drawn[meds] or tips[meds]) and (drawn[spices] or tips[spices]) and drawn["3"] and drawn["2"])
+    assert(panels[20000] and panels[20000].h>0,"the gel pool details scroll on a narrow screen")
+    model.farm.pens[1].blocked=true
+    render(model)
+    local full=zh and "草药或纤维库存已满" or "Herb or fiber stock full"
+    assert(drawn[full] or tips[full])
+    model.progression=original
+end
+testGelPool("zh")
+testGelPool("en")
+
 local function testCardWalletPanel()
     width,height,model.lang,model.debug=640,360,"en",true
     model.perkCapacity,model.packablePerk=0,nil
@@ -1208,6 +1249,12 @@ local function testCardWalletPanel()
     model.cells[3],affinity.dragon=card(nil,"dragon",80),100
     point(tiles[1006].x+1,tiles[1006].y+1)
     assert(drawn[NHCompanions.cardIcon("dragon")] and drawn["Fire immunity"] and drawn["Projectile shield at 100% of normal recharge"])
+    model.cells[3],affinity.slime=card(nil,"slime",80),0
+    point(tiles[1006].x+1,tiles[1006].y+1)
+    assert(drawn[NHCompanions.cardIcon("slime")] and drawn["Underwater breathing"] and not drawn["Heals 1 HP every 6 s"])
+    affinity.slime=100
+    point(tiles[1006].x+1,tiles[1006].y+1)
+    assert(drawn["Heals 1 HP every 6 s"] and drawn["25% gift chance per 15 s of travel"])
     model.lang="zh"
     render(model)
     point(tiles[1009].x+1,tiles[1009].y+1)
@@ -1238,6 +1285,8 @@ local function testCardWalletPanel()
     for _,lang in ipairs({"zh","en"}) do
         model.lang,width,height=lang,320,180
         render(model,213)
+        render(model)
+        assert(tips[lang=="zh" and "共 7 种召唤卡，每种各发一张满耐久卡。" or "One full-charge card for each of the 7 companions."])
         assert(render(model,480)=="test_cards")
         render(model)
         assert(panels[70].y>=0 and panels[210].y>=0 and buttons[481].y<height)

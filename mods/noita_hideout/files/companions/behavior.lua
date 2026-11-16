@@ -51,8 +51,8 @@ local function support(player,id,spec,bonus,x,y,age)
     if spec.effect then
         refreshAura(player,"nh_companion_"..spec.effect,"data/entities/misc/"..spec.effect..".xml",x,y)
     end
-    if id=="flower_fairy" or id=="dryad" then
-        local seconds=id=="flower_fairy" and bonus.fairySeconds or bonus.dryadSeconds
+    if id=="flower_fairy" or spec.bonus=="regeneration" then
+        local seconds=id=="flower_fairy" and bonus.fairySeconds or bonus.regenSeconds
         if seconds==0 or age%(seconds*60)~=0 then return end
         local model=EntityGetFirstComponentIncludingDisabled(player,"DamageModelComponent")
         if model then

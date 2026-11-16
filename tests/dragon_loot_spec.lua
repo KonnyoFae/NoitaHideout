@@ -42,7 +42,7 @@ for seed=1,1500 do
     if item.kind=="summon_card" then
         assert(#cards==1 and cards[1]==item.species and item.remaining==80 and NHCompanions.validCard(item))
         category=item.species=="dragon" and "dragon" or "card"
-        key=item.species
+        key="card_"..item.species
     else
         assert(#cards==0)
         if item.kind=="spell" then
@@ -65,10 +65,23 @@ for seed=1,1500 do
     if seed<=100 then totals[category]=totals[category]+1 end
 end
 assert(totals.spell==40 and totals.containers==28 and totals.supplies==24 and totals.card==5 and totals.dragon==3)
-for _,key in ipairs({"dryad","flower_fairy","minotaur","griffin","bee","dragon","water","slime",
+for _,species in ipairs(NHCompanions.order) do assert(seen["card_"..species],species) end
+for _,key in ipairs({"water","slime",
     "magic_liquid_unstable_teleportation","sand","gunpowder","medkit","bandage","bread","sugar_cube","metal_knife","grenade"}) do
     assert(seen[key],key)
 end
+-- The old slime-flask key and the new slime-maiden key must survive a
+-- delayed delivery in the same snapshot and use their separate warehouses.
+s=load()
+s.dragonLoot={seed=100,pending={slime=1,card_slime=1}}
+assert(NHDragonLoot.pendingCards(s)==1)
+assert(NHStore.commit(s))
+s=load()
+local flask=s.warehouse[assert(NHStore.slotIndex(s,"warehouse",1,"potion"))].item
+local slimeCard=s.warehouse[assert(NHStore.slotIndex(s,"warehouse",1,"summon_card"))].item
+assert(flask.materials.slime==500 and slimeCard.species=="slime" and slimeCard.remaining==80)
+-- The rest of this suite starts with an empty profile.
+settings,flags={},{}
 
 -- Occupy every spell slot, including the one reserved for an unfinished
 -- workshop order. A due nest must retain this exact discovery across reloads.

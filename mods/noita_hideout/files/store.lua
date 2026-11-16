@@ -9,6 +9,7 @@ NHMedkits=dofile("mods/noita_hideout/files/medkits.lua")
 NHSurgeryKits=dofile("mods/noita_hideout/files/surgery_kits.lua")
 NHThrowables=dofile("mods/noita_hideout/files/throwables.lua")
 NHDragonLoot=dofile("mods/noita_hideout/files/dragon_loot.lua")
+NHGelPool=dofile("mods/noita_hideout/files/gel_pool.lua")
 dofile("mods/noita_hideout/files/farming.lua")
 dofile("mods/noita_hideout/files/essences.lua")
 dofile("mods/noita_hideout/files/pouches.lua")
@@ -186,6 +187,7 @@ local function validate(s)
     assert(type(s.checkpoints)=="table","Invalid Holy Mountain checkpoints")
     NHCompanions.validate(s,whole)
     NHDragonLoot.validate(s,whole)
+    NHGelPool.validate(s,whole)
     NHAffinity.validate(s,whole)
     for key,visited in pairs(s.checkpoints) do
         assert(type(key)=="string" and key~="" and visited==true,"Invalid Holy Mountain checkpoint")
@@ -491,6 +493,7 @@ function NHStore.commit(state)
         next_state.revision = saved.revision + 1
         NHCompanions.stageDelivery(next_state)
         NHDragonLoot.stageDelivery(next_state)
+        NHGelPool.stageDelivery(next_state)
         validate(next_state)
         local payload = encode(next_state)
         local raw = "NH1:" .. checksum(payload) .. ":" .. payload
@@ -506,6 +509,7 @@ function NHStore.commit(state)
     if not ok then return nil, tostring(result) end
     state.revision,state.nextItemId=result.revision,result.nextItemId
     state.warehouse,state.summons,state.dragonLoot=result.warehouse,result.summons,result.dragonLoot
+    state.gelBonus,state.resources=result.gelBonus,result.resources
     return true
 end
 
@@ -741,6 +745,15 @@ NHStore.shopGoods={
     {id="dragon_egg",animal="dragon_egg",zh="龙蛋",en="Dragon egg",category="livestock",price=3000,quantity=1},
 }
 
+function NHStore.stockDoseSlot(state,subtype)
+    for index,row in ipairs(state.warehouse) do
+        if row.item.kind=="dose" and NHStore.acceptsDose(row.item,NHStore.doseDurability,subtype) then
+            return row.slot or index,index
+        end
+    end
+    if state.nextItemId<max_safe_integer then return NHStore.freeSlot(state,"warehouse",nil,"dose") end
+end
+
 function NHStore.canBuyGood(state,good)
     if good.animal then
         local slot,reason=NHLivestock.freePen(state,good.animal)
@@ -756,10 +769,9 @@ function NHStore.canBuyGood(state,good)
     end
     local kind=good.item.kind
     if kind=="dose" then
-        for _,row in ipairs(state.warehouse) do
-            local item=row.item
-            if item.kind==kind and NHStore.acceptsDose(item,NHStore.doseDurability,good.item.subtype) then return true,row.slot,row end
-        end
+        local slot,index=NHStore.stockDoseSlot(state,good.item.subtype)
+        if slot then return true,slot,index and state.warehouse[index] end
+        return false,"Supplies storage is full."
     end
     local slot=NHStore.freeSlot(state,"warehouse",nil,kind)
     if not slot or state.nextItemId>=max_safe_integer then return false,"Supplies storage is full." end

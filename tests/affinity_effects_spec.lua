@@ -123,15 +123,16 @@ for tier,threshold in ipairs({0,10,40,100}) do
         expire(pet,clock)
     end
 
-    for _,id in ipairs({"dryad","flower_fairy"}) do
+    for _,id in ipairs({"dryad","flower_fairy","slime"}) do
         pet,clock=companion(id)
-        local period=(id=="dryad" and {0,12,9,6} or {5,4,3,2})[tier]
+        local period=(id=="flower_fairy" and {5,4,3,2} or {0,12,9,6})[tier]
         local ticks=math.max(period,12)*10
         health.hp=1
         for _=1,ticks do NHCompanions.update(pet) end
         local pulses=period>0 and math.floor(ticks/(period*10)) or 0
         assert(math.abs(health.hp-1-0.04*pulses)<0.00001)
         if id=="dryad" then assert(#EntityGetAllChildren(player,"nh_companion_effect_protection_radioactivity")==1) end
+        if id=="slime" then assert(#EntityGetAllChildren(player,"nh_companion_effect_breath_underwater")==1) end
         expire(pet,clock)
     end
     for _,id in ipairs({"griffin","bee"}) do

@@ -1,23 +1,24 @@
-NHCompanions={durability=80,order={"dryad","flower_fairy","minotaur","griffin","bee","dragon"}}
+NHCompanions={durability=80,order={"dryad","flower_fairy","minotaur","griffin","bee","dragon","slime"}}
 local items="mods/noita_hideout/files/items/"
 local pets="mods/noita_hideout/files/companions/"
 NHCompanions.species={
-    dryad={zh="树精",en="Dryad",gift="bread",effect="effect_protection_radioactivity",damage=0.22},
+    dryad={zh="树精",en="Dryad",gift="bread",effect="effect_protection_radioactivity",bonus="regeneration",damage=0.22},
     flower_fairy={zh="花妖",en="Flower fairy",gift="bandage",damage=0.16},
     minotaur={zh="米诺陶少女",en="Minotaur maiden",gift="bandage",effect="effect_protection_melee",bonus="shield",damage=0.32},
     griffin={zh="狮鹫少女",en="Griffin maiden",gift="sugar_cube",effect="effect_faster_levitation",bonus="flight",damage=0.24},
     bee={zh="蜂娘",en="Bee maiden",gift="sugar_cube",effect="effect_movement_faster",bonus="flight",damage=0.20},
     dragon={zh="龙娘",en="Dragon maiden",gift="grenade",effect="effect_protection_fire",bonus="shield",damage=0.36},
+    slime={zh="凝胶少女",en="Gel maiden",gift="bandage",effect="effect_breath_underwater",bonus="regeneration",damage=0.20},
 }
 -- Shield recharge uses the native EnergyShieldComponent scale (0.22 on the perk shield).
 NHCompanions.bonuses={
-    [0]={fairySeconds=5,dryadSeconds=0,shieldRecharge=0,flightPercent=0,giftSeconds=30},
-    [1]={fairySeconds=4,dryadSeconds=12,shieldRecharge=0.08,flightPercent=5,giftSeconds=25},
-    [2]={fairySeconds=3,dryadSeconds=9,shieldRecharge=0.15,flightPercent=10,giftSeconds=20},
-    [3]={fairySeconds=2,dryadSeconds=6,shieldRecharge=0.22,flightPercent=15,giftSeconds=15},
+    [0]={fairySeconds=5,regenSeconds=0,shieldRecharge=0,flightPercent=0,giftSeconds=30},
+    [1]={fairySeconds=4,regenSeconds=12,shieldRecharge=0.08,flightPercent=5,giftSeconds=25},
+    [2]={fairySeconds=3,regenSeconds=9,shieldRecharge=0.15,flightPercent=10,giftSeconds=20},
+    [3]={fairySeconds=2,regenSeconds=6,shieldRecharge=0.22,flightPercent=15,giftSeconds=15},
 }
-local families={farm={"dryad","flower_fairy"},livestock={"minotaur","griffin"},beehive={"bee"}}
-local seedOffsets={farm=126,livestock=7918,beehive=15836}
+local families={farm={"dryad","flower_fairy"},livestock={"minotaur","griffin"},beehive={"bee"},gel_pool={"slime"}}
+local seedOffsets={farm=126,livestock=7918,beehive=15836,gel_pool=23754}
 local modulus=2147483647
 
 function NHCompanions.cardIcon(id)

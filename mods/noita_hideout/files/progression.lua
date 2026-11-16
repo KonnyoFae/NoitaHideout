@@ -38,6 +38,8 @@ define("beehive","expansion","蜂箱","Beehive",1,{{"fiber",12},{"slime",75},{"s
     {effect={"可购入女王蜂，定期采集糖分与香料","House a queen bee to produce sugar and spices"}})
 define("dragon_nest","expansion","龙巢","Dragon nest",1,{{"farm_sand",400},{"gunpowder",100},{"oil",150}},
     {effect={"可购入龙蛋，孵化后定期带回金币与物品","Hatch a dragon to bring back gold and items"}})
+define("gel_pool","expansion","凝胶池","Gel pool",1,{{"slime",250},{"water",150},{"farm_soil",100}},
+    {effect={"建成即产草药和纤维，有机会附产香料、激活剂与召唤卡","Produces herbs and fiber with chances of spices, injectors and summon cards"}})
 
 local material_groups={
     farm_sand={alternatives={"sand","sandstone","sandstone_surface"}},
@@ -181,7 +183,7 @@ function NHStore.progressMenu(s,lang)
     return result
 end
 
-function NHStore.buyUpgrade(s,request)
+function NHStore.buyUpgrade(s,request,now)
     local entry=type(request)=="table" and definitions[request.id]
     if not entry or entry.planned then return false,"Construction unavailable." end
     local level=NHStore.level(s,entry.id)
@@ -219,6 +221,7 @@ function NHStore.buyUpgrade(s,request)
         end
     end
     s.levels[entry.id]=level+1
+    if entry.id=="gel_pool" then NHLivestock.deliver(s,"gel_pool",NHLivestock.species.gel_pool.offset,now) end
     return true
 end
 

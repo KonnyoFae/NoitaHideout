@@ -200,6 +200,8 @@ function NHFarm.view(state,lang,now)
     local livestockRates
     view.pens,view.produce,livestockRates=NHLivestock.view(state,lang,now)
     view.dragonPending=NHDragonLoot.pendingCount(state)
+    view.gelPending=NHGelPool.pendingDoses(state)
+    view.gelSpicePending=state.gelBonus and state.gelBonus.spice or 0
     local fieldCounts={}
     for id=1,NHStore.level(state,"farmland") do
         local plot=state.farm.plots[id] or {token=0}

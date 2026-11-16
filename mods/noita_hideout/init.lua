@@ -787,7 +787,8 @@ local function workshop_action(player,action,index)
                 "购买成功，已送入对应设施。","Purchased and delivered to the facility.")
         else commit_edit(NHStore.buyGood,"购买成功，商品已入库。","Purchased and delivered to storage.",index) end
     elseif action=="buy_upgrade" and type(index)=="table" then
-        commit_edit(NHStore.buyUpgrade,"建设完成。","Construction complete.",index)
+        local now=NHFarm.observe(state,GameGetFrameNum())
+        commit_edit(function(draft) return NHStore.buyUpgrade(draft,index,now) end,"建设完成。","Construction complete.")
     elseif action=="farm_plant" and type(index)=="table" then
         local frame=GameGetFrameNum()
         local now=NHFarm.observe(state,frame)

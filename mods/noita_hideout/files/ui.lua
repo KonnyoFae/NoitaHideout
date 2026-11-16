@@ -230,6 +230,8 @@ local function item_details(slot,model,tr)
         lines[#lines+1]=nextTier and (affinity..tr("   下一阶段 ","   Next at ")..nextTier) or affinity
         if slot.species=="dryad" then
             lines[#lines+1]=tr("毒泥免疫","Toxic sludge immunity")
+        elseif slot.species=="slime" then
+            lines[#lines+1]=tr("水下呼吸","Underwater breathing")
         elseif slot.species=="minotaur" or slot.species=="dragon" then
             lines[#lines+1]=slot.species=="dragon" and tr("火焰免疫","Fire immunity") or tr("近战免疫","Melee immunity")
             if bonus.shieldRecharge>0 then
@@ -242,7 +244,7 @@ local function item_details(slot,model,tr)
                 lines[#lines+1]=string.format(tr("每秒恢复 %d%% 飞行能量","Restores %d%% flight fuel per second"),bonus.flightPercent)
             end
         end
-        local healSeconds=slot.species=="flower_fairy" and bonus.fairySeconds or (slot.species=="dryad" and bonus.dryadSeconds)
+        local healSeconds=slot.species=="flower_fairy" and bonus.fairySeconds or (species.bonus=="regeneration" and bonus.regenSeconds)
         if healSeconds and healSeconds>0 then
             lines[#lines+1]=string.format(tr("每 %d 秒恢复 1 HP","Heals 1 HP every %d s"),healSeconds)
         end
@@ -473,11 +475,17 @@ end
 local forage_rows={
     queen_bee={{"蜂娘卡","Bee card","3%"}},
     dragon_egg={{"法术、容器或消耗品","Spell, flask or supply","92%"},{"其他召唤卡","Other summon card","5%"},{"龙娘卡","Dragon card","3%"}},
+    gel_pool={
+        {"香料 + 激活剂","Spice + injector",NHGelPool.bonusChance.."%","同时产出 1 份香料和 1 支随机满耐久激活剂。香料存入农产库存，激活剂存入消耗品库。",
+            "Adds 1 spice to crop stock and 1 random full-charge injector to supplies in the same harvest."},
+        {"凝胶少女卡","Gel maiden card","3%","每轮独立抽取，获得的卡片存入藏品库。","Rolled separately each cycle. The card goes to the collection."},
+    },
 }
 
 local function show_forage(species,y,tr,value_row)
     for _,reward in ipairs(forage_rows[species] or {}) do
-        value_row(y,tr(reward[1],reward[2]),reward[3],muted)
+        local name=tr(reward[1],reward[2])
+        value_row(y,name,reward[3],muted,reward[4] and name,reward[4] and tr(reward[4],reward[5]))
         y=y+13
     end
     return y
@@ -494,6 +502,7 @@ end
 local function draw_livestock(farm,y,tr,button,label,value_row)
     if #farm.pens==0 then
         if button(442,6,y,tr("去扩建畜牧设备","Build livestock pens")) then tab,selected_entry="expansion","livestock" end
+        if button(446,6,y+13,tr("建造凝胶池","Build gel pool")) then tab,selected_entry="expansion","gel_pool" end
         return
     end
     local pen=current_pen(farm)
@@ -513,6 +522,15 @@ local function draw_livestock(farm,y,tr,button,label,value_row)
     if pen.species=="dragon_egg" and (farm.dragonPending or 0)>0 then
         value_row(next_y,tr("已找到，待入库","Found, awaiting space"),compact(farm.dragonPending),gold)
         next_y=next_y+13
+    elseif pen.species=="gel_pool" then
+        if (farm.gelPending or 0)>0 then
+            value_row(next_y,tr("待入库激活剂","Injectors awaiting space"),compact(farm.gelPending),gold)
+            next_y=next_y+13
+        end
+        if (farm.gelSpicePending or 0)>0 then
+            value_row(next_y,tr("待入库香料","Spice awaiting space"),compact(farm.gelSpicePending),gold)
+            next_y=next_y+13
+        end
     end
     if not pen.name then
         if pen.growth>0 then
@@ -526,7 +544,10 @@ local function draw_livestock(farm,y,tr,button,label,value_row)
         value_row(next_y,pen.species=="dragon_egg" and tr("距离孵化","Time to hatch") or tr("距离成年","Time to adulthood"),time_text(pen.remaining),white)
         value_row(next_y+13,tr("首次自动入库","First deposit"),time_text(pen.remaining+pen.period),white)
     elseif pen.blocked then
-        label(next_y,pen.species=="dragon_egg" and tr("存钱罐已满","Bank full") or tr("畜产库存已满","Produce storage full"),muted)
+        local full=tr("畜产库存已满","Produce storage full")
+        if pen.species=="dragon_egg" then full=tr("存钱罐已满","Bank full")
+        elseif pen.species=="gel_pool" then full=tr("草药或纤维库存已满","Herb or fiber stock full") end
+        label(next_y,full,muted)
     else
         value_row(next_y,tr("下次自动入库","Next deposit"),time_text(pen.remaining),white)
     end
@@ -622,7 +643,11 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         elseif pen then
             body_height=84+13*#(forage_rows[pen.species] or {})
             if pen.species=="dragon_egg" and (model.farm.dragonPending or 0)>0 then body_height=body_height+13 end
-        else body_height=13*math.max(1,#model.farm.pens)+5 end
+            if pen.species=="gel_pool" then
+                if (model.farm.gelPending or 0)>0 then body_height=body_height+13 end
+                if (model.farm.gelSpicePending or 0)>0 then body_height=body_height+13 end
+            end
+        else body_height=13*math.max(2,#model.farm.pens)+5 end
     elseif farming then
         local farm=model.farm
         local plot=selected_plot and farm.plots[selected_plot]
@@ -1036,7 +1061,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         if button(217,6,body+33,tr("重发测试针剂包","Reissue test pouch"),gold,
             tr("替换现有针剂包，内含两支激活剂。","Replace the current pouch with two doses.")) then dispatch("restock") end
         if button(480,6,body+49,tr("领取全部召唤卡","Claim all summon cards"),gold,
-            tr("每位伙伴各一张满耐久卡。","One full-charge card for each companion.")) then
+            string.format(tr("共 %d 种召唤卡，每种各发一张满耐久卡。","One full-charge card for each of the %d companions."),#NHCompanions.order)) then
             folded,warehouse_tab,warehouse_pages.collection=false,"collection",1
             dispatch("test_cards")
         end

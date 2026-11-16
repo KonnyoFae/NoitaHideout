@@ -74,10 +74,11 @@ assert(spend("dryad",30*360)==40 and controller.tier(40)==2 and controller.tier(
 assert(spend("dryad",60*360)==100 and controller.tier(100)==3 and controller.tier(99)==2)
 assert(entity.follow("dryad",6)==100)
 assert(spend("bee",10*360)==10 and spend("dragon",360)==1)
+assert(spend("slime",40*360)==40)
 controller.sync(state)
 assert(NHStore.commit(state) and state.affinity.dryad==36000)
 local saved=assert(NHStore.load())
-assert(saved.affinity.bee==3600 and saved.affinity.dragon==360)
+assert(saved.affinity.bee==3600 and saved.affinity.dragon==360 and saved.affinity.slime==14400)
 state.affinity.dryad=36001
 assert(not NHStore.commit(state))
 print("Companion affinity persists across summons, worlds and failed writes, keeping fractional progress and capped independent ranks.")
