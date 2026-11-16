@@ -29,6 +29,7 @@ function EntityGetAllChildren(id)
 end
 function EntityGetFirstComponentIncludingDisabled(id, kind, tag)
     if kind == "Inventory2Component" then return entities[id].inv end
+    if kind == "ItemComponent" then return entities[id].item end
     if kind == "VariableStorageComponent" then
         assert(tag == "noita_hideout_transfer_id")
         return entities[id].marker
@@ -224,3 +225,49 @@ assert(NHTransfers.deposit(working,player,"docks",newer,1))
 entities[issued].alive,globals=false,{}
 assert(NHTransfers.reconcile(working,player))
 assert(#working.docks==1 and #working.warehouse==1 and working.docks[1].id~=working.warehouse[1].id)
+
+local function makeCard(species,remaining)
+    local id=make("noita_hideout_summon_card",false)
+    entities[id].tags["nh_companion_"..species]=true
+    entities[id].item={uses_remaining=remaining}
+    return id
+end
+function EntityLoad(path,x,y)
+    return makeCard(assert(path:match("/card_([%w_]+)%.xml$")),80)
+end
+NHCompanions.registerItems()
+local cards=state()
+assert(NHCompanions.grantSet(cards) and NHCompanions.grantSet(cards))
+local idx=NHStore.slotIndex(cards,"warehouse",1,"summon_card")
+local row=cards.warehouse[idx]
+assert(row.item.count==2 and row.item.remaining==80)
+fail=true
+assert(not NHTransfers.withdraw(cards,player,idx) and row.item.count==2 and not EntityGetIsAlive(next_entity))
+local orphan=next_entity
+entities[orphan].alive=true -- Rewind to just before disposing the unpublished world object.
+fail=false
+assert(NHTransfers.reconcile(cards,player) and not EntityGetIsAlive(orphan))
+local ok,card=NHTransfers.withdraw(cards,player,idx)
+assert(ok and not cards.warehouse[idx].item.count and cards.warehouse[idx].id==row.id)
+assert(NHTransfers.reconcile(cards,player) and EntityGetIsAlive(card))
+pick(card)
+fail=true
+assert(not NHTransfers.deposit(cards,player,"warehouse",card,1) and not cards.warehouse[idx].item.count and EntityGetIsAlive(card))
+fail=false
+assert(NHTransfers.deposit(cards,player,"warehouse",card,1) and cards.warehouse[idx].item.count==2)
+ok,card=NHTransfers.withdraw(cards,player,idx)
+entities[card].alive,globals=false,{}
+assert(NHTransfers.reconcile(cards,player) and cards.warehouse[idx].item.count==2)
+assert(NHTransfers.reconcile(cards,player) and cards.warehouse[idx].item.count==2)
+local worn=makeCard("dryad",79)
+pick(worn)
+assert(not NHTransfers.deposit(cards,player,"warehouse",worn,1) and EntityGetIsAlive(worn))
+assert(NHTransfers.deposit(cards,player,"safe",worn,1) and cards.safe[1].item.remaining==79)
+assert(not NHCompanions.moveCard(cards,"safe",1,"warehouse",1,cards.safe[1].id))
+assert(NHCompanions.moveCard(cards,"safe",1,"warehouse",5,cards.safe[1].id))
+assert(NHCompanions.moveCard(cards,"warehouse",1,"safe",1,row.id))
+assert(NHCompanions.moveCard(cards,"warehouse",1,"safe",1,row.id) and cards.safe[1].item.count==2)
+assert(NHCompanions.moveCard(cards,"safe",1,"warehouse",1,cards.safe[1].id))
+assert(NHCompanions.moveCard(cards,"warehouse",5,"warehouse",6,cards.warehouse[NHStore.slotIndex(cards,"warehouse",5,"summon_card")].id))
+assert(cards.warehouse[NHStore.slotIndex(cards,"warehouse",6,"summon_card")].item.remaining==79)
+print("Summon cards: single withdrawals, same-species merges, partial charges, failed writes, rewind and secure storage passed.")

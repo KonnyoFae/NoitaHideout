@@ -111,6 +111,10 @@ function EntityLoad(path,x,y)
     elseif file:match("^dose_") then
         EntityAddTag(next_id,"noita_hideout_dose")
         EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png"})
+    elseif file:match("^card_") and file~="card_wallet" then
+        EntityAddTag(next_id,"noita_hideout_summon_card")
+        EntityAddTag(next_id,"nh_companion_"..file:sub(6))
+        EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png",uses_remaining=80})
     elseif file=="home_wand_edit" then EntityAddComponent2(next_id,"GameEffectComponent",{effect="EDIT_WANDS_EVERYWHERE",frames=3})
     else EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=""}) end
     return next_id
@@ -1324,3 +1328,101 @@ local function testLivestockController()
 end
 testLivestockController()
 print("Controller: pens, savings payments, staggered maturity, range checks and single collection passed.")
+
+local function testCardSupplies()
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    settings["noita_hideout.test_tools"]=false
+    tick()
+    tick(nil,"test_cards")
+    tick(nil,"test_wallet")
+    settings["noita_hideout.test_tools"]=true
+    entities[player].x=400
+    tick(nil,"test_cards")
+    tick(nil,"test_wallet")
+    entities[player].x=227
+    assert(#state().warehouse==0)
+    fail_commit=true
+    tick(nil,"test_cards")
+    fail_commit=false
+    boot()
+    tick()
+    assert(#state().warehouse==0)
+    tick(nil,"test_cards")
+    tick(nil,"test_cards")
+    tick(nil,"test_wallet")
+    local view=tick()
+    local seen={}
+    for _,card in pairs(view.warehouse.collection) do
+        assert(card.kind=="summon_card" and card.remaining==80 and card.count==2 and not seen[card.species],
+            ("grant showed %s, durability %s, count %s"):format(tostring(card.species),tostring(card.remaining),tostring(card.count)))
+        seen[card.species]=true
+    end
+    for _,species in ipairs(NHCompanions.order) do assert(seen[species]) end
+    assert(view.warehouse.equipment[1].kind=="card_wallet")
+    assert(#state().warehouse==5 and view.warehouse_capacity.collection==48)
+    boot()
+    assert(#state().warehouse==5)
+end
+testCardSupplies()
+print("Controller: test-only supplies, failed delivery, four independent card stacks and card wallet passed.")
+
+local function testCardWalletController()
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    tick()
+    tick(nil,"test_wallet")
+    tick(nil,"test_cards")
+    tick(nil,"test_cards")
+    local view=tick()
+    local wallet=view.warehouse.equipment[1].id
+    local card=view.warehouse.collection[1]
+    tick(nil,"open_container",{kind="card_wallet",walletId=wallet,container="warehouse",safeSlot=1})
+    assert(tick().walletId==wallet)
+    tick(nil,"move_wallet_card",{walletId=wallet,from=1,entity=card.id,targetCell=3,container="warehouse"})
+    view=tick()
+    assert(view.cells[3].species==card.species and (view.warehouse.collection[1].count or 1)==1)
+    tick(nil,"move_wallet",{source="warehouse",from=1,entity=wallet,destination="safe",safeSlot=1})
+    view=tick()
+    assert(view.walletId==wallet and view.secure_loot[1].kind=="card_wallet")
+    local function tool(i)
+        return {lane="tool",parent=quick,xslot=i,yslot=0}
+    end
+    local take=tool(0)
+    take.container,take.storedId,take.kind,take.safeSlot="safe",wallet,"card_wallet",1
+    tick(nil,"secure_withdraw",take)
+    view=tick()
+    local carried=view.native_slots[5]
+    for _,slot in ipairs(view.native_slots) do if slot.walletId==wallet then carried=slot end end
+    assert(carried.kind=="card_wallet" and carried.walletId==wallet and not view.popup)
+    held=carried.entity
+    inventory_open=false
+    tick()
+    tick()
+    tick(nil,nil,nil,true)
+    view=tick()
+    assert(view.mode=="container" and view.walletId==wallet and view.cells[3].species==card.species)
+    local out=tool(1)
+    out.walletId,out.sourceCell,out.remaining,out.species=wallet,3,80,card.species
+    tick(nil,"take_card",out)
+    view=tick()
+    assert(not view.cells[3])
+    local loose
+    for _,slot in ipairs(view.native_slots) do if slot.kind=="summon_card" then loose=slot end end
+    assert(loose and loose.species==card.species and loose.remaining==80 and loose.xslot==1)
+    ComponentSetValue2(EntityGetFirstComponentIncludingDisabled(loose.entity,"ItemComponent"),"uses_remaining",79)
+    local back=tool(1)
+    back.entity,back.walletId,back.targetCell=loose.entity,wallet,2
+    tick(nil,"place",back)
+    view=tick()
+    assert(view.cells[2].remaining==79 and not EntityGetIsAlive(loose.entity))
+    boot()
+    inventory_open=true
+    tick()
+    tick(nil,"open_container",{kind="card_wallet",walletId=wallet,entity=held})
+    assert(tick().cells[2].remaining==79)
+end
+testCardWalletController()
+print("Controller: open and carry a loaded wallet, transfer a worn card in the field and continue the game.")

@@ -2,6 +2,7 @@
 -- readback checks the settings API; it does not force the engine to flush.
 NHStore = {}
 dofile("mods/noita_hideout/files/companions.lua")
+dofile("mods/noita_hideout/files/card_wallets.lua")
 NHInjectors=dofile("mods/noita_hideout/files/injectors.lua")
 dofile("mods/noita_hideout/files/farming.lua")
 dofile("mods/noita_hideout/files/essences.lua")
@@ -29,7 +30,7 @@ local function fresh(profile)
     local s={
         version = 1, profile = profile, revision = 0,
         runSerial = 0, closedThrough = 0, checkpoints = {},
-        nextItemId = 1, materials = {}, docks = {}, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true,
+        nextItemId = 1, materials = {}, docks = {}, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true, collectionSlots=true,
         pouches = {},
         order = false, finished = 0, levels = {}, storageBase = {}, resources = {}, farm={time=0,plots={}}, bankGold = 0, bankWalletNet = 0,
     }
@@ -84,13 +85,14 @@ function NHStore.freeSafeSlot(s, preferred)
 end
 
 -- Each item kind resolves to one warehouse grid for both live items and saved rows.
-NHStore.itemCategories={wand="wand",spell="spell",potion="containers",pouch="equipment",summon_card="equipment"}
+NHStore.itemCategories={wand="wand",spell="spell",potion="containers",pouch="equipment",summon_card="collection"}
+NHStore.itemCategories.card_wallet="equipment"
 function NHStore.category(kind)
     return NHStore.itemCategories[kind] or "supplies"
 end
 
 local function warehouse_grids()
-    return {wand={},spell={},containers={},supplies={},equipment={}}
+    return {wand={},spell={},containers={},supplies={},equipment={},collection={}}
 end
 
 function NHStore.slotIndex(s,container,slot,kind)
@@ -179,6 +181,16 @@ local function validate(s)
     assert(type(s.materials)=="table" and type(s.docks)=="table","Invalid bulk storage")
     progression.validate(s,whole)
     NHFarm.validate(s,whole)
+    for _,rows in ipairs({s.safe,s.warehouse}) do
+        for _,row in ipairs(rows) do
+            if row.item.kind=="card_wallet" then assert(NHCardWallets.valid(row.item),"Invalid card wallet") end
+        end
+    end
+    if s.transit then
+        for _,release in pairs(s.transit.issued) do
+            if release.row.item.kind=="card_wallet" then assert(NHCardWallets.valid(release.row.item),"Invalid issued card wallet") end
+        end
+    end
     for name,amount in pairs(s.materials) do
         assert(type(name)=="string" and name~="" and whole(amount) and amount>0,"Invalid material stock")
     end
@@ -379,6 +391,16 @@ local function unpack_slot(raw)
         end
     end
     progression.adopt(s)
+    if not s.collectionSlots then
+        -- Previous cards occupied equipment slots. Preserve every card's ID and
+        -- actual charges, including profiles with an expanded equipment grid.
+        local n=0
+        for _,row in ipairs(s.warehouse) do
+            if row.item.kind=="summon_card" then n=n+1; row.slot=n end
+        end
+        if n>NHStore.warehouseCapacity(s,"collection") then s.storageBase.collection=n end
+        s.collectionSlots=true
+    end
     if s.farm==nil then s.farm={time=0,plots={}} end
     if not s.sharedSlots then
         s.safeCapacity = NHStore.safeCapacity(s)+1
@@ -605,6 +627,10 @@ NHStore.recipes={
         noteZh="单次投掷，基础直击伤害 17.5，爆炸伤害 12.5。",noteEn="Single use. Base damage is 17.5 on impact and 12.5 from the explosion."},
     {id="pouch",category="equipment",facility="injector",zh="空针剂包",en="Empty injector pouch",
         inputs={{name="slime",amount=50}},emptyContainers=1,item={kind="pouch"}},
+    {id="card_wallet",category="equipment",facility="farmland",zh="空卡片夹",en="Empty card wallet",
+        inputs={},resources={fiber=4},emptyContainers=1,item=NHCardWallets.empty(),
+        noteZh="四格卡片夹，可在外出时打开并存取召唤卡。",
+        noteEn="Four card slots. Open the wallet to store or withdraw summon cards while exploring."},
 }
 for _,food in ipairs(dofile("mods/noita_hideout/files/cooking.lua")) do
     NHStore.recipes[#NHStore.recipes+1]={id=food.id,category="food",facility=food.facility,zh=food.zh,en=food.en,
@@ -698,6 +724,14 @@ end
 local function stockItem(state,slot,item)
     table.insert(state.warehouse,{id=state.nextItemId,slot=slot,item=item})
     state.nextItemId=state.nextItemId+1
+end
+
+function NHStore.grantTestWallet(state)
+    local slot=NHStore.freeSlot(state,"warehouse",nil,"card_wallet")
+    if not slot then return false,"Equipment storage is full." end
+    if state.nextItemId>=max_safe_integer then return false,"Item ID limit reached." end
+    stockItem(state,slot,NHCardWallets.empty())
+    return true
 end
 
 -- The request names the offer. Price, quantity and destination come from the
@@ -922,6 +956,8 @@ function NHStore.advanceProduction(state,request)
     local output=order.output
     if output.item and output.item.kind=="pouch" then
         NHPouches.create(state,"warehouse",output.slot,0)
+    elseif output.item and output.item.kind=="card_wallet" then
+        stockItem(state,output.slot,NHCardWallets.empty())
     elseif output.item then
         stockItem(state,output.slot,output.item)
     else

@@ -17,7 +17,8 @@ assert(NHFarm.plant(state,{plot=1,token=0,crop="fiber"},0))
 local request={plot=1,token=1,crop="fiber"}
 local ok,awards=NHFarm.harvest(state,request,120*60)
 assert(ok and #awards==1 and awards[1]=="dryad" and state.resources.fiber==6)
-assert(state.warehouse[1].item.kind=="summon_card" and NHStore.category("summon_card")=="equipment")
+assert(state.warehouse[1].item.kind=="summon_card" and NHStore.category("summon_card")=="collection")
+assert(state.warehouse[1].item.remaining==80)
 assert(not NHFarm.harvest(state,request,120*60) and #state.warehouse==1)
 local graze=NHCompanions.reward(state,"livestock",1)
 assert(#graze==1 and graze[1]=="griffin")
@@ -29,13 +30,15 @@ local total=0
 for _=1,40 do total=total+#NHCompanions.reward(one,"livestock",1) end
 assert(total==#batch and before.summons.livestock==one.summons.livestock)
 
--- Fill equipment storage with separate cards. A harvest still succeeds. Losing
--- the commit head write while releasing an equipment slot cannot lose its award.
-local max=NHStore.warehouseCapacity(state,"equipment")
+-- Used cards each occupy a slot. Capturing another species at capacity queues
+-- its reward; full copies of an already stored species still join their stack.
+local max=NHStore.warehouseCapacity(state,"collection")
 while #state.warehouse<max do
-    state.summons.farm=31
-    NHCompanions.reward(state,"farm",1)
+    local worn=NHCompanions.withCount({species="dryad",remaining=79},1)
+    assert(NHCompanions.put(state,"warehouse",#state.warehouse+1,nil,worn))
 end
+state.summons.farm=31
+assert(#NHCompanions.reward(state,"farm",1)==1 and state.warehouse[1].item.count==2 and #state.warehouse==max)
 state.summons.farm=62
 local pending=NHCompanions.reward(state,"farm",1)
 assert(#pending==1 and state.summons.pending.flower_fairy==1 and #state.warehouse==max)
@@ -56,6 +59,27 @@ assert(#changed.warehouse==max and changed.nextItemId==nextId+1 and not next(cha
 state=assert(NHStore.load())
 assert(state.warehouse[max].item.species=="flower_fairy" and state.warehouse[max].slot==1)
 assert(NHStore.commit(state) and state.nextItemId==nextId+1)
+
+-- Stage a 0.22-shaped snapshot: cards used to be individual equipment rows,
+-- including slots beyond the capacity of a fresh collection.
+state.collectionSlots=nil
+state.levels.warehouse_equipment=1
+state.warehouse={{id=nextId,slot=67,item=NHCompanions.withCount({species="griffin",remaining=2},1)}}
+state.nextItemId=nextId+1
+NHStore.itemCategories.summon_card="equipment"
+assert(NHStore.commit(state))
+NHStore.itemCategories.summon_card="collection"
+state=assert(NHStore.load())
+assert(state.warehouse[1].id==nextId and state.warehouse[1].slot==1 and state.warehouse[1].item.remaining==2)
+assert(NHCompanions.grantSet(state))
+local full=state.warehouse[2].item
+assert(full.species=="dryad" and full.remaining==80 and state.warehouse[1].item.remaining==2)
+state.summons.pending.dryad=4000000000
+assert(NHStore.commit(state))
+state=assert(NHStore.load())
+assert(state.warehouse[2].item.count==4000000001 and #state.warehouse==5 and not next(state.summons.pending))
+assert(not NHCompanions.validCard({species="dryad",remaining=79,count=2}))
+assert(not NHCompanions.validCard({species="dryad",remaining=80,count=0}))
 
 local entities,serial={},0
 local function create(x,y,tags)
@@ -103,7 +127,7 @@ function EntityLoad(path,x,y)
         local species=name:sub(6)
         e.tags.noita_hideout_summon_card=true
         e.tags["nh_companion_"..species]=true
-        put(id,"ItemComponent",{uses_remaining=3})
+        put(id,"ItemComponent",{uses_remaining=80})
     elseif NHCompanions.species[name] then
         e.tags.noita_hideout_companion=true
         put(id,"VariableStorageComponent",{value_int=0,value_string=name},"nh_companion_clock")
@@ -152,7 +176,7 @@ local pet=spawned[1]
 assert(NHCompanions.use(player,raw,"en") and #spawned==1 and adapter.capture(raw).remaining==1)
 local restored=assert(adapter.restore(adapter.capture(raw),0,0))
 assert(adapter.capture(restored).remaining==1 and adapter.capture(restored).species=="flower_fairy")
-assert(not adapter.restore({kind="summon_card",species="griffin",remaining=4},0,0))
+assert(not adapter.restore({kind="summon_card",species="griffin",remaining=81},0,0))
 assert(not adapter.restore({kind="summon_card",species="missing",remaining=1},0,0))
 
 function dofile_once(path) dofile(path) end

@@ -11,14 +11,16 @@ function NHNative.registerTranslations()
     local original = ModTextFileGetContent(path)
     if not original then return end
     local labels = {
+        {"nh_hideout_card_wallet","Card wallet","卡片夹"},
+        {"nh_hideout_card_wallet_desc","Four slots for summoning cards. Matching full-charge cards stack.","四个召唤卡格。同种满耐久卡可以叠放。"},
         {"nh_card_dryad","Dryad summon card","树精召唤卡"},
         {"nh_card_flower_fairy","Flower fairy summon card","花妖召唤卡"},
         {"nh_card_minotaur","Minotaur maiden summon card","米诺陶少女召唤卡"},
         {"nh_card_griffin","Griffin maiden summon card","狮鹫少女召唤卡"},
-        {"nh_card_dryad_desc","3 charges. Summons a dryad for 3 minutes. Protects against toxic sludge. May give bread while traveling.","3 次耐久。树精随行 3 分钟并提供毒泥免疫，途中可能赠送面包。"},
-        {"nh_card_flower_fairy_desc","3 charges. Summons a flower fairy for 3 minutes. Restores 1 HP every 5 seconds. May give bandages while traveling.","3 次耐久。花妖随行 3 分钟，每 5 秒恢复 1 点生命，途中可能赠送绷带。"},
-        {"nh_card_minotaur_desc","3 charges. Summons a minotaur maiden for 3 minutes. Grants melee immunity. May give bandages while traveling.","3 次耐久。米诺陶少女随行 3 分钟并提供近战免疫，途中可能赠送绷带。"},
-        {"nh_card_griffin_desc","3 charges. Summons a griffin maiden for 3 minutes. Speeds up levitation. May give sugar cubes while traveling.","3 次耐久。狮鹫少女随行 3 分钟并提高飞行速度，途中可能赠送糖块。"},
+        {"nh_card_dryad_desc","80 charges when new. Summons a dryad for 3 minutes. Protects against toxic sludge. May give bread while traveling.","新卡耐久 80。树精随行 3 分钟并提供毒泥免疫，途中可能赠送面包。"},
+        {"nh_card_flower_fairy_desc","80 charges when new. Summons a flower fairy for 3 minutes. Restores 1 HP every 5 seconds. May give bandages while traveling.","新卡耐久 80。花妖随行 3 分钟，每 5 秒恢复 1 点生命，途中可能赠送绷带。"},
+        {"nh_card_minotaur_desc","80 charges when new. Summons a minotaur maiden for 3 minutes. Grants melee immunity. May give bandages while traveling.","新卡耐久 80。米诺陶少女随行 3 分钟并提供近战免疫，途中可能赠送绷带。"},
+        {"nh_card_griffin_desc","80 charges when new. Summons a griffin maiden for 3 minutes. Speeds up levitation. May give sugar cubes while traveling.","新卡耐久 80。狮鹫少女随行 3 分钟并提高飞行速度，途中可能赠送糖块。"},
         {"nh_companion_gift","Your companion left you a gift:","伙伴送出了礼物："},
         {"nh_hideout_medkit","Medkit","医疗包"},
         {"nh_hideout_medkit_desc","Three uses. Each use restores up to 10 HP.","可使用三次，每次最多恢复 10 点生命。"},

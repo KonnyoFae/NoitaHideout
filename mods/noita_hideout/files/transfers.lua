@@ -85,6 +85,13 @@ local function stored_release(s, token, ids)
     return tonumber(profile) == s.profile and ids[tonumber(item_id)]
 end
 
+local function unpublished_release(s,j,token)
+    -- A split card has its own ID. Its original stack stays in storage and
+    -- cannot identify a world object staged before a failed pointer write.
+    local profile,run=token:match("^r/(%d+)/(%d+)/")
+    return tonumber(profile)==s.profile and tonumber(run)==s.runSerial and not j.issued[token]
+end
+
 local customItems = {}
 local customOrder = {}
 -- Register before gameplay. A codec snapshots a live item and rebuilds it
@@ -96,7 +103,8 @@ function NHTransfers.registerItem(kind, matches, adapter)
     assert(not customItems[kind] and kind~="wand" and kind~="spell" and kind~="potion"
         and kind~="pouch" and kind~="dose" and kind~="other","Duplicate or reserved item kind")
     if adapter.warehouseCategory then
-        assert(adapter.warehouseCategory=="equipment" or adapter.warehouseCategory=="supplies","Invalid warehouse category")
+        assert(adapter.warehouseCategory=="equipment" or adapter.warehouseCategory=="supplies"
+            or adapter.warehouseCategory=="collection","Invalid warehouse category")
         NHStore.itemCategories[kind]=adapter.warehouseCategory
     end
     customItems[kind]={matches=matches,adapter=adapter}
@@ -180,25 +188,33 @@ local function quick_item(player, item)
     return false
 end
 
-local function deposit_item(s,player,dest,item,preferred,equipped_record)
+local function incoming(s,player,item)
     local source = marker(item)
     if source then
         local ids, origins = storage_ids(s)
-        if journal(s).retired[source] or origins[source] or stored_release(s, source, ids) then
+        local j=journal(s)
+        if j.retired[source] or origins[source] or stored_release(s, source, ids) or unpublished_release(s,j,source) then
             dispose(item, player)
-            return nil, "The stored item was already transferred."
+            return nil,nil,"The stored item was already transferred."
         end
     end
-    local kind = NHTransfers.item_kind(item)
-    local slot=NHStore.freeSlot(s,dest,preferred,kind)
-    if not slot then return nil,"Inventory slot changed." end
+    return true,source
+end
 
+local function deposit_item(s,player,dest,item,preferred,equipped_record)
+    local accepted,source,sourceError=incoming(s,player,item)
+    if not accepted then return nil,sourceError end
+    local kind = NHTransfers.item_kind(item)
     local adapter = codec(kind)
     if not adapter then return nil, "This item has no storage adapter." end
     local record, err = equipped_record
-    if not record then record,err=adapter.capture(item) end
+    if not record then record,err=adapter.capture(item,s) end
     if not record then return nil, err end
     if record.kind~=kind then return nil,"Invalid item record." end
+    local slot,stack
+    if kind=="summon_card" then slot,stack=NHCompanions.cardSlot(s,dest,preferred,record)
+    else slot=NHStore.freeSlot(s,dest,preferred,kind) end
+    if not slot then return nil,"Inventory slot changed." end
     if dest=="docks" and NHPotion.dockSlot(record)~=slot then return nil,"Wrong loading slot." end
     local id = s.nextItemId
     if not source or not EntityHasTag(item, tag) then
@@ -208,7 +224,12 @@ local function deposit_item(s,player,dest,item,preferred,equipped_record)
 
     local changed = draft(s)
     changed.nextItemId = id + 1
-    table.insert(changed[dest], {id = id, item = record, origin = source, slot = slot})
+    if kind=="summon_card" then
+        if not NHCompanions.put(changed,dest,slot,stack,record,id,source) then return nil,"Inventory slot changed." end
+    else
+        local issued=kind=="card_wallet" and changed.transit.issued[source]
+        table.insert(changed[dest],{id=issued and issued.row.id or id,item=record,origin=source,slot=slot})
+    end
     -- Keep retirement after a stored flask's contents are spent or the item
     -- is withdrawn. A replayed source object must never become spendable.
     changed.transit.retired[source] = true
@@ -243,38 +264,73 @@ function NHTransfers.depositEquippedPerk(s,player,request)
     return deposit_item(s,player,request.container,request.entity,request.storageSlot,record)
 end
 
+-- Both warehouse rows and individual wallet cards use this commit boundary.
+local function issue(s,changed,player,release,deliver)
+    local row=release.row
+    local adapter=codec(row.item.kind)
+    if not adapter then return nil,"Stored item type is unsupported." end
+    local ticket=changed.nextItemId
+    if ticket>=NHStore.maxResourceAmount then return nil,"Inventory slot changed." end
+    local x,y=EntityGetTransform(player)
+    local entity,err=adapter.restore(row.item,x,y-4)
+    if not entity or entity==0 then return nil,err or "Could not restore this item." end
+    local token=new_token("r",s,ticket,row.id,entity)
+    if not stamp(entity,token) then
+        dispose(entity,player)
+        return nil,"Could not mark the delivery; item remains in storage."
+    end
+    if deliver and not deliver(entity) then
+        dispose(entity,player)
+        return nil,"Inventory slot changed."
+    end
+    release.x,release.y=x,y-4
+    changed.nextItemId=ticket+1
+    changed.transit.issued[token]=release
+    local ok,reason=commit(s,changed)
+    if not ok then dispose(entity,player); return nil,reason end
+    GlobalsSetValue(receipt(token),"1")
+    return true,entity
+end
+
 function NHTransfers.withdraw(s, player, index, container, deliver)
     local src = container_name(container)
     if not src then return nil, "Unknown container." end
     local row = s[src][index]
     if not row then return nil, "Item is no longer in this container." end
-    local adapter = codec(row.item.kind)
-    if not adapter then return nil, "Stored item type is unsupported." end
-    local x, y = EntityGetTransform(player)
-    local entity, err = adapter.restore(row.item, x, y - 4)
-    if not entity or entity == 0 then return nil, err or "Could not restore this item." end
-    local ticket = s.nextItemId
-    local token = new_token("r", s, ticket, row.id, entity)
-    if not stamp(entity, token) then
-        dispose(entity, player)
-        return nil, "Could not mark the delivery; item remains in storage."
-    end
-
-    if deliver and not deliver(entity) then
-        dispose(entity, player)
-        return nil, "Inventory slot changed."
-    end
     local changed = draft(s)
-    table.remove(changed[src], index)
-    changed.nextItemId = ticket + 1
-    changed.transit.issued[token] = {row = row, container = src, x = x, y = y - 4}
-    local ok, reason = commit(s, changed)
-    if not ok then
-        dispose(entity, player)
-        return nil, reason
+    if row.item.kind=="summon_card" then
+        row=NHCompanions.take(changed,src,index)
+        if not row then return nil,"Inventory slot changed." end
+    else
+        table.remove(changed[src],index)
     end
-    GlobalsSetValue(receipt(token), "1")
-    return true, entity
+    return issue(s,changed,player,{row=row,container=src},deliver)
+end
+
+local function recover(draft,release)
+    local dest=release.container
+    local row=copy(release.row)
+    if dest=="card_wallet" then return NHCardWallets.recover(draft,release) end
+    if row.item.kind=="summon_card" then
+        local slot,index=NHCompanions.cardSlot(draft,dest,row.slot,row.item)
+        if not slot then slot,index=NHCompanions.cardSlot(draft,dest,nil,row.item) end
+        if not slot and dest=="safe" then
+            dest="warehouse"
+            slot,index=NHCompanions.cardSlot(draft,dest,nil,row.item)
+        end
+        return NHCompanions.put(draft,dest,slot,index,row.item,row.id,row.origin)
+    end
+    if dest=="safe" then
+        row.slot=NHStore.freeSafeSlot(draft,row.slot or 1) or NHStore.freeSafeSlot(draft)
+        if not row.slot then dest="warehouse" end
+    end
+    if dest=="docks" and not NHStore.freeSlot(draft,dest,row.slot,row.item.kind) then dest,row.slot="warehouse",nil end
+    if dest=="warehouse" then
+        row.slot=NHStore.freeSlot(draft,dest,row.slot,row.item.kind) or NHStore.freeSlot(draft,dest,nil,row.item.kind)
+    end
+    if not row.slot then return false end
+    table.insert(draft[dest],row)
+    return true
 end
 
 function NHTransfers.reconcile(s, player)
@@ -300,7 +356,7 @@ function NHTransfers.reconcile(s, player)
         if EntityGetIsAlive(entity) then
             local token = marker(entity)
             if token then
-                if j.retired[token] or origins[token] or stored_release(s, token, ids) then
+                if j.retired[token] or origins[token] or stored_release(s, token, ids) or unpublished_release(s,j,token) then
                     dispose(entity, player)
                 elseif j.issued[token] then
                     if seen[token] then
@@ -323,24 +379,11 @@ function NHTransfers.reconcile(s, player)
             and math.abs(x - release.x) < 64 and math.abs(y - release.y) < 64
             and DoesWorldExistAt(math.floor(release.x) - 16, math.floor(release.y) - 16,
                 math.ceil(release.x) + 16, math.ceil(release.y) + 16) then
-            local current=changed or s
-            local dest = release.container
-            local row = copy(release.row)
-            if dest == "safe" then
-                row.slot = NHStore.freeSafeSlot(current,row.slot or 1) or NHStore.freeSafeSlot(current)
-                if not row.slot then dest = "warehouse" end
-            end
-            if dest=="docks" and not NHStore.freeSlot(current,dest,row.slot,row.item.kind) then
-                dest,row.slot="warehouse",nil
-            end
-            if dest=="warehouse" then row.slot=NHStore.freeSlot(current,dest,row.slot,row.item.kind) or NHStore.freeSlot(current,dest,nil,row.item.kind) end
+            local candidate=changed or draft(s)
             -- A full warehouse keeps the release in the journal for a later retry.
-            if row.slot or ids[release.row.id] then
-                changed=changed or draft(s)
-                if not ids[release.row.id] then
-                    table.insert(changed[dest],row)
-                    ids[release.row.id]=true
-                end
+            if ids[release.row.id] or recover(candidate,candidate.transit.issued[token]) then
+                changed=candidate
+                ids[release.row.id]=true
                 changed.transit.retired[token] = true
                 changed.transit.issued[token] = nil
             end
@@ -348,4 +391,64 @@ function NHTransfers.reconcile(s, player)
     end
     if changed then return commit(s, changed) end
     return true
+end
+
+function NHTransfers.issuedRecord(s,entity)
+    if not s then return end
+    local token=marker(entity)
+    if token then return journal(s).issued[token],token end
+end
+
+function NHTransfers.depositWalletCard(s,player,ref,entity,cell)
+    if not quick_item(player,entity) or NHTransfers.item_kind(entity)~="summon_card" then return nil,"Select a carried summon card." end
+    local accepted,token,reason=incoming(s,player,entity)
+    if not accepted then return nil,reason end
+    local item,err=codec("summon_card").capture(entity)
+    if not item then return nil,err end
+    local changed=draft(s)
+    if not NHCardWallets.put(changed,player,ref,cell,item) then return nil,"Card wallet slot unavailable." end
+    if not token or not EntityHasTag(entity,tag) then
+        local ticket=changed.nextItemId
+        if ticket>=NHStore.maxResourceAmount then return nil,"Inventory slot changed." end
+        token=token or new_token("d",s,ticket,ticket,entity)
+        if not stamp(entity,token) then return nil,"Could not mark this item; it remains in your inventory." end
+        changed.nextItemId=ticket+1
+    end
+    changed.transit.retired[token]=true
+    changed.transit.issued[token]=nil
+    local ok,err=commit(s,changed)
+    if not ok then return nil,err end
+    dispose(entity,player)
+    return true
+end
+
+function NHTransfers.withdrawWalletCard(s,player,ref,source,deliver)
+    local changed=draft(s)
+    local item=NHCardWallets.take(changed,player,ref,source)
+    if not item then return nil,"Card wallet slot unavailable." end
+    local row={id=changed.nextItemId,item=item}
+    return issue(s,changed,player,{row=row,container="card_wallet",walletId=ref.id,cell=source.cell},deliver)
+end
+
+function NHTransfers.moveWalletCard(s,player,ref,source,target)
+    local changed=draft(s)
+    if source.cell then
+        if source.cell==target.cell then return nil,"Card wallet slot unavailable." end
+        local card=NHCardWallets.take(changed,player,ref,source)
+        if not card then return nil,"Card wallet slot unavailable." end
+        if target.cell then
+            if not NHCardWallets.put(changed,player,ref,target.cell,card) then return nil,"Card wallet slot unavailable." end
+        else
+            if not target.slot then return nil,"Inventory slot changed." end
+            local slot,index=NHCompanions.cardSlot(changed,target.container,target.slot,card)
+            if not slot or not NHCompanions.put(changed,target.container,slot,index,card) then return nil,"Inventory slot changed." end
+        end
+    elseif target.cell and (source.container=="warehouse" or source.container=="safe") then
+        local i=NHStore.slotIndex(changed,source.container,source.slot,"summon_card")
+        local row=changed[source.container][i]
+        if not row or row.id~=source.id or row.item.kind~="summon_card" then return nil,"Inventory slot changed." end
+        local one=NHCompanions.take(changed,source.container,i)
+        if not one or not NHCardWallets.put(changed,player,ref,target.cell,one.item) then return nil,"Card wallet slot unavailable." end
+    else return nil,"Card wallet slot unavailable." end
+    return commit(s,changed)
 end

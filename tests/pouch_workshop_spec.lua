@@ -66,3 +66,26 @@ assert(s.pouches[second.id].cells[1].remaining==1 and s.pouches[first_id].cells[
 assert(NHStore.restock(s) and s.pouches[first_id] and s.pouches[second.id])
 assert(#s.warehouse==1 and s.warehouse[1].item.materials.water==1)
 print("Workshop: empty-container payment, reserved delivery, retries, multiple independent pouches and protected durability passed.")
+
+run=NHStore.newRun(s)
+s.resources.fiber=4
+assert(not NHStore.startOrder(s,"card_wallet"))
+s.materials={sand=350,water=200}
+assert(NHStore.buyUpgrade(s,{id="farmland",level=0}))
+assert(not NHStore.startOrder(s,"card_wallet") and s.resources.fiber==4)
+add_flask(2,{})
+assert(NHStore.startOrder(s,"card_wallet") and s.order.output.slot==3)
+assert(not s.resources.fiber and NHStore.emptyContainerCount(s)==0 and s.warehouse[1].item.materials.water==1)
+assert(NHStore.grantTestWallet(s))
+assert(NHStore.slotIndex(s,"warehouse",4,"card_wallet"))
+persist()
+local done={run=run,orderId=s.order.id,progress=s.order.required}
+assert(NHStore.advanceProduction(s,done) and not NHStore.advanceProduction(s,done))
+persist()
+local crafted=s.warehouse[NHStore.slotIndex(s,"warehouse",3,"card_wallet")]
+local granted=s.warehouse[NHStore.slotIndex(s,"warehouse",4,"card_wallet")]
+assert(crafted.id~=granted.id and crafted.item.cells~=granted.item.cells)
+assert(not next(crafted.item.cells) and not next(granted.item.cells))
+assert(NHStore.warehouseCapacity(s,"collection")==48 and NHStore.buyUpgrade(s,{id="warehouse_collection",level=0}))
+assert(NHStore.warehouseCapacity(s,"collection")==72 and NHStore.warehouseCapacity(s,"equipment")==48)
+print("Card wallets: craft and test grant have separate equipment slots and independent empty contents.")

@@ -1,4 +1,4 @@
-NHCompanions={durability=3,order={"dryad","flower_fairy","minotaur","griffin"}}
+NHCompanions={durability=80,order={"dryad","flower_fairy","minotaur","griffin"}}
 local items="mods/noita_hideout/files/items/"
 local pets="mods/noita_hideout/files/companions/"
 NHCompanions.species={
@@ -14,9 +14,94 @@ local function card(id,remaining)
     return {kind="summon_card",species=id,remaining=remaining,name="$nh_card_"..id,icon=items.."card_"..id..".png"}
 end
 
+function NHCompanions.withCount(item,count)
+    local result=card(item.species,item.remaining)
+    if count>1 then result.count=count end
+    return result
+end
+
 function NHCompanions.validCard(item)
     local n=item.remaining
+    local count=item.count
     return NHCompanions.species[item.species]~=nil and type(n)=="number" and n==math.floor(n) and n>=1 and n<=NHCompanions.durability
+        and (count==nil or (type(count)=="number" and count==math.floor(count) and count>=1 and count<=NHStore.maxResourceAmount
+            and (n==NHCompanions.durability or count==1)))
+end
+
+function NHCompanions.canStack(target,source)
+    return target and source and target.kind=="summon_card" and source.kind=="summon_card"
+        and target.species==source.species and target.remaining==NHCompanions.durability
+        and source.remaining==NHCompanions.durability and (target.count or 1)<NHStore.maxResourceAmount
+end
+
+-- A specified storage slot must accept the card; automatic deposits prefer
+-- an existing full-condition stack even when every storage slot is occupied.
+function NHCompanions.cardSlot(s,container,preferred,item)
+    if container~="warehouse" and container~="safe" then return end
+    if preferred then
+        local index=NHStore.slotIndex(s,container,preferred,"summon_card")
+        if index then
+            if NHCompanions.canStack(s[container][index].item,item) then return preferred,index end
+            return
+        end
+    else
+        local slot,at
+        for i,row in ipairs(s[container]) do
+            if NHCompanions.canStack(row.item,item) and (not slot or (row.slot or i)<slot) then
+                slot,at=row.slot or i,i
+            end
+        end
+        if at then return slot,at end
+    end
+    return NHStore.freeSlot(s,container,preferred,"summon_card")
+end
+
+-- Replace rows to keep shallow transfer drafts isolated until their commit succeeds.
+function NHCompanions.put(s,container,slot,index,item,id,origin)
+    if not slot then return false end
+    local rows=s[container]
+    if index then
+        local row=rows[index]
+        local count=row.item.count or 1
+        local added=item.count or 1
+        if not NHCompanions.canStack(row.item,item) or added>NHStore.maxResourceAmount-count then return false end
+        rows[index]={id=row.id,origin=row.origin,slot=slot,item=NHCompanions.withCount(item,count+added)}
+    else
+        if not id then
+            if s.nextItemId>=NHStore.maxResourceAmount then return false end
+            id=s.nextItemId
+            s.nextItemId=id+1
+        end
+        rows[#rows+1]={id=id,origin=origin,slot=slot,item=item}
+    end
+    return true
+end
+
+function NHCompanions.take(s,container,index)
+    local rows=s[container]
+    local row=rows[index]
+    if not row or row.item.kind~="summon_card" then return end
+    local count=row.item.count or 1
+    if count==1 then return table.remove(rows,index) end
+    if s.nextItemId>=NHStore.maxResourceAmount then return end
+    rows[index]={id=row.id,origin=row.origin,slot=row.slot,item=NHCompanions.withCount(row.item,count-1)}
+    local one={id=s.nextItemId,slot=row.slot,item=NHCompanions.withCount(row.item,1)}
+    s.nextItemId=s.nextItemId+1
+    return one
+end
+
+function NHCompanions.moveCard(s,from,sourceSlot,to,targetSlot,expectedId)
+    if (from~="warehouse" and from~="safe") or (to~="warehouse" and to~="safe")
+        or not targetSlot or (from==to and sourceSlot==targetSlot) then return false,"Inventory slot changed." end
+    local index=NHStore.slotIndex(s,from,sourceSlot,"summon_card")
+    local row=index and s[from][index]
+    if not row or row.id~=expectedId or row.item.kind~="summon_card" then return false,"Inventory slot changed." end
+    local slot,stack=NHCompanions.cardSlot(s,to,targetSlot,row.item)
+    if not slot then return false,"Inventory slot changed." end
+    local one=NHCompanions.take(s,from,index)
+    if not one then return false,"Inventory slot changed." end
+    if stack and from==to then stack=NHStore.slotIndex(s,to,targetSlot,"summon_card") end
+    return NHCompanions.put(s,to,slot,stack,one.item,one.id,one.origin)
 end
 
 function NHCompanions.validate(state,whole)
@@ -35,11 +120,13 @@ function NHCompanions.deliver(state)
     if not pending or not next(pending) then return end
     for _,id in ipairs(NHCompanions.order) do
         while pending[id] do
-            local slot=NHStore.freeSlot(state,"warehouse",nil,"summon_card")
-            if not slot or state.nextItemId>=NHStore.maxResourceAmount then return end
-            state.warehouse[#state.warehouse+1]={slot=slot,id=state.nextItemId,item=card(id,NHCompanions.durability)}
-            state.nextItemId=state.nextItemId+1
-            pending[id]=pending[id]>1 and pending[id]-1 or nil
+            local item=card(id,NHCompanions.durability)
+            local slot,index=NHCompanions.cardSlot(state,"warehouse",nil,item)
+            if not slot then break end
+            local amount=pending[id]
+            if index then amount=math.min(amount,NHStore.maxResourceAmount-(state.warehouse[index].item.count or 1)) end
+            if not NHCompanions.put(state,"warehouse",slot,index,NHCompanions.withCount(item,amount)) then break end
+            pending[id]=pending[id]>amount and pending[id]-amount or nil
         end
     end
 end
@@ -48,7 +135,7 @@ end
 -- detached tables until the settings commit pointer has been published.
 function NHCompanions.stageDelivery(state)
     local book=state.summons
-    if not book or not next(book.pending) or not NHStore.freeSlot(state,"warehouse",nil,"summon_card") then return end
+    if not book or not next(book.pending) then return end
     local pending={}
     for id,n in pairs(book.pending) do pending[id]=n end
     state.summons={farm=book.farm,livestock=book.livestock,pending=pending}
@@ -56,6 +143,17 @@ function NHCompanions.stageDelivery(state)
     for i,row in ipairs(state.warehouse) do rows[i]=row end
     state.warehouse=rows
     NHCompanions.deliver(state)
+end
+
+function NHCompanions.grantSet(state)
+    local book=state.summons or {pending={}}
+    for _,id in ipairs(NHCompanions.order) do
+        if (book.pending[id] or 0)>=NHStore.maxResourceAmount then return false,"Resource storage is full." end
+    end
+    state.summons=book
+    for _,id in ipairs(NHCompanions.order) do book.pending[id]=(book.pending[id] or 0)+1 end
+    NHCompanions.deliver(state)
+    return true
 end
 
 -- One persistent roll per successful crop or animal production cycle, in the
@@ -90,7 +188,7 @@ function NHCompanions.rewardText(ids,lang,state)
     local zh=lang=="zh"
     local message=(zh and "获得召唤卡：" or "Summon cards: ")..table.concat(names,zh and "、" or ", ")
     if next(state.summons.pending) then
-        return message..(zh and "。装备库已满，腾出栏位后自动入库。" or ". Waiting for a free equipment slot.")
+        return message..(zh and "。藏品库已满，腾出栏位后自动入库。" or ". Waiting for a free collection slot.")
     end
     return message
 end
@@ -101,17 +199,20 @@ local function speciesOf(entity)
     end
 end
 
+function NHCompanions.captureCard(entity)
+    local id=speciesOf(entity)
+    local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
+    if id and item then
+        local record=card(id,ComponentGetValue2(item,"uses_remaining"))
+        if NHCompanions.validCard(record) then return record end
+    end
+    return nil,"Invalid summon card."
+end
+
 function NHCompanions.registerItems()
     NHTransfers.registerItem("summon_card",function(entity) return EntityHasTag(entity,"noita_hideout_summon_card") end,{
-        warehouseCategory="equipment",
-        capture=function(entity)
-            local id=speciesOf(entity)
-            local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
-            if not id or not item then return nil,"Invalid summon card." end
-            local record=card(id,ComponentGetValue2(item,"uses_remaining"))
-            if NHCompanions.validCard(record) then return record end
-            return nil,"Invalid summon card."
-        end,
+        warehouseCategory="collection",
+        capture=NHCompanions.captureCard,
         restore=function(record,x,y)
             if not NHCompanions.validCard(record) then return nil,"Invalid summon card." end
             local entity=EntityLoad(items.."card_"..record.species..".xml",x,y)

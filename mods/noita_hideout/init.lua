@@ -7,6 +7,7 @@ dofile_once(files .. "wand.lua")
 dofile_once(files .. "potion.lua")
 dofile_once(files .. "transfers.lua")
 NHCompanions.registerItems()
+NHCardWallets.registerItem()
 dofile_once(files .. "products.lua")
 dofile_once(files .. "perks.lua")
 dofile_once(files .. "native_items.lua")
@@ -35,6 +36,11 @@ local function tr(zh, en)
 end
 
 local error_translations = {
+    ["Card wallet changed."] = "卡片夹已移动，请重新选择。",
+    ["Card wallet slot unavailable."] = "卡片夹栏位已改变，或此格无法叠放该卡。",
+    ["Invalid card wallet."] = "卡片夹记录无效。",
+    ["Could not create card wallet."] = "未能生成卡片夹。",
+    ["Select a carried summon card."] = "请从原版道具栏选择一张召唤卡。",
     ["Hold a wand or flask first."] = "请先拾取并切换到手中的魔杖或药瓶。",
     ["This item has no storage adapter."] = "仓库尚未适配这件物品。",
     ["Wrong loading slot."] = "请将药瓶和粉末袋放入各自的装卸格。",
@@ -74,6 +80,8 @@ local error_translations = {
     ["Not enough stored gold."] = "存钱罐余额不足。",
     ["Unknown shop item."] = "商店没有这件商品。",
     ["Supplies storage is full."] = "消耗品仓库没有空格。",
+    ["Equipment storage is full."] = "装备仓库没有空格。",
+    ["Item ID limit reached."] = "藏身处无法再分配新的物品编号。",
     ["Wallet is full."] = "钱包余额已达上限。",
     ["Piggy bank is full."] = "存钱罐余额已达上限。",
     ["Wallet unavailable."] = "当前钱包无法存取金币。",
@@ -338,7 +346,7 @@ local function item_label(entry)
     local name = item.name or ""
     if name ~= "" then name = GameTextGetTranslatedOrNot(name) end
     if item.kind=="medkit" then return name.." ("..(item.remaining or 3).."/3)" end
-    if item.kind=="summon_card" then return name.." ("..item.remaining.."/"..NHCompanions.durability..")" end
+    if item.kind=="summon_card" then return translated(item.name) or tr(NHCompanions.species[item.species].zh,NHCompanions.species[item.species].en) end
     if item.kind~="wand" then return name~="" and name or item.kind end
     if not name or name == "" then name = tr("魔杖", "Wand") end
     return name .. " (" .. #(item.cards or {}) .. tr(" 个法术)", " spells)")
@@ -350,7 +358,7 @@ local function stored_view(entry)
     return {id=entry.id,kind=item.kind,name=item_label(entry),potion=potion,
         icon=potion and NHPotion.inventoryIcon(potion) or (item.kind=="dose" and NHInjectors.get(item.subtype).icon)
             or item.icon or (item.sprite and item.sprite.image_file),
-        remaining=item.remaining,count=item.count,subtype=item.subtype,dockSlot=NHPotion.dockSlot(item)}
+        remaining=item.remaining,count=item.count,subtype=item.subtype,species=item.species,dockSlot=NHPotion.dockSlot(item)}
 end
 
 local function pouch_name(id)
@@ -416,7 +424,7 @@ local function inventory_view()
     end
     model.progression=NHStore.progressMenu(state,lang)
     model.warehouse_capacity={}
-    for _,category in ipairs({"wand","spell","containers","supplies","equipment","materials"}) do
+    for _,category in ipairs({"wand","spell","containers","supplies","equipment","collection","materials"}) do
         model.warehouse_capacity[category]=NHStore.warehouseCapacity(state,category)
     end
     model.salvage_enabled=NHStore.level(state,"salvage")>0
@@ -533,6 +541,13 @@ local function native_slots(player)
                             slot.entity,slot.kind = id,kind
                             if kind=="dose" then slot.remaining,slot.subtype=NHDoses.remaining(state,id) end
                             if kind=="pouch" then slot.pouchId=NHDoses.isPouch(state,id) end
+                            if kind=="card_wallet" then
+                                local row=NHCardWallets.carried(state,player,id)
+                                slot.walletId=row and row.id
+                            elseif kind=="summon_card" then
+                                local card=NHCompanions.captureCard(id)
+                                if card then slot.remaining,slot.species=card.remaining,card.species end
+                            end
                             slot.icon = ComponentGetValue2(item,"ui_sprite")
                             if kind=="potion" then
                                 slot.dockSlot=(EntityHasTag(id,"powder_stash") or slot.icon=="data/ui_gfx/items/material_pouch.png") and 2 or 1
@@ -579,6 +594,10 @@ end
 
 local function popup_accessible(player)
     if not popup then return false end
+    if popup.kind=="card_wallet" then
+        return (not popup.slot or (GameIsInventoryOpen() and (popup.container=="safe" or near_home(player))))
+            and NHCardWallets.get(state,player,popup)~=nil
+    end
     local pouch=state.pouches[popup.id]
     if not pouch then return false end
     if popup.slot then
@@ -590,7 +609,11 @@ local function popup_accessible(player)
 end
 
 local function matches_popup(player,id)
-    return popup and popup.id==id and popup_accessible(player)
+    return popup and popup.kind~="card_wallet" and popup.id==id and popup_accessible(player)
+end
+
+local function matches_wallet(player,id)
+    return popup and popup.kind=="card_wallet" and popup.id==id and popup_accessible(player)
 end
 
 local function close_panel()
@@ -677,6 +700,12 @@ local function workshop_action(player,action,index)
     elseif ModSettingGet("noita_hideout.test_tools") ~= false then
         if action == "restock" then
             commit_edit(NHStore.restock, "测试针剂包已重发，内有两支。", "Test pouch reissued with two doses.")
+        elseif action == "test_cards" then
+            if commit_edit(NHCompanions.grantSet) then
+                feedback(NHCompanions.rewardText(NHCompanions.order,lang,state))
+            end
+        elseif action == "test_wallet" then
+            commit_edit(NHStore.grantTestWallet,"空卡片夹已放入装备库。","Empty card wallet delivered to equipment storage.")
         elseif action == "preview_items" then
             local x, y = EntityGetTransform(player)
             local wand, err = NHWand.sample(x - 9, y - 5)
@@ -744,6 +773,12 @@ local function dispatch(player, action, index)
             elseif action~="cancel_native" and not ((action=="place" or action=="secure_withdraw") and index.kind=="potion") then return end
         end
         if action=="open_container" then
+            if index.kind=="card_wallet" then
+                local ref={kind="card_wallet",id=index.walletId,slot=index.safeSlot,container=container}
+                if not ref.slot then ref.entity=index.entity end
+                if ref.id and (not ref.slot or (case_open and GameIsInventoryOpen())) and NHCardWallets.get(state,player,ref) then popup=ref end
+                return
+            end
             if not index.pouchId then return end
             if index.safeSlot then
                 local pouch=NHPouches.at(state,container,index.safeSlot)
@@ -752,6 +787,41 @@ local function dispatch(player, action, index)
                 end
             elseif index.entity and NHDoses.isPouch(state,index.entity)==index.pouchId and EntityGetRootEntity(index.entity)==player then
                 popup={id=index.pouchId,entity=index.entity}
+            end
+            return
+        end
+        if action=="move_wallet_card" then
+            if not matches_wallet(player,index.walletId) then return end
+            if (not index.sourceCell or not index.targetCell) and not (case_open and GameIsInventoryOpen()) then return end
+            local source=index.sourceCell and {cell=index.sourceCell,species=index.species,remaining=index.remaining,count=index.count}
+                or {container=container,slot=index.from,id=index.entity}
+            local target=index.targetCell and {cell=index.targetCell} or {container=container,slot=index.safeSlot}
+            local ok,reason=NHCardWallets.move(state,player,popup,source,target)
+            if ok then status="" else transfer_error(reason) end
+            return
+        end
+        if action=="move_stored_card" or action=="move_wallet" then
+            local from,to=index.source,index.destination
+            if not case_open or not GameIsInventoryOpen() or (from~="safe" and from~="warehouse")
+                or (to~="safe" and to~="warehouse") or ((from=="warehouse" or to=="warehouse") and not near_home(player)) then return end
+            if action=="move_stored_card" then
+                commit_edit(function(draft)
+                    return NHCompanions.moveCard(draft,from,index.from,to,index.safeSlot,index.entity)
+                end)
+            else
+                local moved=commit_edit(function(draft)
+                    local at=NHStore.slotIndex(draft,from,index.from,"card_wallet")
+                    local row=at and draft[from][at]
+                    if not row or row.id~=index.entity or row.item.kind~="card_wallet"
+                        or not NHStore.freeSlot(draft,to,index.safeSlot,"card_wallet") then return false,"Inventory slot changed." end
+                    table.remove(draft[from],at)
+                    row.slot=index.safeSlot
+                    table.insert(draft[to],row)
+                    return true
+                end)
+                if moved and popup and popup.kind=="card_wallet" and popup.id==index.entity then
+                    popup={kind="card_wallet",id=index.entity,container=to,slot=index.safeSlot}
+                end
             end
             return
         end
@@ -818,7 +888,10 @@ local function dispatch(player, action, index)
                 return
             end
             local kind = NHNative.kind(id)
-            if container=="docks" then ok,result=NHTransfers.deposit(state,player,container,id,index.safeSlot)
+            if index.walletId and index.targetCell then
+                if not matches_wallet(player,index.walletId) then return end
+                ok,result=NHCardWallets.move(state,player,popup,{entity=id},{cell=index.targetCell})
+            elseif container=="docks" then ok,result=NHTransfers.deposit(state,player,container,id,index.safeSlot)
             elseif kind=="pouch" and index.safeSlot then ok,result=NHDoses.storePouch(state,player,id,index.safeSlot,container)
             elseif kind=="dose" then
                 if not index.safeSlot and not (index.intoContainer and matches_popup(player,index.pouchId)) then return end
@@ -835,6 +908,10 @@ local function dispatch(player, action, index)
                 local pouch=NHPouches.at(state,container,index.safeSlot)
                 if not pouch or pouch.id~=index.pouchId then return end
                 ok,result=NHDoses.takePouch(state,player,deliver,pouch.id)
+            elseif action=="take_card" then
+                if not matches_wallet(player,index.walletId) then return end
+                ok,result=NHCardWallets.move(state,player,popup,
+                    {cell=index.sourceCell,species=index.species,remaining=index.remaining,count=index.count},{deliver=deliver})
             elseif action=="take_dose" then
                 if not matches_popup(player,index.pouchId) then return end
                 ok,result=NHDoses.withdraw(state,player,deliver,popup.entity,nil,index.sourceCell,container,popup.id)
@@ -952,6 +1029,9 @@ function OnWorldPostUpdate()
         if kind == "pouch" then
             local id=NHDoses.isPouch(state,item)
             if id then opened,popup=true,{id=id,entity=item} end
+        elseif item and EntityHasTag(item,"noita_hideout_card_wallet") then
+            local row=NHCardWallets.carried(state,player,item)
+            if row then opened,popup=true,{kind="card_wallet",id=row.id,entity=item} end
         elseif kind == "dose" then use_dose(player, item)
         elseif item and (NHCompanions.use(player,item,lang) or NHProducts.use(player,item)) then mouse_release=true end
     end
@@ -968,9 +1048,16 @@ function OnWorldPostUpdate()
     end
     if opened and (case_open or popup) then model.native_slots = native_slots(player) end
     model.popup = popup ~= nil
-    model.pouchId=popup and popup.id
-    model.pouchName=popup and pouch_name(popup.id)
-    model.cells=popup and state.pouches[popup.id].cells
+    model.walletId,model.pouchId,model.cells,model.pouchName=nil,nil,nil,nil
+    if popup and popup.kind=="card_wallet" then
+        local wallet=NHCardWallets.get(state,player,popup)
+        model.walletId,model.pouchName=popup.id,tr("卡片夹","Card wallet").." #"..popup.id
+        model.cells=wallet.item.cells or {}
+        model.walletCapacity=NHCardWallets.capacity
+    elseif popup then
+        model.pouchId,model.pouchName=popup.id,pouch_name(popup.id)
+        model.cells=state.pouches[popup.id].cells
+    end
     model.mode = case_open and "case" or (popup and "container" or "closed")
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
 

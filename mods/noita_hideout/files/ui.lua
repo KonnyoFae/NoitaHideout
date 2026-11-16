@@ -9,7 +9,7 @@ local bank_amounts={1,10,100,1000}
 local warehouse_tabs = {
     {"wand","魔杖","Wands"}, {"spell","法术","Spells"}, {"containers","容器","Containers"},
     {"supplies","消耗品","Supplies"}, {"equipment","装备","Equipment"}, {"materials","物料","Materials"},
-    {"bank","存钱罐","Piggy bank"}, {"essences","精华","Essences"},
+    {"bank","存钱罐","Piggy bank"}, {"essences","精华","Essences"}, {"collection","藏品","Collection"},
 }
 local workshop_folded=false
 local list_pages={}
@@ -145,12 +145,18 @@ local function item_details(slot,model,tr)
         end
         return lines
     end
-    if slot.kind=="pouch" then
+    if slot.kind=="pouch" or slot.kind=="card_wallet" then
         local details={slot.name,tr("点击打开，拖动移动","Click to open or drag to move")}
         if slot.view and slot.view.doses then
             table.insert(details,2,tr("针剂数量 ","Injectors: ")..slot.view.doses)
         end
         return details
+    end
+    if slot.kind=="summon_card" then
+        local species=NHCompanions.species[slot.species]
+        return {species and tr(species.zh,species.en) or slot.name,
+            tr("耐久 ","Durability ")..slot.remaining.."/"..NHCompanions.durability,
+            tr("数量 ","Count ")..string.format("%.0f",slot.count or 1)}
     end
     if slot.kind=="dose" then
         local d=NHInjectors.get(slot.subtype)
@@ -172,6 +178,19 @@ local function home_layout(sw,scale,tile_width)
     local right=sw-5-secure*scale
     local middle=(left+stash*scale+right-bench*scale)/2
     return {left=left,stash=stash,middle=middle,bench=bench,secure=secure}
+end
+
+local function stash_tabs(width,scale,tr)
+    local x,y=8,22
+    local tabs={}
+    for i,t in ipairs(warehouse_tabs) do
+        local name=tr(t[2],t[3])
+        local w=GuiGetTextDimensions(gui,name,scale)/scale
+        if x>8 and x+w>width-6 then x,y=8,y+13 end
+        tabs[i]={x=x,y=y,name=name}
+        x=x+w+8
+    end
+    return tabs,y+15
 end
 
 -- Keep the ends of a long page strip reachable and center the nearby numbers.
@@ -455,7 +474,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         return item.canBuy
     end
     local body_height=62
-    if salvage then
+    if tab=="samples" and not salvage then body_height=82
+    elseif salvage then
         body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)+(per_card and 13 or 0)
     elseif ranching then
         if livestock_page=="produce" then body_height=13*#model.farm.produce+5
@@ -751,6 +771,14 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         label(body+17,tr("在脚边拾取样品","Pick up the samples at your feet"),muted)
         if button(217,6,body+33,tr("重发测试针剂包","Reissue test pouch"),gold,
             tr("替换现有针剂包，内含两支激活剂。","Replace the current pouch with two doses.")) then dispatch("restock") end
+        if button(480,6,body+49,tr("领取四种召唤卡","Claim four summon cards"),gold) then
+            folded,warehouse_tab,warehouse_pages.collection=false,"collection",1
+            dispatch("test_cards")
+        end
+        if button(481,6,body+65,tr("领取空卡片夹","Claim empty card wallet"),gold) then
+            folded,warehouse_tab,warehouse_pages.equipment=false,"equipment",1
+            dispatch("test_wallet")
+        end
     end
     return hover
 end
@@ -769,7 +797,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     local function slot(column,y,key,kind,name,icon,entity,left,top)
         local x = 8 + column * qw
         slots[#slots+1] = {x=(left or ox)+x*scale, y=(top or oy)+y*scale, key=key, kind=kind,
-            name=name, icon=icon, entity=entity, pouchId=kind=="pouch" and entity or nil}
+            name=name, icon=icon, entity=entity, pouchId=kind=="pouch" and entity or nil,
+            walletId=kind=="card_wallet" and entity or nil}
     end
 
     local standalone = model.mode=="container"
@@ -787,7 +816,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             local v = model.secure_loot[n] or {}
             slot(i-1,25,"valuable",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id)
             slots[#slots].safeSlot,slots[#slots].dockSlot,slots[#slots].view=n,v.dockSlot,v
-            slots[#slots].remaining,slots[#slots].count,slots[#slots].subtype=v.remaining,v.count,v.subtype
+            slots[#slots].remaining,slots[#slots].count,slots[#slots].subtype,slots[#slots].species=v.remaining,v.count,v.subtype,v.species
         end
     end
     local popupY = standalone and 0 or -66
@@ -802,13 +831,18 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             dispatch("close_container")
             return
         end
-        for i=1,model.pouchCapacity do
+        for i=1,(model.walletId and model.walletCapacity or model.pouchCapacity) do
             local cell=model.cells[i]
-            local d=cell and NHInjectors.get(cell.subtype)
-            slot(i-1,popupY+23,"dose",cell and "dose",d and tr(d.zh,d.en) or tr("空格","Empty slot"),d and d.icon)
+            if model.walletId then
+                local species=cell and NHCompanions.species[cell.species]
+                slot(i-1,popupY+23,"card_cell",cell and "summon_card",species and tr(species.zh,species.en) or tr("空格","Empty slot"),cell and cell.icon)
+            else
+                local d=cell and NHInjectors.get(cell.subtype)
+                slot(i-1,popupY+23,"dose",cell and "dose",d and tr(d.zh,d.en) or tr("空格","Empty slot"),d and d.icon)
+            end
             local v=slots[#slots]
-            v.cell,v.pouchId=i,model.pouchId
-            if cell then v.remaining,v.count,v.subtype=cell.remaining,cell.count,cell.subtype end
+            v.cell,v.pouchId,v.walletId=i,model.pouchId,model.walletId
+            if cell then v.remaining,v.count,v.subtype,v.species=cell.remaining,cell.count,cell.subtype,cell.species end
         end
     end
 
@@ -824,17 +858,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         panel_hover=draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         local left,width=layout.left,layout.stash
         local cols=math.max(1,math.min(10,math.floor((width-16)/qw)))
-        local tx,ty=8,22
-        local tabs={}
-        for i,t in ipairs(warehouse_tabs) do
-            local name=tr(t[2],t[3])
-            local text_width=GuiGetTextDimensions(gui,name,scale)/scale
-            if tx>8 and tx+text_width>width-6 then tx,ty=8,ty+13 end
-            tabs[i]={x=tx,y=ty,name=name}
-            tx=tx+text_width+8
-        end
-        local grid_y=ty+15
-        local content_height=qh+30+material_rows*11
+        local tabs,grid_y=layout.tabs,layout.gridY
+        local content_height=layout.contentHeight
         local height=folded and 20 or grid_y+content_height+18
         local top=sh-5-height*scale
         local warehouse_hover=mx>=left and mx<left+width*scale and my>=top and my<top+height*scale
@@ -842,6 +867,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         if warehouse_hover and drag and not folded then
             local src=drag.source
             if src.key=="dose" then warehouse_tab="supplies"
+            elseif src.key=="card_cell" or (src.key=="valuable" and src.kind=="summon_card") then warehouse_tab="collection"
+            elseif src.key=="valuable" and src.kind=="card_wallet" then warehouse_tab="equipment"
             elseif src.key=="valuable" and src.kind=="pouch" then warehouse_tab="equipment"
             elseif src.key=="native" and src.kind~="other" and (warehouse_tab~="materials" or src.kind~="potion") then
                 warehouse_tab=NHStore.category(src.kind)
@@ -963,7 +990,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                     slot(i%cols,grid_y+math.floor(i/cols)*qh,"warehouse",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id,left,top)
                     local target=slots[#slots]
                     target.view=v
-                    target.subtype=v.subtype
+                    target.subtype,target.species=v.subtype,v.species
                     target.safeSlot,target.remaining,target.count,target.dockSlot=n,v.remaining,v.count,v.dockSlot
                 end
             end
@@ -994,25 +1021,42 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     if not hovered and mx>=ox and my>=oy+(model.popup and popupY or 0)*scale and mx<ox+pw*scale and my<oy+72*scale then
         hovered = {key="panel"}
     end
-    if drag and (model.revision~=drag.revision or model.pouchId~=drag.popupId) then drag=nil end
+    if drag and (model.revision~=drag.revision or model.pouchId~=drag.pouchId or model.walletId~=drag.walletId) then drag=nil end
     if model.salvage_enabled and hovered and hovered.key=="warehouse" and hovered.view and hovered.view.salvage_yield
         and not fresh and not drag and InputIsMouseButtonJustDown(2) then
         salvage_target={id=hovered.entity,kind=hovered.kind,slot=hovered.safeSlot,mode=hovered.view.essence and "essence" or "scrap"}
         workshop_folded=false
     end
     if not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind and hovered.kind~="reserved" then
-        drag={source=hovered,revision=model.revision,popupId=model.pouchId,x=mx,y=my}
+        drag={source=hovered,revision=model.revision,pouchId=model.pouchId,walletId=model.walletId,x=mx,y=my}
     end
     if drag and ((mx-drag.x)^2+(my-drag.y)^2)>9*scale^2 then drag.moved=true end
     local source=drag and drag.source
     local function drop(target)
         if not source or not target then return end
-        if source.kind=="pouch" and source.key==target.key and source.entity==target.entity
+        if (source.kind=="pouch" or source.kind=="card_wallet") and source.key==target.key and source.entity==target.entity
             and source.safeSlot==target.safeSlot and not drag.moved then
             return "open_container",source,source.safeSlot
         end
         local from_store=source.key=="valuable" or source.key=="warehouse"
         local to_store=target.key=="valuable" or target.key=="warehouse"
+        if source.kind=="summon_card" then
+            local accepts=not target.kind or (target.kind=="summon_card" and NHCompanions.canStack(target,source))
+            if target.key=="card_cell" and accepts then
+                if source.key=="native" then return "place",source end
+                if from_store or (source.key=="card_cell" and source.cell~=target.cell) then return "move_wallet_card",source end
+            end
+            if to_store and accepts and (target.key=="valuable" or warehouse_tab=="collection") then
+                if source.key=="card_cell" then return "move_wallet_card",source,target.safeSlot end
+                if from_store and (source.key~=target.key or source.safeSlot~=target.safeSlot) then return "move_stored_card",source,target.safeSlot end
+                if source.key=="native" then return "place",source,target.safeSlot end
+            end
+            if source.key=="card_cell" and target.key=="native" and not target.entity and target.lane=="tool" then return "take_card",target end
+        end
+        if source.kind=="card_wallet" and from_store and to_store and not target.kind
+            and (target.key=="valuable" or warehouse_tab=="equipment") and (source.key~=target.key or source.safeSlot~=target.safeSlot) then
+            return "move_wallet",source,target.safeSlot
+        end
         if model.mode=="case" and source.kind=="perk" and not target.kind then
             if from_store and target.key=="perk" then return "equip_stored_perk",source end
             if source.key=="perk" and to_store and (target.key=="valuable" or warehouse_tab=="supplies") then
@@ -1089,14 +1133,17 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     end
     for i,v in ipairs(slots) do
         local placement=drop(v)
-        if placement=="place" or placement=="move_pouch" or placement=="equip_stored_perk" or placement=="store_equipped_perk" then tint(green) end
+        if placement=="place" or placement=="move_pouch" or placement=="move_wallet" or placement=="move_wallet_card"
+            or placement=="move_stored_card" or placement=="equip_stored_perk" or placement=="store_equipped_perk" then tint(green) end
         GuiImage(gui,1000+i,v.x,v.y,tile,1,scale)
         if v.kind=="reserved" then GuiText(gui,v.x+5*scale,v.y+3*scale,"...",scale)
         elseif v.kind then sprite(v,2000+i,v.x+qw*scale/2,v.y+qh*scale/2,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and source.perkSlot==v.perkSlot and 0.35 or 1)
         end
-        if v.kind=="dose" then
-            local remaining=v.remaining or model.maxUses
-            local caption=(v.count or 1)>1 and ("×"..v.count) or (remaining.."/"..model.maxUses)
+        if v.kind=="dose" or v.kind=="summon_card" then
+            local durability=v.kind=="summon_card" and NHCompanions.durability or model.maxUses
+            local remaining=v.remaining or durability
+            local quantity=(v.kind=="summon_card" and compact(v.count or 1)) or v.count
+            local caption=(v.count or 1)>1 and ("×"..quantity) or (remaining.."/"..durability)
             GuiZSetForNextWidget(gui,-84)
             GuiText(gui,v.x,v.y+(v.key=="warehouse" and qh-7 or qh-1)*scale,caption,0.8*scale)
         end
@@ -1130,7 +1177,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                 source=storage_key(source.key),destination=storage_key(hovered.key),
                 container=(source.key=="docks" or hovered.key=="docks") and "docks" or storage_key(source.key) or storage_key(hovered.key) or "safe",
                 sourceCell=source.cell,targetCell=hovered and hovered.cell,
-                pouchId=source.pouchId or hovered.pouchId,
+                pouchId=source.pouchId or hovered.pouchId,walletId=source.walletId or hovered.walletId,
+                species=source.species,remaining=source.remaining,count=source.kind=="summon_card" and (source.count or 1) or source.count,
                 intoContainer=hovered and hovered.key=="dose"}
             dispatch(action,request)
         end
@@ -1164,7 +1212,17 @@ function NHUI.draw(model, dispatch)
     if s<=0 then return end
     local layout
     if at_home then
-        layout=home_layout(sw,s,GuiGetImageDimensions(gui,tile))
+        local qw,qh=GuiGetImageDimensions(gui,tile)
+        local content_height=qh+30+material_rows*11
+        layout=home_layout(sw,s,qw)
+        layout.tabs,layout.gridY=stash_tabs(layout.stash,s,tr)
+        local fit_scale=(sh-10)/(layout.gridY+content_height+18)
+        if not folded and fit_scale<s then
+            s=fit_scale
+            layout=home_layout(sw,s,qw)
+            layout.tabs,layout.gridY=stash_tabs(layout.stash,s,tr)
+        end
+        layout.contentHeight=content_height
         pw=layout.secure
     end
     local ox,oy=sw-pw*s-5,sh-ph*s-5

@@ -157,7 +157,7 @@ print("Native inventory drag, spell row, exact slot, upgrade pages and close can
 
 -- Left warehouse, native tile pitch, automatic filing and materials tab.
 model.near,model.warehouse=true,{}
-model.warehouse_capacity={wand=48,spell=48,containers=48,supplies=48,equipment=48,materials=16}
+model.warehouse_capacity={wand=48,spell=48,containers=48,supplies=48,equipment=48,collection=48,materials=16}
 model.debug=true
 local profile={safeCapacity=2,levels={},materials={water=500,sand=350,slime=200},resources={},warehouse={}}
 model.progression=NHStore.progressMenu(profile,"en")
@@ -579,6 +579,7 @@ assert(green_button(244) and buttons[244].name=="Gear 5" and not buttons[245])
 render(model,213)
 assert(render(model,216)=="preview_items")
 assert(render(model,217)=="restock")
+assert(render(model,480)=="test_cards" and render(model,481)=="test_wallet")
 render(model,211)
 render(model)
 assert(drawn["[+] Hideout"] and panels[70] and panels[10] and not drawn.Workshop)
@@ -679,12 +680,13 @@ action,param=render(model,241)
 assert(action=="buy_upgrade" and param.id=="warehouse_wand" and param.level==0)
 render(model,243)
 render(model)
-assert(not green_button(248)) -- Salvage bench, missing oil.
-render(model,248)
+render(model,243)
+render(model)
+assert(buttons[244].name=="Salvage bench" and not green_button(244))
+render(model,244)
 assert(not render(model,241) and drawn["Insufficient stock"])
 render(model,240)
-render(model,243)
-render(model,244) -- Future support station.
+render(model,245) -- Future support station.
 assert(not render(model,241) and drawn["In development"])
 render(model,219)
 render(model)
@@ -770,7 +772,7 @@ do
     render(model,300)
     render(model)
     assert(drawn["酸液"] and drawn["1.2M"])
-    point(panels[70].x+9,buttons[82].y+18)
+    point(panels[70].x+9,buttons[83].y+18)
     assert(drawn["治疗精华  1234000"])
     width,height,model.lang=sw,sh,"en"
 end
@@ -944,3 +946,57 @@ end
 testLivestockPanel("en")
 testLivestockPanel("zh")
 print("UI: youngstock shop, pen timers, stock and collection in both languages passed.")
+
+local function testCardWalletPanel()
+    width,height,model.lang,model.debug=640,360,"en",true
+    model.perkCapacity,model.packablePerk=0,nil
+    model.pouchId,model.walletId,model.popup=nil,nil,false
+    model.secure_loot={{id=95,kind="card_wallet",name="Card wallet"}}
+    local function card(id,species,remaining,count)
+        return {id=id,kind="summon_card",name=species,species=species,remaining=remaining,count=count}
+    end
+    model.warehouse.collection={card(201,"dryad",80,9754),card(202,"flower_fairy",3)}
+    model.warehouse.equipment={model.secure_loot[1]}
+    render(model,213)
+    assert(render(model,480)=="test_cards")
+    render(model)
+    local first=tiles[1004]
+    point(first.x+1,first.y+1)
+    assert(drawn["Dryad"] and drawn["Count 9754"] and drawn["Durability 80/80"])
+    local action,req=drag_tiles(1,1)
+    assert(action=="open_container" and req.walletId==95 and req.container=="safe")
+    model.walletId,model.walletCapacity,model.pouchName,model.popup=95,4,"Card wallet #95",true
+    model.cells={card(nil,"dryad",80,3),card(nil,"dryad",79),card(nil,"griffin",80)}
+    render(model)
+    assert(tiles[1007].x-tiles[1004].x==60)
+    action,req=drag_tiles(8,4)
+    assert(action=="move_wallet_card" and req.walletId==95 and req.entity==201 and req.from==1 and req.targetCell==1)
+    assert(not drag_tiles(8,5) and not drag_tiles(8,6),"cannot stack worn or other-species cards")
+    action,req=drag_tiles(5,7)
+    assert(action=="move_wallet_card" and req.sourceCell==2 and req.targetCell==4 and req.remaining==79)
+    action,req=drag_tiles(4,8)
+    assert(action=="move_wallet_card" and req.sourceCell==1 and req.safeSlot==1 and req.container=="warehouse")
+    action,req=drag_tiles(4,2)
+    assert(action=="move_wallet_card" and req.sourceCell==1 and req.safeSlot==2 and req.container=="safe")
+    action,req=drag_tiles(9,2)
+    assert(action=="move_stored_card" and req.source=="warehouse" and req.destination=="safe" and req.entity==202)
+    local c=tiles[1005]
+    point(c.x+1,c.y+1,"press")
+    action,req=point(148,28,"release")
+    assert(action=="take_card" and req.walletId==95 and req.sourceCell==2 and req.remaining==79)
+    local carried=model.native_slots[2]
+    carried.kind,carried.species,carried.remaining="summon_card","dryad",80
+    point(108,28,"press")
+    c=tiles[1004]
+    action,req=point(c.x+1,c.y+1,"release")
+    assert(action=="place" and req.entity==carried.entity and req.targetCell==1 and req.walletId==95)
+    for _,lang in ipairs({"zh","en"}) do
+        model.lang,width,height=lang,320,180
+        render(model,213)
+        assert(render(model,480)=="test_cards")
+        render(model)
+        assert(panels[70].y>=0 and panels[210].y>=0 and buttons[481].y<height)
+    end
+end
+testCardWalletPanel()
+print("UI: test supplies, collection, 80/80 stacks and exact-wallet transfers passed.")

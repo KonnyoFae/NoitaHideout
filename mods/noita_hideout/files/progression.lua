@@ -14,6 +14,7 @@ define("warehouse_spell","expansion","法术库","Spell storage",4,stock_cost,{c
 define("warehouse_containers","expansion","容器库","Container storage",4,stock_cost,{category="containers"})
 define("warehouse_supplies","expansion","消耗品库","Supply storage",4,stock_cost,{category="supplies"})
 define("warehouse_equipment","expansion","装备库","Equipment storage",4,stock_cost,{category="equipment"})
+define("warehouse_collection","expansion","藏品库","Collection storage",4,stock_cost,{category="collection"})
 define("warehouse_materials","expansion","物料库","Material storage",4,{{"sand",250},{"slime",100}},{category="materials"})
 define("medical","expansion","医疗工位","Medical station",1,{{"water",250},{"slime",100}},
     {effect={"制造医疗物品","Craft medical supplies"}})

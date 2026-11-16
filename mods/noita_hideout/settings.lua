@@ -6,7 +6,7 @@ mod_settings = {
     {
         id = "test_tools",
         ui_name = "测试物资 / Test supplies",
-        ui_description = "在出生点生成测试魔杖和混合瓶，或重发起始测试针剂包。",
+        ui_description = "在出生点领取四种召唤卡、空卡片夹、测试针剂包或魔杖与混合瓶。",
         value_default = true,
         scope = MOD_SETTING_SCOPE_RUNTIME,
     },
