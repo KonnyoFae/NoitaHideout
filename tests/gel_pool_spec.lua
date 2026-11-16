@@ -19,13 +19,13 @@ local s=load()
 NHStore.newRun(s)
 s.materials={slime=249,water=150,soil_lush=70,soil=30}
 local upgrade={id="gel_pool",level=0}
-assert(not NHStore.buyUpgrade(s,upgrade,start) and s.materials.water==150 and not s.farm.pens)
+assert(not NHStore.buyUpgrade(s,upgrade,start) and s.materials.water==150 and not s.farm.herds)
 s.materials.slime=250
 assert(NHStore.buyUpgrade(s,upgrade,start) and not next(s.materials) and not NHStore.buyUpgrade(s,upgrade,start))
-local pen=s.farm.pens[9]
+local pen=NHLivestock.view(s,"en",start)[1]
 local period=NHLivestock.species.gel_pool.period
-assert(period==4*60*60 and pen.kind=="gel_pool" and pen.born==start and pen.nextAt==start+period)
-assert(not NHLivestock.freePen(s,"gel_pool") and not NHStore.buyGood(s,{id="gel_pool"}))
+assert(period==4*60*60 and pen.species=="gel_pool" and pen.adults==1 and pen.nextAt==start+period)
+assert(pen.capacity==2 and NHLivestock.freePen(s,"gel_pool") and not NHStore.buyGood(s,{id="gel_pool"}))
 s.gelBonus={seed=100,pending={}}
 s.summons={gel_pool=100,pending={}}
 assert(NHStore.commit(s))
@@ -68,7 +68,8 @@ for _,rolls in ipairs({{100,1},{1,100},{1,1}}) do
     replay.gelBonus={seed=rolls[1],pending={}}
     replay.summons={gel_pool=rolls[2],pending={}}
     replay.warehouse,replay.resources={},{}
-    replay.farm.pens[9].nextAt=start+period
+    replay.farm.time=start
+    replay.farm.herds.gel_pool.progress,replay.farm.herds.gel_pool.owed=0,0
     local _,ok,cards=NHFarm.sync(replay,start+period)
     assert(ok and (replay.resources.spice==1)==(rolls[1]==100) and (#cards==1)==(rolls[2]==100))
 end
@@ -115,7 +116,7 @@ assert(warehouseItem(s,2,"dose").count==2 and not next(s.gelBonus.pending))
 s.resources.herb=NHStore.maxResourceAmount-3
 local before,cardStream=s.gelBonus.seed,s.summons.gel_pool
 NHFarm.sync(s,start+4*period)
-assert(s.farm.pens[9].nextAt==start+4*period and s.gelBonus.seed==before and s.summons.gel_pool==cardStream)
+assert(s.farm.herds.gel_pool.owed==1 and s.gelBonus.seed==before and s.summons.gel_pool==cardStream)
 s.resources.herb=NHStore.maxResourceAmount-4
 assert(NHFarm.due(s,s.farm.time) and NHFarm.sync(s,s.farm.time))
 assert(s.resources.herb==NHStore.maxResourceAmount and s.resources.fiber==24)

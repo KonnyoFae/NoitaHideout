@@ -33,13 +33,14 @@ define("perk_slots","upgrade","特质栏","Perk slots",3,{{"water",250},{"slime"
 define("farmland","expansion","田地","Farmland",4,{{"farm_soil",150},{"water",100}})
 define("agri_equipment","expansion","农业设备","Farm equipment",1,{{"farm_sand",300},{"water",200}},
     {effect={"种植香料与激活草药","Grow spices and stimulating herbs"}})
-define("livestock","expansion","畜牧设备","Livestock pens",3,{{"farm_sand",200},{"water",150}})
-define("beehive","expansion","蜂箱","Beehive",1,{{"fiber",12},{"slime",75},{"sugar",8}},
-    {effect={"可购入女王蜂，定期采集糖分与香料","House a queen bee to produce sugar and spices"}})
-define("dragon_nest","expansion","龙巢","Dragon nest",1,{{"farm_sand",400},{"gunpowder",100},{"oil",150}},
-    {effect={"可购入龙蛋，孵化后定期带回金币与物品","Hatch a dragon to bring back gold and items"}})
-define("gel_pool","expansion","凝胶池","Gel pool",1,{{"slime",250},{"water",150},{"farm_soil",100}},
-    {effect={"建成即产草药和纤维，有机会附产香料、激活剂与召唤卡","Produces herbs and fiber with chances of spices, injectors and summon cards"}})
+define("livestock","expansion","畜牧设备","Livestock pens",3,{{"farm_sand",200},{"water",150}},
+    {housing={"鸡、牛容量各","Chicken and cattle capacity (each)"}})
+define("beehive","expansion","蜂箱","Beehive",3,{{"fiber",12},{"slime",75},{"sugar",8}},
+    {housing={"女王蜂容量","Queen bee capacity"}})
+define("dragon_nest","expansion","龙巢","Dragon nest",3,{{"farm_sand",400},{"gunpowder",100},{"oil",150}},
+    {housing={"龙容量","Dragon capacity"}})
+define("gel_pool","expansion","凝胶池","Gel pool",3,{{"slime",250},{"water",150},{"farm_soil",100}},
+    {housing={"凝胶容量","Gel capacity"}})
 
 local material_groups={
     farm_sand={alternatives={"sand","sandstone","sandstone_surface"}},
@@ -147,9 +148,12 @@ local function description(s,entry,offset,lang)
     if entry.id=="safe" then return (NHStore.safeCapacity(s)+offset)..(zh and " 格" or " slots") end
     local level=NHStore.level(s,entry.id)+offset
     if entry.id=="farmland" then return level..(zh and " 块田地" or (level==1 and " field" or " fields")) end
-    if entry.id=="livestock" then
-        if zh then return level.." 鸡舍 + "..level.." 牛栏" end
-        return level..(level==1 and " coop + " or " coops + ")..level..(level==1 and " cowshed" or " cowsheds")
+    if entry.housing then
+        local text=entry.housing[zh and 1 or 2].." "..NHLivestock.capacityAtLevel(level)
+        if entry.id=="gel_pool" and offset==1 and level==1 then
+            text=text..(zh and "，附带 1 只成熟凝胶" or " (includes 1 adult gel)")
+        end
+        return text
     end
     if entry.id=="perk_slots" then return level..(zh and " 个特质栏位" or " perk slots") end
     if level==0 then return zh and "未解锁" or "Locked" end
@@ -221,7 +225,9 @@ function NHStore.buyUpgrade(s,request,now)
         end
     end
     s.levels[entry.id]=level+1
-    if entry.id=="gel_pool" then NHLivestock.deliver(s,"gel_pool",NHLivestock.species.gel_pool.offset,now) end
+    if entry.id=="gel_pool" and level==0 then
+        NHLivestock.deliver(s,"gel_pool",NHLivestock.freePen(s,"gel_pool"),now,true)
+    end
     return true
 end
 

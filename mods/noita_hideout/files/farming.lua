@@ -16,17 +16,19 @@ crop("spice","香料","Spices",3,240,true)
 crop("active_herb","激活草药","Stimulating herbs",3,300,true)
 
 function NHFarm.adopt(farm)
-    if farm.passive then return end
-    -- Manual fields held one ripe crop, and the old pens held up to four
-    -- batches. Start the continuous schedule with exactly that earned output.
-    for _,plot in pairs(farm.plots) do
-        if plot.crop then plot.readyAt=math.max(plot.readyAt,farm.time) end
+    if not farm.passive then
+        -- Manual fields held one ripe crop, and old pens held up to four
+        -- batches. Preserve those limits before converting to shared groups.
+        for _,plot in pairs(farm.plots) do
+            if plot.crop then plot.readyAt=math.max(plot.readyAt,farm.time) end
+        end
+        for _,animal in pairs(farm.pens or {}) do
+            local period=NHLivestock.species[animal.kind].period
+            animal.nextAt=math.max(animal.nextAt,farm.time-3*period)
+        end
+        farm.passive=true
     end
-    for _,animal in pairs(farm.pens or {}) do
-        local period=NHLivestock.species[animal.kind].period
-        animal.nextAt=math.max(animal.nextAt,farm.time-3*period)
-    end
-    farm.passive=true
+    NHLivestock.adopt(farm)
 end
 
 function NHFarm.validate(state,whole)
@@ -55,7 +57,7 @@ function NHFarm.validate(state,whole)
 end
 
 local function active(farm)
-    if farm.pens and next(farm.pens) then return true end
+    if farm.herds and next(farm.herds) then return true end
     for _,plot in pairs(farm.plots) do
         if plot.crop then return true end
     end
@@ -97,10 +99,10 @@ end
 
 -- Normally one batch matures at a time. Bound the number of reward rolls
 -- per source per tick when a restored world is far ahead of its profile.
-local maxBatchesPerSettlement=128
+NHFarm.batchLimit=128
 function NHFarm.batches(now,nextAt,period,space)
     if now<nextAt then return 0 end
-    return math.min(1+math.floor((now-nextAt)/period),space,maxBatchesPerSettlement)
+    return math.min(1+math.floor((now-nextAt)/period),space,NHFarm.batchLimit)
 end
 
 local function cropRoom(state,id)
@@ -120,22 +122,20 @@ function NHFarm.due(state,now)
     for _,plot in pairs(farm.plots) do
         if plot.crop and now>=plot.readyAt and cropBatches(state,plot,now)>0 then return true end
     end
-    for _,animal in pairs(farm.pens or {}) do
-        if now>=animal.nextAt and NHLivestock.batches(state,animal,now)>0 then return true end
-    end
-    return false
+    return NHLivestock.due(state,math.max(farm.time,now))
 end
 
 function NHFarm.sync(state,now)
     local farm=state.farm
     if not active(farm) and not farm.pending then return false,false end
     local elapsed=math.max(now,farm.time)
-    local advanced=elapsed>farm.time
+    local previous=farm.time
+    local advanced=elapsed>previous
     farm.time=elapsed
     local crops=0
     if farm.pending then
         for id,owed in pairs(farm.pending) do
-            local count=math.min(owed,cropRoom(state,id),maxBatchesPerSettlement)
+            local count=math.min(owed,cropRoom(state,id),NHFarm.batchLimit)
             if count>0 then
                 state.resources[id]=(state.resources[id] or 0)+count*NHFarm.crops[id].amount
                 farm.pending[id]=owed>count and owed-count or nil
@@ -157,7 +157,7 @@ function NHFarm.sync(state,now)
         end
     end
     local awards=crops>0 and NHCompanions.reward(state,"farm",crops) or {}
-    local animalBatches,animalAwards=NHLivestock.settle(state,elapsed)
+    local animalBatches,animalAwards=NHLivestock.settle(state,previous,elapsed)
     for _,id in ipairs(animalAwards) do awards[#awards+1]=id end
     local produced=crops+animalBatches>0
     return advanced or produced,produced,awards

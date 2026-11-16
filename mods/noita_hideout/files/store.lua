@@ -743,6 +743,7 @@ NHStore.shopGoods={
     {id="calf",animal="calf",zh="牛犊",en="Calf",category="livestock",price=240,quantity=1},
     {id="queen_bee",animal="queen_bee",zh="女王蜂",en="Queen bee",category="livestock",price=480,quantity=1},
     {id="dragon_egg",animal="dragon_egg",zh="龙蛋",en="Dragon egg",category="livestock",price=3000,quantity=1},
+    {id="gel_pool",animal="gel_pool",zh="凝胶幼体",en="Gel hatchling",category="livestock",price=320,quantity=1},
 }
 
 function NHStore.stockDoseSlot(state,subtype)
@@ -802,12 +803,14 @@ function NHStore.buyGood(state,request,now)
     if not good then return false,"Unknown shop item." end
     local ready,slot,stack=NHStore.canBuyGood(state,good)
     if not ready then return false,slot end
-    if good.animal and request.pen and request.pen~=slot then return false,"Livestock collection changed." end
+    if good.animal then
+        if request.pen~=nil and request.pen~=slot then return false,"Livestock collection changed." end
+        if not NHLivestock.deliver(state,good.animal,slot,now) then return false,"Livestock collection changed." end
+        return NHStore.spendGold(state,good.price)
+    end
     local paid,reason=NHStore.spendGold(state,good.price)
     if not paid then return false,reason end
-    if good.animal then
-        NHLivestock.deliver(state,good.animal,slot,now)
-    elseif good.material then
+    if good.material then
         state.materials[good.material]=(state.materials[good.material] or 0)+good.quantity
     elseif stack then
         stack.item={kind="dose",subtype=good.item.subtype,remaining=NHStore.doseDurability,count=(stack.item.count or 1)+1}

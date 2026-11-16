@@ -1056,7 +1056,7 @@ local function testShop()
     assert(wallet.money==400 and not state().materials.water)
     tick(nil,"bank_transfer",{direction="deposit",amount=320})
     local view=tick()
-    assert(view.bankGold==320 and view.walletGold==80 and #view.shopGoods==10)
+    assert(view.bankGold==320 and view.walletGold==80 and #view.shopGoods==11)
     assert(has_project(view.shopGoods,"medkit").category=="supplies")
     entities[player].x=900
     buy("water")
@@ -1371,12 +1371,12 @@ local function testLivestockController()
     tick(nil,"shop_buy",{id="chick",pen=1})
     advance(600)
     tick(nil,"shop_buy",{id="calf",pen=2})
-    assert(state().bankGold==40 and state().farm.pens[2].born>=600)
+    local herds=state().farm.herds
+    local adulthood=herds.chick.young[1]
+    local calfAdulthood=herds.calf.young[1]
+    assert(state().bankGold==40 and calfAdulthood-NHLivestock.species.calf.growth>=600)
     local young=tick().farm.pens[1]
-    assert(young.name=="Chick" and not young.grown)
-    local pens=state().farm.pens
-    local adulthood=pens[1].born+NHLivestock.species.chick.growth
-    local calfAdulthood=pens[2].born+NHLivestock.species.calf.growth
+    assert(young.juveniles==1 and young.adults==0 and young.count==1 and young.capacity==2)
     local juveniles=advance(adulthood-NHFarm.observe(state(),frame)-1).farm.produce
     for _,product in ipairs(juveniles) do assert(product.perMinute==0) end
     local firstAdult=tick().farm.produce
@@ -1391,7 +1391,7 @@ local function testLivestockController()
     entities[player].x=227
     inventory_open=true
     local adult=tick().farm.pens[1]
-    assert(adult.name=="Hen" and adult.grown and adult.remaining>0)
+    assert(adult.adults==1 and adult.juveniles==0 and adult.remaining>0)
     local combined=tick().farm.produce
     assert(math.abs(combined[2].perMinute-2/3)<1e-9 and math.abs(combined[3].perMinute-7/6)<1e-9)
     assert(tick().status:find("Summon cards",1,true))
@@ -1424,7 +1424,7 @@ local function testSpecialLivestock()
     tick(nil,"shop_buy",{id=bee.id,pen=bee.pen})
     tick(nil,"shop_buy",{id=egg.id,pen=egg.pen})
     assert(state().bankGold==0 and #tick().farm.pens==2)
-    local firstTreasure=state().farm.pens[egg.pen].nextAt
+    local firstTreasure=state().farm.herds.dragon_egg.young[1]+NHLivestock.species.dragon_egg.period
     inventory_open=false
     entities[player].x=400
     advance(firstTreasure-1-NHFarm.observe(state(),frame))
@@ -1432,7 +1432,7 @@ local function testSpecialLivestock()
     tick()
     s=state()
     assert(s.bankGold==150 and #s.warehouse+NHDragonLoot.pendingCount(s)>=1)
-    assert(s.farm.pens[egg.pen].nextAt==firstTreasure+NHLivestock.species.dragon_egg.period)
+    assert(s.farm.herds.dragon_egg.adults==1 and s.farm.herds.dragon_egg.progress==0)
     local treasureSeed=s.dragonLoot.seed
     boot()
     tick()
@@ -1455,8 +1455,9 @@ local function testGelPoolProduction()
     advance(210)
     tick(nil,"buy_upgrade",{id="gel_pool",level=0})
     s=state()
-    local pool=assert(s.farm.pens[9])
-    assert(pool.born==NHFarm.observe(s,frame) and pool.born>=210 and pool.nextAt==pool.born+240*60)
+    local first=s.farm.time+240*60
+    assert(s.farm.time==NHFarm.observe(s,frame) and s.farm.time>=210)
+    assert(s.farm.herds.gel_pool.adults==1 and s.farm.herds.gel_pool.progress==0)
     assert(not next(s.materials) and not s.resources.herb and not s.resources.fiber)
     -- Both independent rolls win at the first deadline.
     s.gelBonus={seed=100,pending={}}
@@ -1465,7 +1466,7 @@ local function testGelPoolProduction()
     boot()
     inventory_open=false
     entities[player].x=400
-    advance(pool.nextAt-NHFarm.observe(s,frame)-1)
+    advance(first-NHFarm.observe(s,frame)-1)
     assert(not state().resources.herb and not state().resources.spice)
     tick()
     s=state()
@@ -1480,7 +1481,7 @@ local function testGelPoolProduction()
     entities[player].x=227
     inventory_open=true
     tick()
-    assert(state().resources.spice==1 and state().farm.pens[9].nextAt==pool.nextAt+240*60)
+    assert(state().resources.spice==1 and state().farm.herds.gel_pool.progress==0)
     local pouch=starter()
     tick(nil,"open_container",{pouchId=pouch.id,safeSlot=pouch.slot,container="safe"})
     tick(nil,"pack_dose",{pouchId=pouch.id,container="warehouse",safeSlot=dose.slot,targetCell=4})
@@ -1491,6 +1492,71 @@ local function testGelPoolProduction()
     assert(starter().cells[4].remaining==2)
 end
 testGelPoolProduction()
+
+do
+    settings,flags={},{}
+    new_world()
+    local s=state()
+    s.materials={slime=1500,water=900,soil=600}
+    assert(NHStore.creditGold(s,2000) and NHStore.commit(s))
+    boot()
+    inventory_open=true
+    tick()
+    tick(nil,"buy_upgrade",{id="gel_pool",level=0})
+    local start=state().farm.time
+    local function view()
+        return tick().farm.pens[1]
+    end
+    local function offer()
+        return assert(has_project(tick().shopGoods,"gel_pool"))
+    end
+    local function buy(quoted)
+        return tick(nil,"shop_buy",{id=quoted.id,pen=quoted.pen})
+    end
+    local pool=view()
+    assert(pool.count==1 and pool.adults==1 and pool.capacity==2 and pool.effectivePeriod==240)
+    advance(1200)
+    local offer1=offer()
+    assert(offer1.price==320 and offer1.ready)
+    buy(offer1)
+    buy(offer1)
+    assert(state().bankGold==1680 and not offer().ready)
+    pool=view()
+    assert(pool.juveniles==1 and pool.adults==1 and pool.count==2 and pool.effectivePeriod==240)
+    tick(nil,"buy_upgrade",{id="gel_pool",level=1})
+    pool=view()
+    assert(pool.capacity==4 and pool.count==2)
+    buy(offer1)
+    assert(state().bankGold==1680 and view().count==2)
+    local mature=state().farm.herds.gel_pool.young[1]
+    -- Only the resident works before maturity. Both finish the leftover work together.
+    local first=mature+math.ceil((240*60-(mature-start))/2)
+    advance(mature-NHFarm.observe(state(),frame))
+    pool=view()
+    assert(pool.adults==2 and pool.juveniles==0 and pool.effectivePeriod==120)
+    assert(pool.remaining==math.ceil((first-NHFarm.observe(state(),frame))/60))
+    entities[player].x=400
+    inventory_open=false
+    advance(first-NHFarm.observe(state(),frame)-1)
+    assert(not state().resources.herb)
+    tick()
+    assert(state().resources.herb==4 and state().resources.fiber==6)
+    boot()
+    advance(120*60)
+    assert(state().resources.herb==8 and state().resources.fiber==12)
+    entities[player].x=227
+    inventory_open=true
+    tick()
+    tick(nil,"buy_upgrade",{id="gel_pool",level=2})
+    assert(view().capacity==6 and view().count==2)
+    for _=1,4 do buy(offer()) end
+    pool=view()
+    assert(pool.count==6 and pool.adults==2 and pool.juveniles==4 and not offer().ready)
+    local last=state().farm.herds.gel_pool.young[4]
+    advance(last-NHFarm.observe(state(),frame))
+    pool=view()
+    assert(pool.adults==6 and pool.effectivePeriod==40 and state().bankGold==400)
+end
 
 local function testCardSupplies()
     settings,flags={},{}

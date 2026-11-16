@@ -89,4 +89,33 @@ local current={levels={warehouse_supplies=1},storageBase={},warehouse={{id=9,ite
 progression.adopt(current)
 assert(current.pouches[10].slot==1 and current.pouches[10].cells[1].remaining==2 and current.warehouse[1].slot==1)
 assert(not NHStore.freeSlot(current,"warehouse",1,"pouch") and not NHStore.freeSlot(current,"warehouse",1,"dose"))
+
+-- Upgrades quote and charge the target level. Raising an occupied facility's
+-- capacity keeps its residents; only the initial gel pool includes an adult.
+local function testLivestockCapacity()
+    settings,flags={},{}
+    s=assert(NHStore.load())
+    NHStore.newRun(s)
+    s.resources={fiber=12*6,sugar=8*6}
+    s.materials={sand=(200+400)*6,water=(150+150)*6,slime=(75+250)*6,oil=150*6,gunpowder=100*6,soil=100*6}
+    for _,facility in ipairs({"livestock","beehive","dragon_nest","gel_pool"}) do
+        for level=0,2 do
+            local offer=quote(facility)
+            assert(offer.level==level and offer.canBuy and not offer.maxed)
+            assert(offer.current:find(tostring(2*level),1,true) and offer.next:find(tostring(2*(level+1)),1,true))
+            assert(offer.costs[1].amount==({livestock=200,beehive=12,dragon_nest=400,gel_pool=250})[facility]*(level+1))
+            assert(buy(facility,level) and not buy(facility,level) and NHStore.commit(s))
+            s=assert(NHStore.load())
+            if facility=="gel_pool" then
+                local pens=NHLivestock.view(s,"en",s.farm.time)
+                local gel=pens[#pens]
+                assert(gel.species=="gel_pool" and gel.count==1 and gel.adults==1 and gel.juveniles==0 and gel.capacity==2*(level+1))
+            end
+        end
+        local full=quote(facility)
+        assert(full.maxed and not full.canBuy and #full.costs==0 and not buy(facility,3))
+    end
+    assert(not next(s.materials) and not next(s.resources))
+end
+testLivestockCapacity()
 print("Progression costs, stale confirmations, independent capacities, order reservations and legacy stock passed.")

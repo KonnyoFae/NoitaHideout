@@ -113,4 +113,45 @@ gold=s.bankGold
 assert(not buy("water") and s.bankGold==gold)
 persist()
 assert(s.bankWalletNet==-135 and s.bankGold==gold)
+
+local function testAnimalOffers()
+    settings,flags={},{}
+    s=assert(NHStore.load())
+    NHStore.newRun(s)
+    assert(NHStore.creditGold(s,20000))
+    s.materials={sand=(200+400),water=(150+150),oil=150,gunpowder=100,slime=(75+250),soil=100}
+    s.resources={fiber=12,sugar=8}
+    for _,id in ipairs({"chick","calf","queen_bee","dragon_egg","gel_pool"}) do assert(not NHStore.canBuyGood(s,goods[id])) end
+    for _,id in ipairs({"livestock","beehive","dragon_nest","gel_pool"}) do assert(NHStore.buyUpgrade(s,{id=id,level=0},0)) end
+    local ready,gelSlot=NHStore.canBuyGood(s,goods.gel_pool)
+    assert(ready)
+    s.bankGold=319
+    assert(not NHStore.buyGood(s,{id="gel_pool",pen=gelSlot},60) and s.bankGold==319)
+    s.bankGold=20000
+    local deliver=NHLivestock.deliver
+    NHLivestock.deliver=function() return false end
+    assert(not NHStore.buyGood(s,{id="gel_pool",pen=gelSlot},60) and s.bankGold==20000)
+    NHLivestock.deliver=deliver
+    for _,entry in ipairs({{"chick",120},{"calf",240},{"queen_bee",480},{"dragon_egg",3000},{"gel_pool",320}}) do
+        local id,price=unpack(entry)
+        assert(goods[id].price==price and goods[id].quantity==1)
+        local count=id=="gel_pool" and 1 or 2
+        for _=1,count do
+            local ready,slot=NHStore.canBuyGood(s,goods[id])
+            assert(ready and type(slot)=="number")
+            local previous=s.bankGold
+            local request={id=id,pen=slot}
+            assert(NHStore.buyGood(s,request,60) and s.bankGold==previous-price)
+            assert(not NHStore.buyGood(s,request,60) and s.bankGold==previous-price)
+            persist()
+        end
+        assert(not NHStore.canBuyGood(s,goods[id]))
+    end
+    local pens=NHLivestock.view(s,"en",s.farm.time)
+    local gel=pens[#pens]
+    assert(gel.count==2 and gel.juveniles==1 and gel.adults==1)
+    pens=NHLivestock.view(s,"en",s.farm.time+120*60)
+    assert(pens[#pens].adults==2 and pens[#pens].juveniles==0)
+end
+testAnimalOffers()
 print("Shop: material and supply offers, exact savings debits, warehouse reservations, full-dose stacks and atomic purchase recovery passed.")

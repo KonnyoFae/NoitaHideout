@@ -35,9 +35,8 @@ assert(pens[1].yieldLabel=="糖分 / 香料" and pens[1].yieldValue=="5 / 2" and
 assert(not buy("queen_bee",8) and buy("queen_bee",7) and not buy("queen_bee",7))
 assert(state.bankGold==2999 and not buy("dragon_egg",8))
 assert(NHStore.creditGold(state,1) and buy("dragon_egg",8) and state.bankGold==0)
-local hive=state.farm.pens[7]
-local nest=state.farm.pens[8]
-local firstHoney,firstHoard=hive.nextAt,nest.nextAt
+local function projected(i) return NHLivestock.view(state,"en",state.farm.time)[i] end
+local firstHoney,firstHoard=projected(1).nextAt,projected(2).nextAt
 local cycle=NHLivestock.species.dragon_egg.period
 assert(firstHoney==180*60 and firstHoard==(480+300)*60)
 assert(NHFarm.view(state,"en",0).pens[1].grown and not NHFarm.view(state,"en",480*60-1).pens[2].grown)
@@ -53,7 +52,7 @@ assert(not NHFarm.sync(state,firstHoney))
 -- Both harvests stay together if the spice stock cannot receive its share.
 state.resources.spice=NHStore.maxResourceAmount-1
 assert(NHFarm.sync(state,2*firstHoney) and not NHFarm.due(state,2*firstHoney))
-assert(state.farm.pens[7].nextAt==2*firstHoney and state.resources.sugar==5)
+assert(state.farm.herds.queen_bee.owed==1 and state.resources.sugar==5)
 state.resources.spice=NHStore.maxResourceAmount-2
 assert(NHFarm.due(state,2*firstHoney) and NHFarm.sync(state,2*firstHoney))
 assert(state.resources.spice==NHStore.maxResourceAmount and state.resources.sugar==10)
@@ -73,7 +72,7 @@ state.resources.sugar=NHStore.maxResourceAmount
 state.bankGold=NHStore.maxGold-149
 state.dragonLoot={seed=100,pending={}}
 assert(NHFarm.sync(state,firstHoard) and state.bankGold==NHStore.maxGold-149)
-assert(state.dragonLoot.seed==100 and state.farm.pens[8].nextAt==firstHoard)
+assert(state.dragonLoot.seed==100 and state.farm.herds.dragon_egg.owed==1)
 farm=NHFarm.view(state,"en",firstHoard)
 assert(farm.pens[2].blocked and find(farm.produce,"gold").perMinute==30)
 assert(NHStore.spendGold(state,1))
@@ -95,7 +94,7 @@ assert(not NHFarm.sync(state,firstHoard) and state.dragonLoot.pending.dragon==1)
 table.remove(state.warehouse)
 persist()
 assert(not next(state.dragonLoot.pending) and state.warehouse[before].item.species=="dragon")
-assert(state.warehouse[before].item.remaining==80 and state.farm.pens[8].nextAt==firstHoard+cycle)
+assert(state.warehouse[before].item.remaining==80 and projected(2).nextAt==firstHoard+cycle)
 assert(not NHFarm.sync(state,firstHoard))
 
 -- Each overdue cycle grants one item (possibly queued) and the same gold payment.
@@ -109,4 +108,40 @@ assert(NHStore.spendGold(state,450) and NHFarm.sync(state,firstHoard+3*cycle))
 persist()
 assert(itemCount(state)==oldCount+3 and state.bankGold==NHStore.maxGold)
 assert(not NHFarm.sync(state,firstHoard+3*cycle))
+
+local function mixedHerds()
+    local s=assert(NHStore.load())
+    s.levels={beehive=3,dragon_nest=3,gel_pool=3}
+    s.farm={time=0,plots={},passive=true}
+    s.bankGold,s.resources,s.warehouse,s.nextItemId=0,{},{},1
+    s.gelBonus,s.dragonLoot,s.summons=nil,nil,nil
+    local function add(species,now,adult)
+        assert(NHLivestock.deliver(s,species,assert(NHLivestock.freePen(s,species)),now,adult))
+    end
+    add("gel_pool",0,true)
+    add("gel_pool",0)
+    add("dragon_egg",0)
+    add("dragon_egg",600)
+    add("queen_bee",600)
+    add("queen_bee",1200)
+    return s
+end
+local single=mixedHerds()
+local ticks=mixedHerds()
+local firstGel=NHFarm.view(single,"en",1200).pens[3]
+assert(firstGel.adults==1 and firstGel.juveniles==1 and firstGel.nextAt==10800)
+local firstCredits=NHFarm.view(single,"en",1200).pens[2].nextAt
+assert(firstCredits==38100)
+local firstSugar=NHFarm.view(single,"en",1200).pens[1]
+assert(firstSugar.nextAt==6300 and firstSugar.effectivePeriod==90)
+local ending=1200+120000
+assert(NHFarm.sync(single,ending))
+for at=1230,ending,30 do NHFarm.sync(ticks,at) end
+for _,name in ipairs({"herb","fiber","sugar","spice"}) do assert(single.resources[name]==ticks.resources[name]) end
+assert(single.bankGold==ticks.bankGold and single.dragonLoot.seed==ticks.dragonLoot.seed and single.gelBonus.seed==ticks.gelBonus.seed)
+assert(single.summons.beehive==ticks.summons.beehive and single.summons.gel_pool==ticks.summons.gel_pool)
+for species,herd in pairs(single.farm.herds) do
+    local other=ticks.farm.herds[species]
+    assert(herd.adults==other.adults and herd.owed==other.owed and herd.progress==other.progress)
+end
 print("Special livestock: independent buildings, purchases, passive rates, capped and replay-safe gold and item deliveries passed.")

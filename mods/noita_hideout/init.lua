@@ -82,6 +82,7 @@ local error_translations = {
     ["Livestock equipment is required."] = "请先扩建畜牧设备。",
     ["Beehive is required."] = "请先建造蜂箱。",
     ["Dragon nest is required."] = "请先建造龙巢。",
+    ["Gel pool is required."] = "请先建造凝胶池。",
     ["No matching pen is free."] = "这种幼畜的栏舍已满。",
     ["Livestock collection changed."] = "栏舍已变化，请重新选择。",
     ["Missing catalyst."] = "物料库中缺少所需的催化样品。",

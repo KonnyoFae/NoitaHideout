@@ -1085,7 +1085,8 @@ local function testLivestockPanel(lang)
     width,height,model.lang,model.near=320,180,lang,true
     pointer={x=0,y=0}
     local stock={profile=1,levels={livestock=1},resources={egg=21},farm={time=0,plots={}},warehouse={},pouches={},nextItemId=1}
-    model.shopGoods={{id="chick",category="livestock",name="Chick",price=120,quantity=1,ready=true,pen=1}}
+    local first=assert(NHLivestock.freePen(stock,"chick"))
+    model.shopGoods={{id="chick",category="livestock",name="Chick",price=120,quantity=1,ready=true,pen=first}}
     model.farm=NHFarm.view(stock,lang,0)
     render(model,223)
     render(model,440)
@@ -1097,21 +1098,21 @@ local function testLivestockPanel(lang)
     assert(buttons[258] and drawn["120"] and drawn["3:00"] and drawn["2:00"] and drawn["2 / 1"])
     assert(panels[210].y>=0 and reveal(model,258).y<height)
     local action,request=render(model,258)
-    assert(action=="shop_buy" and request.id=="chick" and request.pen==1)
-    NHLivestock.deliver(stock,"chick",1,0)
-    NHLivestock.deliver(stock,"calf",2,0)
+    assert(action=="shop_buy" and request.id=="chick" and request.pen==first)
+    NHLivestock.deliver(stock,"chick",first,0)
+    NHLivestock.deliver(stock,"calf",assert(NHLivestock.freePen(stock,"calf")),0)
     model.farm=NHFarm.view(stock,lang,0)
     render(model,223)
     render(model,451)
     render(model)
-    assert(drawn["3:00"] and drawn["5:00"] and not buttons[445])
+    assert(drawn["0 / 1"] and drawn["1 / 2"] and drawn["3:00"] and drawn["5:00"] and buttons[444])
     model.farm=NHFarm.view(stock,lang,180*60)
     render(model)
-    assert(drawn["2:00"] and not buttons[445])
+    assert(drawn["1 / 0"] and drawn["2:00"] and buttons[444])
     assert(NHFarm.sync(stock,300*60))
     model.farm=NHFarm.view(stock,lang,300*60)
     render(model)
-    assert(drawn["2:00"] and not buttons[445],"adult pen shows next automatic deposit")
+    assert(drawn["2:00"] and buttons[444],"partly filled adult housing still sells youngstock")
     model.farm.pens[1].blocked=true
     render(model)
     local full=lang=="zh" and "畜产库存已满" or "Produce storage full"
@@ -1119,7 +1120,7 @@ local function testLivestockPanel(lang)
     render(model,441)
     checkStockColumns(lang,"1","1.17")
     assert(drawn["23"] and drawn["1"] and panels[210].y>=0)
-    stock.levels.livestock,stock.farm.pens=0,nil
+    stock.levels.livestock,stock.farm=0,{time=0,plots={}}
     model.farm=NHFarm.view(stock,lang,0)
     render(model,440)
     render(model)
@@ -1137,7 +1138,7 @@ local function testSpecialPens(lang)
     for _,id in ipairs({"queen_bee","dragon_egg"}) do
         local animal=NHLivestock.species[id]
         model.shopGoods[#model.shopGoods+1]={id=id,category="livestock",name=animal.young[lang=="zh" and 1 or 2],
-            price=id=="queen_bee" and 480 or 3000,quantity=1,ready=true,pen=animal.offset}
+            price=id=="queen_bee" and 480 or 3000,quantity=1,ready=true,pen=assert(NHLivestock.freePen(stock,id))}
     end
     model.farm=NHFarm.view(stock,lang,0)
     for i,good in ipairs(model.shopGoods) do
@@ -1155,14 +1156,14 @@ local function testSpecialPens(lang)
         local action,arg=render(model,258)
         assert(action=="shop_buy" and arg.id==good.id and arg.pen==good.pen)
     end
-    NHLivestock.deliver(stock,"dragon_egg",8,0)
+    NHLivestock.deliver(stock,"dragon_egg",assert(NHLivestock.freePen(stock,"dragon_egg")),0)
     stock.dragonLoot={seed=1,pending={spell_BOMB=3}}
     model.farm=NHFarm.view(stock,lang,0)
     render(model,223)
     render(model,452)
     render(model)
     local pending=lang=="zh" and "已找到，待入库" or "Found, awaiting space"
-    assert((drawn[pending] or tips[pending]) and drawn["3"] and drawn["8:00"] and drawn["13:00"])
+    assert((drawn[pending] or tips[pending]) and drawn["3"] and drawn["8:00"] and drawn["13:00"] and buttons[444])
 end
 testSpecialPens("zh")
 testSpecialPens("en")
@@ -1170,7 +1171,8 @@ testSpecialPens("en")
 local function testGelPool(lang)
     model.lang,width,height=lang,320,180
     local zh=lang=="zh"
-    local stock={profile=1,levels={},resources={},bankGold=0,farm={time=0,plots={}},warehouse={},pouches={},nextItemId=1}
+    local stock={profile=1,levels={},resources={},materials={slime=250,water=150,soil=100},bankGold=320,
+        farm={time=0,plots={}},warehouse={},pouches={},nextItemId=1}
     local original=model.progression
     model.progression=NHStore.progressMenu(profile,lang)
     model.farm=NHFarm.view(stock,lang,0)
@@ -1182,8 +1184,7 @@ local function testGelPool(lang)
     render(model)
     local title=zh and "凝胶池" or "Gel pool"
     assert(buttons[240] and (drawn[title] or tips[title]))
-    stock.levels.gel_pool=1
-    stock.farm.pens={[9]={kind="gel_pool",born=0,nextAt=240*60}}
+    assert(NHStore.buyUpgrade(stock,{id="gel_pool",level=0},0))
     model.farm=NHFarm.view(stock,lang,0)
     render(model,223)
     render(model,451)
@@ -1192,7 +1193,7 @@ local function testGelPool(lang)
     local card=zh and "凝胶少女卡" or "Gel maiden card"
     assert(tips[bonus] and tips[bonus]:find(zh and "消耗品库" or "supplies",1,true))
     assert(tips[card] and tips[card]:find(zh and "独立" or "separately",1,true))
-    assert(drawn["4 / 6"] and drawn["4:00"] and drawn["30%"] and drawn["3%"] and not buttons[444])
+    assert(drawn["4 / 6"] and drawn["4:00"] and drawn["30%"] and drawn["3%"] and drawn["1 / 2"] and buttons[444])
     model.farm.gelPending,model.farm.gelSpicePending=3,2
     render(model)
     local meds=zh and "待入库激活剂" or "Injectors awaiting space"
@@ -1203,6 +1204,36 @@ local function testGelPool(lang)
     render(model)
     local full=zh and "草药或纤维库存已满" or "Herb or fiber stock full"
     assert(drawn[full] or tips[full])
+    model.farm=NHFarm.view(stock,lang,0)
+    local slot=assert(NHLivestock.freePen(stock,"gel_pool"))
+    model.shopGoods={{id="gel_pool",name=zh and "凝胶幼体" or "Gel hatchling",category="livestock",price=320,quantity=1,ready=true,pen=slot}}
+    render(model,444)
+    render(model)
+    assert(drawn["1 / 2"] and drawn["4:00"] and drawn["2:00"] and drawn["320"])
+    reveal(model,258)
+    local action,arg=render(model,258)
+    assert(action=="shop_buy" and arg.id=="gel_pool" and arg.pen==slot)
+    NHLivestock.deliver(stock,arg.id,arg.pen,0)
+    model.farm=NHFarm.view(stock,lang,60*60)
+    render(model,223)
+    render(model,451)
+    render(model)
+    assert(drawn["2 / 2"] and drawn["1 / 1"] and drawn["1:00"] and drawn["4:00"])
+    assert(buttons[447] and not buttons[444],"a full pool permits expansion even while its young are maturing")
+    reveal(model,447)
+    render(model,447)
+    render(model)
+    assert(buttons[240] and (drawn[title] or tips[title]))
+    model.farm=NHFarm.view(stock,lang,120*60)
+    render(model,223)
+    render(model,451)
+    render(model)
+    assert(drawn["2 / 0"] and drawn["2:00"] and not drawn["4:00"])
+    stock.levels.gel_pool=3
+    for i=3,6 do NHLivestock.deliver(stock,"gel_pool",assert(NHLivestock.freePen(stock,"gel_pool")),120*60) end
+    model.farm=NHFarm.view(stock,lang,120*60)
+    render(model)
+    assert(drawn["6 / 6"] and not buttons[444] and not buttons[447])
     model.progression=original
 end
 testGelPool("zh")

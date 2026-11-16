@@ -1,6 +1,7 @@
 NHLivestock={
     resources={egg={zh="蛋",en="Eggs"},milk={zh="奶",en="Milk"},meat={zh="肉",en="Meat"},
         gold={zh="金币",en="Gold"},loot={zh="寻宝",en="Treasure"}},
+    order={"chick","calf","queen_bee","dragon_egg","gel_pool"},
     species={
         chick={young={"小鸡","Chick"},adult={"母鸡","Hen"},pen={"鸡舍","Coop"},offset=1,
             growth=180*60,period=120*60,yields={{"egg",2},{"meat",1}}},
@@ -12,83 +13,150 @@ NHLivestock={
         dragon_egg={young={"龙蛋","Dragon egg"},adult={"寻宝龙","Treasure dragon"},pen={"龙巢","Dragon nest"},
             facility="dragon_nest",locked="Dragon nest is required.",offset=8,
             growth=480*60,period=300*60,yields={{"gold",150},{"loot",1}}},
-        gel_pool={adult={"生产中","Producing"},pen={"凝胶池","Gel pool"},facility="gel_pool",offset=9,
-            growth=0,period=240*60,yields={{"herb",4},{"fiber",6}}},
+        gel_pool={young={"凝胶幼体","Gel hatchling"},adult={"成熟凝胶","Mature gel"},pen={"凝胶池","Gel pool"},facility="gel_pool",offset=9,
+            growth=120*60,period=240*60,yields={{"herb",4},{"fiber",6}}},
     },
 }
 
--- Profile slots 1–6 are the three original coop/cowshed pairs. The special
--- pens keep their own fixed addresses even when normal pens are built later.
-local function penSpecies(state,slot)
-    if slot==7 then
-        if NHStore.level(state,"beehive")>0 then return "queen_bee" end
-    elseif slot==8 then
-        if NHStore.level(state,"dragon_nest")>0 then return "dragon_egg" end
-    elseif slot==9 then
-        if NHStore.level(state,"gel_pool")>0 then return "gel_pool" end
-    elseif slot>=1 and slot<=2*NHStore.level(state,"livestock") then
-        return slot%2==1 and "chick" or "calf"
+local function newHerd()
+    return {adults=0,young={},progress=0,owed=0}
+end
+
+function NHLivestock.capacityAtLevel(level)
+    return 2*level
+end
+
+function NHLivestock.capacity(state,species)
+    local kind=NHLivestock.species[species]
+    return kind and NHLivestock.capacityAtLevel(NHStore.level(state,kind.facility or "livestock")) or 0
+end
+
+-- All counts and deadlines are in game frames. Split whole periods off
+-- before multiplying to retain integer precision on very long catch-ups.
+local function addWork(progress,owed,frames,workers,period)
+    local partial=progress+(frames%period)*workers
+    return partial%period,owed+math.floor(frames/period)*workers+math.floor(partial/period)
+end
+
+-- Up to 0.33 each inhabitant had a separate production deadline. Pool every
+-- earned frame, including overdue batches whose output was blocked in storage.
+function NHLivestock.adopt(farm)
+    if not farm.pens then return end
+    assert(not farm.herds,"Mixed livestock schedules")
+    local herds={}
+    for slot,animal in pairs(farm.pens) do
+        local species=animal.kind
+        local kind=assert(NHLivestock.species[species],"Unknown livestock pen")
+        local validSlot=kind.facility and slot==kind.offset
+            or not kind.facility and slot>=1 and slot<=6 and (slot-kind.offset)%2==0
+        assert(validSlot,"Invalid livestock pen")
+        local herd=herds[species] or newHerd()
+        herds[species]=herd
+        local adultAt=animal.born+(species=="gel_pool" and 0 or kind.growth)
+        assert(animal.born<=farm.time and animal.nextAt>=adultAt+kind.period,"Invalid old livestock clock")
+        if adultAt<=farm.time then
+            herd.adults=herd.adults+1
+            local work=math.max(0,(farm.time-animal.nextAt)+kind.period)
+            herd.progress,herd.owed=addWork(herd.progress,herd.owed,work,1,kind.period)
+        else
+            herd.young[#herd.young+1]=adultAt
+        end
     end
+    for _,herd in pairs(herds) do table.sort(herd.young) end
+    farm.pens,farm.herds=nil,herds
 end
 
 function NHLivestock.validate(state,whole)
-    local pens=state.farm.pens
-    if NHStore.level(state,"gel_pool")>0 then
-        assert(type(pens)=="table" and pens[9] and pens[9].kind=="gel_pool","Missing gel pool production clock")
-    end
-    if pens==nil then return end
-    assert(type(pens)=="table","Invalid livestock pens")
-    for slot,animal in pairs(pens) do
-        assert(whole(slot) and type(animal)=="table" and penSpecies(state,slot)==animal.kind,"Invalid livestock pen")
-        local kind=NHLivestock.species[animal.kind]
-        assert(kind and whole(animal.born) and animal.born<=state.farm.time
-            and whole(animal.nextAt) and animal.nextAt>=animal.born+kind.growth+kind.period,"Invalid livestock")
+    local farm=state.farm
+    local herds=farm.herds or {}
+    assert(type(herds)=="table" and farm.pens==nil,"Invalid livestock schedules")
+    if NHStore.level(state,"gel_pool")>0 then assert(herds.gel_pool,"Missing gel pool production clock") end
+    for species,herd in pairs(herds) do
+        local kind=NHLivestock.species[species]
+        assert(kind and type(herd)=="table" and whole(herd.adults) and type(herd.young)=="table"
+            and whole(herd.progress) and herd.progress<kind.period and whole(herd.owed),"Invalid herd")
+        local count,last=0,farm.time
+        for i,maturity in ipairs(herd.young) do
+            assert(whole(maturity) and maturity>farm.time and maturity>=last and maturity-farm.time<=kind.growth,
+                "Invalid livestock maturity")
+            count,last=i,maturity
+        end
+        for i in pairs(herd.young) do assert(whole(i) and i>=1 and i<=count,"Invalid livestock member") end
+        assert(herd.adults+count>0 and herd.adults+count<=NHLivestock.capacity(state,species),"Invalid livestock population")
     end
 end
 
 function NHLivestock.freePen(state,species)
     local kind=NHLivestock.species[species]
-    if not kind or not kind.young then return nil,"Unknown shop item." end
-    local level=NHStore.level(state,kind.facility or "livestock")
-    if level==0 then return nil,kind.locked or "Livestock equipment is required." end
-    local pens=state.farm.pens or {}
-    local last=kind.facility and kind.offset or level*2
-    for slot=kind.offset,last,2 do
-        if not pens[slot] then return slot end
+    if not kind then return nil,"Unknown shop item." end
+    local capacity=NHLivestock.capacity(state,species)
+    if capacity==0 then return nil,kind.locked or "Livestock equipment is required." end
+    local herd=(state.farm.herds or {})[species]
+    local count=herd and herd.adults+#herd.young or 0
+    if count>=capacity then return nil,"No matching pen is free." end
+    -- A second purchase with the same screen quote cannot spend gold twice.
+    return kind.offset+10*count
+end
+
+function NHLivestock.deliver(state,species,token,now,adult)
+    if token~=NHLivestock.freePen(state,species) or not token then return false end
+    local farm=state.farm
+    now=math.max(farm.time,now or farm.time)
+    NHFarm.sync(state,now)
+    farm.time=now
+    farm.herds=farm.herds or {}
+    local herd=farm.herds[species] or newHerd()
+    farm.herds[species]=herd
+    local growth=NHLivestock.species[species].growth
+    if adult or growth==0 then herd.adults=herd.adults+1
+    else herd.young[#herd.young+1]=now+growth end
+    return true
+end
+
+-- Calculate time worked over [from, now] without changing the saved group.
+-- Young animals start contributing precisely at their own maturity frame.
+local function project(herd,period,from,now)
+    local progress,owed=addWork(herd.progress,herd.owed,now-from,herd.adults,period)
+    local matured=0
+    for i,at in ipairs(herd.young) do
+        if at>now then break end
+        progress,owed=addWork(progress,owed,now-at,1,period)
+        matured=i
     end
-    return nil,"No matching pen is free."
+    return progress,owed,matured
 end
 
-function NHLivestock.deliver(state,species,slot,now)
-    NHFarm.sync(state,now or state.farm.time)
-    state.farm.time=math.max(state.farm.time,now or state.farm.time)
-    local birth=state.farm.time
-    local kind=NHLivestock.species[species]
-    state.farm.pens=state.farm.pens or {}
-    state.farm.pens[slot]={kind=species,born=birth,nextAt=birth+kind.growth+kind.period}
-end
-
-function NHLivestock.batches(state,animal,now)
-    local kind=NHLivestock.species[animal.kind]
-    local space=NHStore.maxResourceAmount
+local function payable(state,kind,owed)
+    local count=math.min(owed,NHFarm.batchLimit)
     for _,part in ipairs(kind.yields) do
         local id,amount=part[1],part[2]
-        if id=="gold" then space=math.min(space,math.floor((NHStore.maxGold-state.bankGold)/amount))
-        elseif id~="loot" then
-            space=math.min(space,math.floor((NHStore.maxResourceAmount-(state.resources[id] or 0))/amount))
-        end
+        if id=="gold" then count=math.min(count,math.floor((NHStore.maxGold-state.bankGold)/amount))
+        elseif id~="loot" then count=math.min(count,math.floor((NHStore.maxResourceAmount-(state.resources[id] or 0))/amount)) end
     end
-    return NHFarm.batches(now,animal.nextAt,kind.period,space)
+    return count
 end
 
-function NHLivestock.settle(state,now)
+function NHLivestock.due(state,now)
+    for species,herd in pairs(state.farm.herds or {}) do
+        local kind=NHLivestock.species[species]
+        local _,owed=project(herd,kind.period,state.farm.time,now)
+        if owed>0 and payable(state,kind,owed)>0 then return true end
+    end
+    return false
+end
+
+function NHLivestock.settle(state,from,now)
     local total,ranch,hives,gel=0,0,0,0
     local finds={}
-    for slot=1,9 do
-        local animal=state.farm.pens and state.farm.pens[slot]
-        if animal and now>=animal.nextAt then
-            local kind=NHLivestock.species[animal.kind]
-            local count=NHLivestock.batches(state,animal,now)
+    for _,species in ipairs(NHLivestock.order) do
+        local herd=(state.farm.herds or {})[species]
+        if herd then
+            local kind=NHLivestock.species[species]
+            local progress,owed,matured=project(herd,kind.period,from,now)
+            local count=payable(state,kind,owed)
+            herd.progress,herd.owed=progress,owed-count
+            herd.adults=herd.adults+matured
+            for i=1,matured do table.remove(herd.young,1) end
             if count>0 then
                 for _,part in ipairs(kind.yields) do
                     local id,amount=part[1],part[2]*count
@@ -96,7 +164,6 @@ function NHLivestock.settle(state,now)
                     elseif id=="loot" then finds=NHDragonLoot.award(state,amount)
                     else state.resources[id]=(state.resources[id] or 0)+amount end
                 end
-                animal.nextAt=animal.nextAt+count*kind.period
                 total=total+count
                 if kind.facility=="beehive" then hives=hives+count
                 elseif kind.facility=="gel_pool" then gel=gel+count
@@ -127,39 +194,57 @@ function NHLivestock.yieldText(species,lang)
     return table.concat(labels," / "),table.concat(amounts," / ")
 end
 
+-- Include future maturities in the estimate. A newly purchased juvenile can
+-- shorten the displayed ETA even though it contributes no work before maturity.
+local function nextPayout(herd,now,adults,matured,needed)
+    local cursor=now
+    for i=matured+1,#herd.young do
+        local at=herd.young[i]
+        local worked=(at-cursor)*adults
+        if adults>0 and needed<=worked then return cursor+math.ceil(needed/adults) end
+        needed,cursor,adults=needed-worked,at,adults+1
+    end
+    if adults>0 then return cursor+math.ceil(needed/adults) end
+end
+
 function NHLivestock.view(state,lang,now)
     local pens,perMinute={},{}
     local language=lang=="zh" and 1 or 2
-    local function addPen(slot,species)
+    now=math.max(state.farm.time,now)
+    for _,species in ipairs(NHLivestock.order) do
         local kind=NHLivestock.species[species]
-        local title=kind.pen[language]
-        if not kind.facility then title=title.." "..math.ceil(slot/2) end
-        local pen={id=slot,species=species,title=title,young=kind.young and kind.young[language],growth=kind.growth/60,period=kind.period/60}
-        pen.yieldLabel,pen.yieldValue=NHLivestock.yieldText(species,lang)
-        local animal=(state.farm.pens or {})[slot]
-        if animal then
-            local adultAt=animal.born+kind.growth
-            pen.grown=now>=adultAt
-            if pen.grown then
-                local cyclesPerMinute=3600/kind.period
-                for _,part in ipairs(kind.yields) do
-                    perMinute[part[1]]=(perMinute[part[1]] or 0)+part[2]*cyclesPerMinute
-                end
-                if species=="gel_pool" then
-                    perMinute.spice=(perMinute.spice or 0)+cyclesPerMinute*NHGelPool.bonusChance/100
+        local facility=kind.facility or "livestock"
+        local capacity=NHLivestock.capacity(state,species)
+        if capacity>0 then
+            local pen={id=kind.offset,species=species,title=kind.pen[language],young=kind.young[language],
+                expansion=facility,canExpand=NHStore.level(state,facility)<3,capacity=capacity,count=0,
+                adults=0,juveniles=0,progress=0,owed=0,growth=kind.growth/60,period=kind.period/60}
+            pen.yieldLabel,pen.yieldValue=NHLivestock.yieldText(species,lang)
+            local herd=(state.farm.herds or {})[species]
+            if herd then
+                local progress,owed,matured=project(herd,kind.period,state.farm.time,now)
+                pen.count=herd.adults+#herd.young
+                pen.adults,pen.juveniles=herd.adults+matured,#herd.young-matured
+                pen.grown=pen.adults>0
+                pen.name=pen.grown and kind.adult[language] or pen.young
+                pen.owed,pen.progress=owed,owed>0 and 1 or progress/kind.period
+                pen.blocked=owed>0 and payable(state,kind,owed)==0
+                if pen.juveniles>0 then pen.growthRemaining=math.ceil((herd.young[matured+1]-now)/60) end
+                pen.nextAt=owed>0 and now or nextPayout(herd,now,pen.adults,matured,kind.period-progress)
+                pen.remaining=math.ceil((pen.nextAt-now)/60)
+                if pen.adults>0 then
+                    pen.effectivePeriod=kind.period/(60*pen.adults)
+                    local rate=60/pen.effectivePeriod
+                    for _,part in ipairs(kind.yields) do
+                        perMinute[part[1]]=(perMinute[part[1]] or 0)+part[2]*rate
+                    end
+                    if species=="gel_pool" then
+                        perMinute.spice=(perMinute.spice or 0)+rate*NHGelPool.bonusChance/100
+                    end
                 end
             end
-            pen.name=pen.grown and kind.adult[language] or pen.young
-            pen.nextAt=animal.nextAt
-            pen.blocked=now>=animal.nextAt and NHLivestock.batches(state,animal,now)==0
-            local target=pen.grown and animal.nextAt or adultAt
-            pen.remaining=math.max(0,math.ceil((target-now)/60))
+            pens[#pens+1]=pen
         end
-        pens[#pens+1]=pen
-    end
-    for slot=1,9 do
-        local species=penSpecies(state,slot)
-        if species then addPen(slot,species) end
     end
     local produce,ids={},{"egg","milk","meat"}
     local hive=NHStore.level(state,"beehive")>0
