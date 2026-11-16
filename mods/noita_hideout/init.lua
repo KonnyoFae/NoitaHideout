@@ -152,6 +152,7 @@ end
 local function save(draft,only_time)
     local cached=only_time and model_cache
     if cached and cached.profile_revision~=draft.revision then cached=nil end
+    NHAffinity.sync(draft)
     local ok, err = NHStore.commit(draft)
     if not ok then invalidate(); report(err); return false end
     if cached then cached.profile_revision=draft.revision end
@@ -184,6 +185,7 @@ local function attach()
         if not save(draft) then return false end
     end
     state, run_id = draft, serial
+    if draft.closedThrough<serial then NHAffinity.bind(draft) end
     return true
 end
 
@@ -253,13 +255,14 @@ local function update_workshop(player,frame,farm_time)
     -- World globals carry sub-checkpoint progress through save/continue.
     -- Avoid serializing the entire warehouse every frame or interrupting a drag.
     local farm_due=NHFarm.due(state,farm_time)
-    if not pending_visit and not farm_due and (not order or (elapsed<order.required and elapsed-order.progress<600)) then return true end
+    local affinity_due=frame%360==0 and NHAffinity.changed(state)
+    if not pending_visit and not farm_due and not affinity_due and (not order or (elapsed<order.required and elapsed-order.progress<600)) then return true end
     local draft=active_draft()
     if not draft then return false end
     local changed,done=NHStore.advanceProduction(draft,{run=run_id,orderId=order and order.id or false,
         progress=elapsed,checkpoint=pending_visit})
     local farm_changed=farm_due and NHFarm.sync(draft,farm_time)
-    if changed or farm_changed then
+    if changed or farm_changed or affinity_due then
         if not save(draft,not done) then return false end
         if done and pending_visit and elapsed<order.required then
             feedback(tr("圣山加速完成了订单，成品已入库。","Holy Mountain boost completed the order. Output delivered."))
@@ -368,6 +371,7 @@ end
 local function inventory_view()
     if model_cache and model_cache.profile_revision == state.revision then return model_cache end
     local model = {revision = state.revision, profile_revision=state.revision, secure_loot = {}, warehouse = {}}
+    model.affinityPoints=function(species) return NHAffinity.points(state,species) end
     model.essences={}
     for _,key in ipairs(NHEssences.order) do
         local kind=NHEssences.types[key]
@@ -961,6 +965,14 @@ function OnPlayerSpawned(player)
         NHClock.observe(state,GameGetFrameNum())
         NHFarm.observe(state,GameGetFrameNum())
         NHPerks.update(state,player)
+    end
+end
+
+function OnPausedChanged(is_paused,is_inventory_pause)
+    -- The pause menu can start a fresh world before the next regular checkpoint.
+    if is_paused and not is_inventory_pause and active_run() and NHAffinity.changed(state) then
+        local draft=active_draft()
+        if draft then save(draft,true) end
     end
 end
 

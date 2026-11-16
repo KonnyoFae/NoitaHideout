@@ -1,6 +1,6 @@
 <Entity tags="noita_hideout_companion,nh_companion_dryad">
     <Base file="mods/noita_hideout/files/companions/base.xml">
-        <SpriteComponent image_file="mods/noita_hideout/files/companions/dryad.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/companions/dryad_idle.xml" offset_x="0" offset_y="0" />
     </Base>
     <VariableStorageComponent _tags="nh_companion_clock" name="age_and_species" value_string="dryad" />
 </Entity>

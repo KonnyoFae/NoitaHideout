@@ -7,6 +7,7 @@ function ModSettingSet(k,v)
 end
 function HasFlagPersistent(k) return flags[k] end
 function AddFlagPersistent(k) flags[k]=true end
+function GlobalsGetValue(_,fallback) return fallback end
 dofile("mods/noita_hideout/files/store.lua")
 dofile("mods/noita_hideout/files/potion.lua")
 local state=assert(NHStore.load())
@@ -84,7 +85,7 @@ assert(not NHCompanions.validCard({species="dryad",remaining=80,count=0}))
 local entities,serial={},0
 local function create(x,y,tags)
     serial=serial+1
-    entities[serial]={x=x,y=y,face=1,parent=0,tags=tags or {},components={}}
+    entities[serial]={x=x,y=y,rotation=0,scaleX=1,scaleY=1,parent=0,tags=tags or {},components={}}
     return serial
 end
 local player=create(0,0,{player_unit=true})
@@ -95,11 +96,21 @@ end
 local hp=put(player,"DamageModelComponent",{hp=1,max_hp=4})
 put(player,"GenomeDataComponent",{herd_id=3})
 local held,open,failed=false,false,false
+local rejectParent,missingTag=false,nil
 local spawned,shots,gifts={},{},{}
-function EntityGetTransform(id) local e=entities[id];return e.x,e.y,0,e.face,1 end
-function EntitySetTransform(id,x,y,_,sx) local e=entities[id];e.x,e.y,e.face=x,y,sx end
+function EntityGetTransform(id)
+    local e=entities[id]
+    return e.x,e.y,e.rotation,e.scaleX,e.scaleY
+end
+function EntitySetTransform(id,x,y,rotation,sx,sy)
+    local e=entities[id]
+    e.x,e.y,e.rotation,e.scaleX,e.scaleY=x,y or 0,rotation or 0,sx or 1,sy or 1
+end
 function EntityGetParent(id) return entities[id].parent end
-function EntityAddChild(id,child) entities[child].parent=id end
+function EntityAddChild(id,child)
+    if not rejectParent then entities[child].parent=id end
+end
+function EntityRemoveFromParent(id) entities[id].parent=0 end
 function EntityHasTag(id,tag) return entities[id] and entities[id].tags[tag] end
 function EntityAddTag(id,tag) entities[id].tags[tag]=true end
 function EntityGetIsAlive(id) return entities[id]~=nil end
@@ -132,7 +143,7 @@ function EntityLoad(path,x,y)
         e.tags.noita_hideout_companion=true
         put(id,"VariableStorageComponent",{value_int=0,value_string=name},"nh_companion_clock")
         for _,t in ipairs({"nh_trip","nh_position","nh_gifts"}) do
-            put(id,"VariableStorageComponent",{value_int=0,value_float=0},t)
+            if t~=missingTag then put(id,"VariableStorageComponent",{value_int=0,value_float=0},t) end
         end
         spawned[#spawned+1]=id
     elseif name:match("^effect_") then put(id,"GameEffectComponent",{frames=-1})
@@ -173,11 +184,25 @@ assert(not NHCompanions.use(player,raw,"en") and adapter.capture(raw).remaining=
 failed=false
 assert(NHCompanions.use(player,raw,"en") and adapter.capture(raw).remaining==1)
 local pet=spawned[1]
-assert(NHCompanions.use(player,raw,"en") and #spawned==1 and adapter.capture(raw).remaining==1)
 local restored=assert(adapter.restore(adapter.capture(raw),0,0))
 assert(adapter.capture(restored).remaining==1 and adapter.capture(restored).species=="flower_fairy")
 assert(not adapter.restore({kind="summon_card",species="griffin",remaining=81},0,0))
 assert(not adapter.restore({kind="summon_card",species="missing",remaining=1},0,0))
+
+-- A bad replacement must leave the current follower and the new card intact.
+held=assert(adapter.restore({kind="summon_card",species="minotaur",remaining=80},0,0))
+failed=true
+assert(not NHCompanions.use(player,held,"en"))
+failed=false
+missingTag="nh_trip"
+assert(not NHCompanions.use(player,held,"en") and not EntityGetIsAlive(spawned[#spawned]))
+missingTag=nil
+rejectParent=true
+assert(not NHCompanions.use(player,held,"en") and not EntityGetIsAlive(spawned[#spawned]))
+rejectParent=false
+assert(adapter.capture(held).remaining==80 and EntityGetIsAlive(pet))
+assert(entities[pet].scaleX==0.5 and entities[pet].scaleY==0.5)
+assert(#EntityGetAllChildren(player,"noita_hideout_companion")==1)
 
 function dofile_once(path) dofile(path) end
 dofile("mods/noita_hideout/files/companions/behavior.lua")
@@ -198,15 +223,55 @@ for cycle=1,3 do
 end
 assert(#gifts==2 and gifts[1]=="bandage")
 while EntityGetIsAlive(pet) do NHCompanions.update(pet) end
+held=raw
 assert(NHCompanions.use(player,raw,"en") and not EntityGetIsAlive(raw))
-EntityKill(spawned[2])
-for _,species in ipairs({"dryad","minotaur","griffin"}) do
+local last=spawned[#spawned]
+local oldAura
+local vanilla=EntityLoad("data/entities/misc/effect_protection_melee.xml",0,0)
+EntityAddChild(player,vanilla)
+local food=EntityLoad("mods/noita_hideout/files/effect_food_levitation.xml",0,0)
+EntityAddTag(food,"noita_hideout_effect_food_levitation")
+EntityAddChild(player,food)
+for _,species in ipairs({"dryad","flower_fairy","minotaur","griffin"}) do
     held=assert(adapter.restore({kind="summon_card",species=species,remaining=3},0,0))
     assert(NHCompanions.use(player,held,"en"))
+    assert(adapter.capture(held).remaining==2 and not EntityGetIsAlive(last))
+    if oldAura then assert(not EntityGetIsAlive(oldAura)) end
     local current=spawned[#spawned]
+    assert(#EntityGetAllChildren(player,"noita_hideout_companion")==1)
+    local body=entities[current]
+    assert(body.scaleX==0.5 and body.scaleY==0.5 and body.x==entities[player].x+12 and body.y==entities[player].y-8)
     NHCompanions.update(current)
-    local aura=EntityGetAllChildren(player,"nh_companion_"..NHCompanions.species[species].effect)
-    assert(#aura==1 and entities[aura[1]].components.GameEffectComponent.frames==70)
-    EntityKill(current)
+    assert(body.scaleX==0.5 and body.scaleY==0.5)
+    entities[player].x=entities[player].x-40
+    NHCompanions.update(current)
+    assert(body.scaleX==-0.5 and body.scaleY==0.5)
+    entities[player].x=entities[player].x+80
+    NHCompanions.update(current)
+    assert(body.scaleX==0.5 and body.scaleY==0.5)
+    assert(entities[player].scaleX==1 and entities[player].scaleY==1)
+    local effect=NHCompanions.species[species].effect
+    local auras=EntityGetAllChildren(player,"noita_hideout_companion_aura")
+    if effect then
+        assert(#auras==1 and EntityHasTag(auras[1],"nh_companion_"..effect))
+        assert(entities[auras[1]].components.GameEffectComponent.frames==70)
+    else
+        assert(#auras==0)
+    end
+    last,oldAura=current,auras[1]
 end
-print("Summon rewards, atomic delivery, card durability, four companions, targeting, travel gifts, auras and expiration passed.")
+-- Recasting a card for the same species also spends one charge and starts a fresh visit.
+local legacyAura=create(0,0,{nh_companion_effect_protection_radioactivity=true})
+EntityAddChild(player,legacyAura)
+local tierAura=create(0,0,{noita_hideout_companion_aura=true})
+EntityAddChild(player,tierAura)
+assert(NHCompanions.use(player,held,"en") and adapter.capture(held).remaining==1)
+assert(not EntityGetIsAlive(last) and not EntityGetIsAlive(oldAura))
+assert(not EntityGetIsAlive(legacyAura) and not EntityGetIsAlive(tierAura))
+local replacement=spawned[#spawned]
+assert(#EntityGetAllChildren(player,"noita_hideout_companion")==1 and EntityGetParent(replacement)==player)
+assert(entities[replacement].components.VariableStorageComponentnh_companion_clock.value_int==0)
+assert(EntityGetIsAlive(vanilla) and EntityGetIsAlive(food))
+assert(NHCompanions.use(player,held,"en") and not EntityGetIsAlive(held))
+assert(not EntityGetIsAlive(replacement) and #EntityGetAllChildren(player,"noita_hideout_companion")==1)
+print("Summon rewards, card durability, replacement rollback, source-scoped auras, travel gifts and expiration passed.")

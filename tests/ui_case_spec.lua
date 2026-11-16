@@ -956,6 +956,8 @@ local function testCardWalletPanel()
         return {id=id,kind="summon_card",name=species,species=species,remaining=remaining,count=count}
     end
     model.warehouse.collection={card(201,"dryad",80,9754),card(202,"flower_fairy",3)}
+    local affinity={dryad=10,flower_fairy=40,griffin=100}
+    model.affinityPoints=function(id) return affinity[id] or 0 end
     model.warehouse.equipment={model.secure_loot[1]}
     render(model,213)
     assert(render(model,480)=="test_cards")
@@ -963,12 +965,23 @@ local function testCardWalletPanel()
     local first=tiles[1004]
     point(first.x+1,first.y+1)
     assert(drawn["Dryad"] and drawn["Count 9754"] and drawn["Durability 80/80"])
+    assert(drawn["Affinity 10/100   Next at 40"] and drawn["Toxic sludge immunity"])
+    assert(drawn["Heals 1 HP every 12 s"] and drawn["25% gift chance per 25 s of travel"])
+    affinity.dryad=100
+    point(first.x+1,first.y+1)
+    assert(drawn["Affinity 100/100"] and drawn["Heals 1 HP every 6 s"] and drawn["25% gift chance per 15 s of travel"])
     local action,req=drag_tiles(1,1)
     assert(action=="open_container" and req.walletId==95 and req.container=="safe")
     model.walletId,model.walletCapacity,model.pouchName,model.popup=95,4,"Card wallet #95",true
     model.cells={card(nil,"dryad",80,3),card(nil,"dryad",79),card(nil,"griffin",80)}
     render(model)
     assert(tiles[1007].x-tiles[1004].x==60)
+    point(tiles[1006].x+1,tiles[1006].y+1)
+    assert(drawn["Affinity 100/100"] and drawn["Restores 15% flight fuel per second"])
+    model.lang="zh"
+    point(tiles[1009].x+1,tiles[1009].y+1)
+    assert(drawn["好感度 40/100   下一阶段 100"] and drawn["每 3 秒恢复 1 HP"])
+    model.lang="en"
     action,req=drag_tiles(8,4)
     assert(action=="move_wallet_card" and req.walletId==95 and req.entity==201 and req.from==1 and req.targetCell==1)
     assert(not drag_tiles(8,5) and not drag_tiles(8,6),"cannot stack worn or other-species cards")

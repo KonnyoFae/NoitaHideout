@@ -154,9 +154,36 @@ local function item_details(slot,model,tr)
     end
     if slot.kind=="summon_card" then
         local species=NHCompanions.species[slot.species]
-        return {species and tr(species.zh,species.en) or slot.name,
+        local lines={species and tr(species.zh,species.en) or slot.name,
             tr("耐久 ","Durability ")..slot.remaining.."/"..NHCompanions.durability,
             tr("数量 ","Count ")..string.format("%.0f",slot.count or 1)}
+        if not species or not model.affinityPoints then return lines end
+        local points=model.affinityPoints(slot.species)
+        local tier=NHAffinity.tier(points)
+        local bonus=NHCompanions.bonuses[tier]
+        local affinity=tr("好感度 ","Affinity ")..points.."/100"
+        local nextTier=NHAffinity.thresholds[tier+2]
+        lines[#lines+1]=nextTier and (affinity..tr("   下一阶段 ","   Next at ")..nextTier) or affinity
+        if slot.species=="dryad" then
+            lines[#lines+1]=tr("毒泥免疫","Toxic sludge immunity")
+        elseif slot.species=="minotaur" then
+            lines[#lines+1]=tr("近战免疫","Melee immunity")
+            if bonus.shieldRecharge>0 then
+                local rate=math.floor(100*bonus.shieldRecharge/NHCompanions.bonuses[3].shieldRecharge+0.5)
+                lines[#lines+1]=string.format(tr("飞弹护盾 · 原版充能速度的 %d%%","Projectile shield at %d%% of normal recharge"),rate)
+            end
+        elseif slot.species=="griffin" then
+            lines[#lines+1]=tr("加快飞行上升速度","Faster levitation")
+            if bonus.flightPercent>0 then
+                lines[#lines+1]=string.format(tr("每秒恢复 %d%% 飞行能量","Restores %d%% flight fuel per second"),bonus.flightPercent)
+            end
+        end
+        local healSeconds=slot.species=="flower_fairy" and bonus.fairySeconds or (slot.species=="dryad" and bonus.dryadSeconds)
+        if healSeconds and healSeconds>0 then
+            lines[#lines+1]=string.format(tr("每 %d 秒恢复 1 HP","Heals 1 HP every %d s"),healSeconds)
+        end
+        lines[#lines+1]=string.format(tr("每结伴移动 %d 秒有 25%% 概率赠物","25%% gift chance per %d s of travel"),bonus.giftSeconds)
+        return lines
     end
     if slot.kind=="dose" then
         local d=NHInjectors.get(slot.subtype)

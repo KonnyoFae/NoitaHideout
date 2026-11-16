@@ -2,6 +2,7 @@
 -- readback checks the settings API; it does not force the engine to flush.
 NHStore = {}
 dofile("mods/noita_hideout/files/companions.lua")
+dofile("mods/noita_hideout/files/affinity.lua")
 dofile("mods/noita_hideout/files/card_wallets.lua")
 NHInjectors=dofile("mods/noita_hideout/files/injectors.lua")
 dofile("mods/noita_hideout/files/farming.lua")
@@ -174,6 +175,7 @@ local function validate(s)
     assert(type(s.bankWalletNet)=="number" and whole(math.abs(s.bankWalletNet)),"Invalid wallet transfer total")
     assert(type(s.checkpoints)=="table","Invalid Holy Mountain checkpoints")
     NHCompanions.validate(s,whole)
+    NHAffinity.validate(s,whole)
     for key,visited in pairs(s.checkpoints) do
         assert(type(key)=="string" and key~="" and visited==true,"Invalid Holy Mountain checkpoint")
     end

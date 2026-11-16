@@ -28,8 +28,16 @@ function GameTextGetTranslatedOrNot(k) return k end
 function CellFactory_GetType() return -1 end
 function ModTextFileGetContent() return nil end
 function GamePrint() end
+function ProceduralRandomi(_,_,lo) return lo end
 function MagicNumbersGetValue(k) return k:sub(-1) == "X" and "227" or "-85" end
-function EntityGetTransform(id) return entities[id].x,entities[id].y end
+function EntityGetTransform(id)
+    local e=entities[id]
+    return e.x,e.y,e.rotation or 0,e.scaleX or 1,e.scaleY or 1
+end
+function EntitySetTransform(id,x,y,rotation,sx,sy)
+    local e=entities[id]
+    e.x,e.y,e.rotation,e.scaleX,e.scaleY=x,y or 0,rotation or 0,sx or 1,sy or 1
+end
 function DoesWorldExistAt() return true end
 function EntityHasTag(id,tag) return entities[id] ~= nil and entities[id].tags[tag] == true end
 function EntityAddTag(id,tag) entities[id].tags[tag]=true end
@@ -115,6 +123,12 @@ function EntityLoad(path,x,y)
         EntityAddTag(next_id,"noita_hideout_summon_card")
         EntityAddTag(next_id,"nh_companion_"..file:sub(6))
         EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png",uses_remaining=80})
+    elseif path:find("/companions/",1,true) and NHCompanions.species[file] then
+        EntityAddTag(next_id,"noita_hideout_companion")
+        EntityAddComponent2(next_id,"VariableStorageComponent",{_tags="nh_companion_clock",value_string=file,value_int=0})
+        for _,tag in ipairs({"nh_gifts","nh_trip","nh_position"}) do
+            EntityAddComponent2(next_id,"VariableStorageComponent",{_tags=tag,value_int=0,value_float=0})
+        end
     elseif file=="home_wand_edit" then EntityAddComponent2(next_id,"GameEffectComponent",{effect="EDIT_WANDS_EVERYWHERE",frames=3})
     else EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=""}) end
     return next_id
@@ -1368,6 +1382,58 @@ end
 testCardSupplies()
 print("Controller: test-only supplies, failed delivery, four independent card stacks and card wallet passed.")
 
+local function testCompanionSwitch()
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    tick()
+    tick(nil,"test_cards")
+    local collection=tick().warehouse.collection
+    for slot=2,4 do
+        tick(nil,"secure_withdraw",{container="warehouse",kind="summon_card",storedId=collection[slot].id,
+            safeSlot=slot,lane="tool",parent=quick,xslot=slot-1,yslot=0})
+    end
+    local cards={}
+    for _,slot in ipairs(tick().native_slots) do
+        if slot.kind=="summon_card" then cards[slot.species]=slot.entity end
+    end
+    local function summoned(species)
+        local pets=EntityGetAllChildren(player,"noita_hideout_companion")
+        assert(#pets==1)
+        local clock=EntityGetFirstComponentIncludingDisabled(pets[1],"VariableStorageComponent","nh_companion_clock")
+        assert(ComponentGetValue2(clock,"value_string")==species)
+        local _,_,_,sx,sy=EntityGetTransform(pets[1])
+        assert(sx==0.5 and sy==0.5)
+        local _,_,_,playerScaleX,playerScaleY=EntityGetTransform(player)
+        assert(playerScaleX==1 and playerScaleY==1)
+        return pets[1]
+    end
+    local function remaining(species) return NHCompanions.captureCard(cards[species]).remaining end
+    local first,second="minotaur","flower_fairy"
+    inventory_open=false
+    tick()
+    tick()
+    held=assert(cards[first])
+    tick(nil,nil,nil,true)
+    local original=summoned(first)
+    tick(nil,nil,nil,true)
+    assert(summoned(first)==original and remaining(first)==79)
+    tick()
+    held=assert(cards[second])
+    tick(nil,nil,nil,true)
+    local replacement=summoned(second)
+    assert(not EntityGetIsAlive(original) and remaining(first)==79 and remaining(second)==79)
+    tick()
+    tick(nil,nil,nil,true)
+    assert(summoned(second)~=replacement and not EntityGetIsAlive(replacement) and remaining(second)==78)
+    tick()
+    held=assert(cards.griffin)
+    tick(nil,nil,nil,true)
+    assert(summoned("griffin") and remaining("griffin")==79 and remaining(second)==78)
+end
+testCompanionSwitch()
+print("Controller: test cards reach the quickbar and each fresh use switches companions for one charge.")
+
 local function testCardWalletController()
     settings,flags={},{}
     new_world()
@@ -1426,3 +1492,34 @@ local function testCardWalletController()
 end
 testCardWalletController()
 print("Controller: open and carry a loaded wallet, transfer a worn card in the field and continue the game.")
+
+local function testCompanionAffinity()
+    settings,flags={},{}
+    new_world()
+    for _=1,59 do NHAffinity.follow("dryad",6) end
+    advance(360-frame%360)
+    assert(state().affinity.dryad==354)
+    assert(NHAffinity.follow("dryad",6)==1)
+    NHAffinity.follow("griffin",6)
+    boot()
+    assert(NHAffinity.points(state(),"dryad")==1)
+    local revision=state().revision
+    OnPausedChanged(true,true)
+    OnPausedChanged(false,false)
+    assert(state().revision==revision)
+    OnPausedChanged(true,false)
+    assert(state().affinity.dryad==360 and state().affinity.griffin==6)
+    OnPausedChanged(true,false)
+    assert(state().revision==revision+1)
+    new_world()
+    assert(state().runSerial==2 and NHAffinity.points(state(),"dryad")==1)
+    NHAffinity.follow("griffin",6)
+    OnPlayerDied()
+    assert(state().affinity.griffin==12)
+    new_world()
+    assert(NHAffinity.points(state(),"dryad")==1)
+    for _=1,58 do NHAffinity.follow("griffin",6) end
+    assert(NHAffinity.points(state(),"griffin")==1)
+end
+testCompanionAffinity()
+print("Controller: affinity checkpoints, pause and new game, continue and death retain each companion's exact progress.")

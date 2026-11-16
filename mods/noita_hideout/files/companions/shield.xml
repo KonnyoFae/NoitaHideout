@@ -1,0 +1,4 @@
+<Entity>
+    <Base file="data/entities/misc/perks/shield.xml" />
+    <GameEffectComponent effect="CUSTOM" custom_effect_id="noita_hideout_minotaur_shield" frames="70" />
+</Entity>

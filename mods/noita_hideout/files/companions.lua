@@ -7,6 +7,13 @@ NHCompanions.species={
     minotaur={zh="米诺陶少女",en="Minotaur maiden",gift="bandage",effect="effect_protection_melee",damage=0.32},
     griffin={zh="狮鹫少女",en="Griffin maiden",gift="sugar_cube",effect="effect_faster_levitation",damage=0.24},
 }
+-- Shield recharge uses the native EnergyShieldComponent scale (0.22 on the perk shield).
+NHCompanions.bonuses={
+    [0]={fairySeconds=5,dryadSeconds=0,shieldRecharge=0,flightPercent=0,giftSeconds=30},
+    [1]={fairySeconds=4,dryadSeconds=12,shieldRecharge=0.08,flightPercent=5,giftSeconds=25},
+    [2]={fairySeconds=3,dryadSeconds=9,shieldRecharge=0.15,flightPercent=10,giftSeconds=20},
+    [3]={fairySeconds=2,dryadSeconds=6,shieldRecharge=0.22,flightPercent=15,giftSeconds=15},
+}
 local families={farm={"dryad","flower_fairy"},livestock={"minotaur","griffin"}}
 local modulus=2147483647
 
@@ -225,26 +232,50 @@ function NHCompanions.registerItems()
     })
 end
 
+local function dismiss(entity)
+    EntityRemoveFromParent(entity)
+    EntityKill(entity)
+end
+
+-- Older worlds have only the per-effect tags. Native perks, food and
+-- injectors with the same GameEffectComponent do not carry these tags.
+local supportTags={"noita_hideout_companion_aura","nh_companion_effect_protection_radioactivity",
+    "nh_companion_effect_protection_melee","nh_companion_effect_faster_levitation"}
+function NHCompanions.clearSupport(player)
+    for _,tag in ipairs(supportTags) do
+        for _,aura in ipairs(EntityGetAllChildren(player,tag) or {}) do
+            dismiss(aura)
+        end
+    end
+end
+
 function NHCompanions.use(player,entity,lang)
     if not EntityHasTag(entity,"noita_hideout_summon_card") or GameIsInventoryOpen() or NHNative.held(player)~=entity then return end
     local id=speciesOf(entity)
     local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
     local remaining=item and ComponentGetValue2(item,"uses_remaining")
     if not NHCompanions.validCard({species=id,remaining=remaining}) then return end
-    for _,child in ipairs(EntityGetAllChildren(player,"noita_hideout_companion") or {}) do
-        if EntityGetIsAlive(child) then
-            GamePrint(lang=="zh" and "已有伙伴随行。" or "A companion is already with you.")
-            return true
-        end
-    end
+    local previous=EntityGetAllChildren(player,"noita_hideout_companion") or {}
     local x,y=EntityGetTransform(player)
     local pet=EntityLoad(pets..id..".xml",x+12,y-8)
     if not pet or pet==0 then return end
+    local clock=EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_companion_clock")
     local gifts=EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_gifts")
-    if not gifts then EntityKill(pet); return end
+    if not (gifts and clock and ComponentGetValue2(clock,"value_string")==id
+        and EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_trip")
+        and EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_position")) then
+        EntityKill(pet)
+        return
+    end
     ComponentSetValue2(gifts,"value_int",ProceduralRandomi(x+GameGetFrameNum(),y,1,1000000))
     EntityAddChild(player,pet)
     if EntityGetParent(pet)~=player then EntityKill(pet); return end
+    -- The 64-pixel source frames are displayed at half size in the world.
+    EntitySetTransform(pet,x+12,y-8,0,0.5,0.5)
+    for _,child in ipairs(previous) do
+        if EntityGetIsAlive(child) then dismiss(child) end
+    end
+    NHCompanions.clearSupport(player)
     if remaining==1 then GameKillInventoryItem(player,entity)
     else ComponentSetValue2(item,"uses_remaining",remaining-1) end
     local spec=NHCompanions.species[id]
