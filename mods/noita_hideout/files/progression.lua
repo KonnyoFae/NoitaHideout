@@ -22,7 +22,7 @@ define("injector","expansion","针剂工位","Injector station",1,{{"water",250}
 define("grenade","expansion","手雷工位","Grenade station",1,{{"gunpowder",150},{"oil",100}},
     {effect={"制造手雷","Craft grenades"}})
 define("salvage","expansion","拆解台","Salvage bench",1,{{"sand",250},{"oil",100}},
-    {effect={"拆解魔杖与法术","Salvage wands and spells"}})
+    {effect={"拆解魔杖、法术与空容器","Salvage wands, spells and empty containers"}})
 define("support","expansion","支援站","Support station",0,{},
     {planned=true,effect={"呼叫支援","Call for support"}})
 define("perk_pack","expansion","特质打包台","Perk packing",1,{{"slime",200},{"arcane_scrap",1}},
@@ -33,10 +33,50 @@ define("perk_slots","upgrade","特质栏","Perk slots",3,{{"water",250},{"slime"
 local material_names={
     water={"水","Water"},sand={"沙","Sand"},slime={"黏液","Slime"},oil={"油","Oil"},
     gunpowder={"火药","Gunpowder"},arcane_scrap={"奥术碎片","Arcane scrap"},
+    empty_container={"仓库空容器","Empty containers in storage"},container_scrap={"容器碎片","Container scrap"},
 }
 local function inventory(s,key)
-    if key=="arcane_scrap" then return s.resources end
+    if key=="arcane_scrap" or key=="container_scrap" then return s.resources end
     return s.materials
+end
+
+function NHStore.emptyContainerCount(s)
+    local count=0
+    for _,row in ipairs(s.warehouse) do
+        if NHPotion.isEmptyContainer(row.item) then count=count+1 end
+    end
+    return count
+end
+
+function NHStore.spendEmptyContainers(s,count)
+    if type(count)~="number" or count<1 or count~=math.floor(count) then return false,"Invalid empty container cost." end
+    local candidates={}
+    for i,row in ipairs(s.warehouse) do
+        if NHPotion.isEmptyContainer(row.item) then
+            candidates[#candidates+1]={index=i,slot=row.slot or i}
+        end
+    end
+    if #candidates<count then return false,"Not enough empty containers." end
+    -- Pay from the first visible warehouse slots, regardless of deposit order.
+    table.sort(candidates,function(a,b) return a.slot<b.slot end)
+    local spent={}
+    for i=1,count do spent[candidates[i].index]=true end
+    for i=#s.warehouse,1,-1 do
+        if spent[i] then table.remove(s.warehouse,i) end
+    end
+    return true
+end
+
+local function costs(s,entry,level,empty_count,lang)
+    local result={}
+    local function add(key,amount)
+        local available=key=="empty_container" and empty_count or inventory(s,key)[key] or 0
+        result[#result+1]={key=key,name=material_names[key][lang=="zh" and 1 or 2],amount=amount,available=available}
+    end
+    for _,part in ipairs(entry.cost) do add(part[1],part[2]*(level+1)) end
+    if entry.category and level>=1 then add("empty_container",level) end
+    if entry.category and level>=2 then add("container_scrap",level-1) end
+    return result
 end
 
 function NHStore.level(s,id)
@@ -87,6 +127,7 @@ end
 function NHStore.progressMenu(s,lang)
     local result={expansion={},upgrade={}}
     local zh=lang=="zh"
+    local empty_count=NHStore.emptyContainerCount(s)
     for _,entry in ipairs(catalog) do
         local level=NHStore.level(s,entry.id)
         local maxed=not entry.planned and level>=entry.max
@@ -96,11 +137,9 @@ function NHStore.progressMenu(s,lang)
         elseif maxed then row.next=zh and "已满级" or "Max level"
         else
             row.next=description(s,entry,1,lang)
-            for _,part in ipairs(entry.cost) do
-                local key,amount=part[1],part[2]*(level+1)
-                local available=inventory(s,key)[key] or 0
-                row.costs[#row.costs+1]={key=key,name=material_names[key][zh and 1 or 2],amount=amount,available=available}
-                if available<amount then row.canBuy=false end
+            row.costs=costs(s,entry,level,empty_count,lang)
+            for _,part in ipairs(row.costs) do
+                if part.available<part.amount then row.canBuy=false end
             end
         end
         table.insert(result[entry.group],row)
@@ -113,17 +152,26 @@ function NHStore.buyUpgrade(s,request)
     if not entry or entry.planned then return false,"Construction unavailable." end
     local level=NHStore.level(s,entry.id)
     if level~=request.level or level>=entry.max then return false,"Upgrade level changed." end
-    for _,part in ipairs(entry.cost) do
-        if (inventory(s,part[1])[part[1]] or 0)<part[2]*(level+1) then return false,"Not enough construction resources." end
+    local payment=costs(s,entry,level,NHStore.emptyContainerCount(s))
+    local shells
+    for _,part in ipairs(payment) do
+        if part.available<part.amount then return false,"Not enough construction resources." end
+        if part.key=="empty_container" then shells=part.amount end
     end
     if entry.id=="safe" then
         local ok,reason=NHStore.expandSafe(s,NHStore.safeCapacity(s)+1)
         if not ok then return false,reason end
     end
-    for _,part in ipairs(entry.cost) do
-        local stock=inventory(s,part[1])
-        local remaining=stock[part[1]]-part[2]*(level+1)
-        stock[part[1]]=remaining>0 and remaining or nil
+    if shells then
+        local ok,reason=NHStore.spendEmptyContainers(s,shells)
+        if not ok then return false,reason end
+    end
+    for _,part in ipairs(payment) do
+        if part.key~="empty_container" then
+            local stock=inventory(s,part.key)
+            local remaining=stock[part.key]-part.amount
+            stock[part.key]=remaining>0 and remaining or nil
+        end
     end
     s.levels[entry.id]=level+1
     return true
@@ -132,10 +180,12 @@ end
 local function adopt(s)
     if s.levels then
         -- A pouch in an expanded supply grid may have no matching slot in the new equipment grid.
-        if s.pouch.location=="warehouse" and not s.levels.warehouse_equipment
-            and s.pouch.slot>NHStore.warehouseCapacity(s,"equipment")
-            and s.pouch.slot<=NHStore.warehouseCapacity(s,"supplies") then
-            s.pouch.slot=assert(NHStore.freeSlot(s,"warehouse",nil,"pouch"),"No equipment slot for stored pouch")
+        for _,pouch in pairs(s.pouches) do
+            if pouch.location=="warehouse" and not s.levels.warehouse_equipment
+                and pouch.slot>NHStore.warehouseCapacity(s,"equipment")
+                and pouch.slot<=NHStore.warehouseCapacity(s,"supplies") then
+                pouch.slot=assert(NHStore.freeSlot(s,"warehouse",nil,"pouch"),"No equipment slot for stored pouch")
+            end
         end
         return
     end
@@ -145,7 +195,9 @@ local function adopt(s)
         if used>(s.storageBase[category] or base_capacity(category)) then s.storageBase[category]=used end
     end
     for i,row in ipairs(s.warehouse) do preserve(NHStore.category(row.item.kind),row.slot or i) end
-    if s.pouch.location=="warehouse" then preserve("equipment",s.pouch.slot) end
+    for _,pouch in pairs(s.pouches) do
+        if pouch.location=="warehouse" then preserve("equipment",pouch.slot) end
+    end
     preserve("materials",material_slots(s))
 end
 

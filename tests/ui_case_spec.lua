@@ -1,6 +1,6 @@
 local width, height = 427, 240
 local click, action, argument
-local drawn,panels = {},{}
+local drawn,panels,tips = {},{},{}
 local frame = 0
 local pointer = {x = 0, y = 0}
 function GameGetFrameNum() return frame end
@@ -10,7 +10,7 @@ function InputIsMouseButtonJustUp() return pointer.released == true end
 function GameGetCameraBounds() return 0, 0, width, height end
 function DEBUG_GetMouseWorld() return pointer.x, pointer.y end
 function GuiCreate() return {} end
-function GuiStartFrame() drawn,panels = {},{} end
+function GuiStartFrame() drawn,panels,tips = {},{},{} end
 function GuiGetScreenDimensions() return width, height end
 function GuiZSet() end
 function GuiZSetForNextWidget() end
@@ -26,7 +26,7 @@ function GuiImage(_,id,x,y,sprite)
     image_colors[id],next_color=next_color,{}
     if sprite=="data/ui_gfx/inventory/quick_inventory_box.png" then tiles[id]={x=x,y=y} end
 end
-function GuiTooltip() end
+function GuiTooltip(_,title) tips[title]=true end
 function GuiGetImageDimensions() return 20,20 end
 function MagicNumbersGetValue(k) return k=="UI_FULL_INVENTORY_OFFSET_X" and "170" or "20" end
 function GuiGetTextDimensions(_, value, scale)
@@ -72,7 +72,7 @@ end
 local model={lang="en",open=false,near=false,status=""}
 assert(not render(model,2))
 model.open,model.mode,model.pouch_location,model.case_count=true,"case","safe",2
-model.capacity,model.revision,model.secure_loot=4,1,{[3]={kind="pouch",name="Pouch"}}
+model.capacity,model.revision,model.secure_loot=4,1,{[3]={kind="pouch",name="Injector pouch #17",id=17}}
 model.native_slots={native("wand",0,0,42,"wand"),native("tool",4,0,43,"dose"),
     native("spell",0,0,44,"spell"),native("spell",5,5),native("tool",6,2),native("wand",3,3)}
 local function point(x,y,event)
@@ -95,34 +95,46 @@ cmd,arg=point(298,28,"release")
 assert(cmd=="secure_withdraw" and arg.xslot==5 and arg.storedId==22 and arg.safeSlot==2)
 point(cx+58,cy+30,"press")
 cmd,arg=point(cx+58,cy+30,"release")
-assert(cmd=="open_container" and arg.safeSlot==3)
-model.popup=true
+assert(cmd=="open_container" and arg.safeSlot==3 and arg.pouchId==17)
+model.popup,model.pouchId,model.pouchName=true,17,"Injector pouch #17"
 model.maxUses,model.pouchCapacity,model.cells=3,4,{{remaining=3,count=2}}
 render(model)
 for i=1002,1003 do assert(tiles[i].x-tiles[i-1].x==20) end -- case
 for i=1005,1007 do assert(tiles[i].x-tiles[i-1].x==20) end -- pouch
 point(cx+58,cy+30,"press")
 cmd,arg=point(148,28,"release")
-assert(cmd=="take_pouch" and arg.xslot==2 and arg.safeSlot==3)
+assert(cmd=="take_pouch" and arg.xslot==2 and arg.safeSlot==3 and arg.pouchId==17)
 point(108,28,"press")
 cmd,arg=point(cx+12,cy-38,"release")
-assert(cmd=="place" and arg.entity==43 and arg.intoContainer)
+assert(cmd=="place" and arg.entity==43 and arg.intoContainer and arg.pouchId==17)
 point(cx+12,cy-38,"press")
 cmd,arg=point(cx+12,cy+30,"release")
-assert(cmd=="unpack_dose" and arg.safeSlot==1)
+assert(cmd=="unpack_dose" and arg.safeSlot==1 and arg.pouchId==17)
 model.secure_loot[1]={kind="dose",id=9}
 point(cx+12,cy+30,"press")
 cmd,arg=point(cx+12,cy-38,"release")
-assert(cmd=="pack_dose" and arg.safeSlot==1)
+assert(cmd=="pack_dose" and arg.safeSlot==1 and arg.pouchId==17)
 point(cx+12,cy-38,"press")
 cmd,arg=point(cx+72,cy-38,"release")
-assert(cmd=="move_cell" and arg.sourceCell==1 and arg.targetCell==4)
+assert(cmd=="move_cell" and arg.sourceCell==1 and arg.targetCell==4 and arg.pouchId==17)
 model.cells[4]={remaining=2,count=1}
 point(cx+12,cy-38,"press")
 assert(not point(cx+72,cy-38,"release"))
 point(cx+72,cy-38,"press")
 cmd,arg=point(148,28,"release")
-assert(cmd=="take_dose" and arg.sourceCell==4)
+assert(cmd=="take_dose" and arg.sourceCell==4 and arg.pouchId==17)
+model.secure_loot[2]={kind="pouch",id=83,name="Injector pouch #83",doses=0}
+point(cx+35,cy+30,"press")
+cmd,arg=point(cx+35,cy+30,"release")
+assert(cmd=="open_container" and arg.pouchId==83)
+point(cx+12,cy-38,"press")
+model.pouchId,model.pouchName,model.cells=83,"Injector pouch #83",{}
+assert(not point(148,28,"release"),"switching pouches cancels the previous cell drag")
+assert(drawn["Injector pouch #83"] and not drawn["×2"])
+point(108,28,"press")
+cmd,arg=point(cx+12,cy-38,"release")
+assert(cmd=="place" and arg.pouchId==83)
+model.secure_loot[2]={kind="spell",name="Bomb",id=22}
 assert(render(model,38)=="close_container")
 model.popup=false
 point(198,28,"press")
@@ -142,13 +154,15 @@ print("Native inventory drag, spell row, exact slot, upgrade pages and close can
 model.near,model.warehouse=true,{}
 model.warehouse_capacity={wand=48,spell=48,containers=48,supplies=48,equipment=48,materials=16}
 model.debug=true
-local profile={safeCapacity=2,levels={},materials={water=500,sand=350,slime=200},resources={}}
+local profile={safeCapacity=2,levels={},materials={water=500,sand=350,slime=200},resources={},warehouse={}}
 model.progression=NHStore.progressMenu(profile,"en")
 model.recipes={
     {id="stable",category="alchemy",name="Teleportatium",output=500,ready=true,inputs={{name="Slime",available=300,amount=250}}},
     {id="medical",category="medical",name="Medkit",output=1,ready=true,inputs={{name="Slime",available=300,amount=100}}},
     {id="injector",category="medical",name="Fire injector",output=1,ready=false,reason="Need stock",inputs={}},
     {id="grenade",category="weapons",name="Magic grenade",output=1,ready=false,unlocked=false,reason="Build the station",inputs={}},
+    {id="pouch",category="equipment",name="Injector pouch",output=1,ready=true,
+        inputs={{name="Slime",amount=50,available=100},{name="Empty container",amount=1,available=2}}},
 }
 render(model)
 local origin=tiles[1004]
@@ -186,16 +200,28 @@ point(108,28,"press")
 cmd,arg=point(origin.x+1,origin.y+1,"release")
 assert(cmd=="place" and arg.kind=="pouch" and arg.container=="warehouse" and arg.safeSlot==1)
 model.native_slots[2].kind="dose"
-model.warehouse.equipment={[1]={kind="pouch",name="Injector pouch"}}
+model.warehouse.equipment={[1]={kind="pouch",name="Injector pouch",id=97}}
 render(model)
 point(origin.x+1,origin.y+1)
 assert(drawn["Injector pouch"])
 point(origin.x+1,origin.y+1,"press")
 cmd,arg=point(origin.x+1,origin.y+1,"release")
-assert(cmd=="open_container" and arg.container=="warehouse" and arg.safeSlot==1)
+assert(cmd=="open_container" and arg.container=="warehouse" and arg.safeSlot==1 and arg.pouchId==97)
 point(origin.x+1,origin.y+1,"press")
 cmd,arg=point(148,28,"release")
-assert(cmd=="take_pouch" and arg.container=="warehouse" and arg.safeSlot==1)
+assert(cmd=="take_pouch" and arg.container=="warehouse" and arg.safeSlot==1 and arg.pouchId==97)
+local original_slot=model.secure_loot[1]
+model.secure_loot[1]=nil
+render(model)
+point(origin.x+1,origin.y+1,"press")
+cmd,arg=point(tiles[1001].x+1,tiles[1001].y+1,"release")
+assert(cmd=="move_pouch" and arg.pouchId==97 and arg.source=="warehouse" and arg.destination=="safe" and arg.safeSlot==1)
+render(model,76) -- Starting over the spell page should still file the case pouch under equipment.
+render(model)
+point(tiles[1003].x+1,tiles[1003].y+1,"press")
+cmd,arg=point(origin.x+21,origin.y+1,"release")
+assert(cmd=="move_pouch" and arg.pouchId==17 and arg.source=="safe" and arg.destination=="warehouse" and arg.safeSlot==2)
+model.secure_loot[1]=original_slot
 model.docks,model.materials={},{}
 render(model,80)
 render(model)
@@ -328,18 +354,24 @@ model.order_active=false
 render(model,240)
 render(model,253)
 render(model)
-assert(drawn["No recipes yet"] and not buttons[244] and not buttons[214])
+assert(drawn["Injector pouch"] and green_button(244) and not buttons[214])
+render(model,244)
+render(model)
+assert((drawn["Empty container"] or tips["Empty container"]) and drawn["2 / 1"] and drawn["100 / 50"])
+action,param=render(model,214)
+assert(action=="craft" and param.id=="pouch")
+render(model,240)
 -- Future equipment recipes share the same pagination and return navigation.
-for i=1,6 do
+for i=1,5 do
     model.recipes[#model.recipes+1]={id="gear"..i,category="equipment",name="Gear "..i,output=1,ready=true,inputs={}}
 end
 render(model,243)
 render(model,244)
 action,param=render(model,214)
-assert(action=="craft" and param.id=="gear6")
+assert(action=="craft" and param.id=="gear5")
 render(model,240)
 render(model)
-assert(green_button(244) and buttons[244].name=="Gear 6" and not buttons[245])
+assert(green_button(244) and buttons[244].name=="Gear 5" and not buttons[245])
 render(model,213)
 assert(render(model,216)=="preview_items")
 assert(render(model,217)=="restock")
@@ -402,7 +434,7 @@ assert(drawn["Now: 2 slots"] and drawn["Next: 3 slots"] and green_button(241))
 action,param=render(model,241)
 assert(action=="buy_upgrade" and param.id=="safe")
 model.salvage_enabled,model.scrap=true,2
-model.warehouse.spell[1].salvage_yield=3
+model.warehouse.spell[1].salvage_yield,model.warehouse.spell[1].salvage_name,model.warehouse.spell[1].salvage_stock=3,"Arcane scrap",2
 render(model,76)
 render(model)
 local spell_tile=tiles[1004]
@@ -417,6 +449,17 @@ render(model)
 pointer.right=false
 action,param=render(model,260)
 assert(action=="salvage" and param.id==32 and param.kind=="spell" and param.slot==1)
+model.warehouse.containers[2]={kind="potion",id=162,name="Empty flask",salvage_yield=1,salvage_name="Container scrap",salvage_stock=7}
+render(model,77)
+render(model)
+local empty_flask=tiles[1005]
+pointer={x=empty_flask.x+1,y=empty_flask.y+1,right=true}
+render(model)
+pointer.right=false
+render(model)
+assert(drawn["Container scrap +1"] and drawn["Current scrap 7"])
+model.warehouse.containers[2].salvage_yield=nil -- refilled before confirmation
+assert(not render(model,260))
 model.perkCapacity,model.perkCells=1,{}
 model.native_slots[2].kind="perk"
 point(108,28,"press")

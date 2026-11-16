@@ -216,6 +216,19 @@ function NHPotion.dockSlot(record)
     if record.kind=="potion" then return record.variant=="powder_stash" and 2 or 1 end
 end
 
+-- Only a captured native material container with an explicitly empty inventory
+-- is usable as a shell. Capture rejects entity children before creating a record.
+function NHPotion.isEmptyContainer(record)
+    if not record or record.kind~="potion" or type(record.materials)~="table" or next(record.materials)
+        or type(record.capacity)~="number" or record.capacity<=0
+        or (record.variant~=nil and not variants[record.variant]) then return false end
+    -- A newer adapter may serialize attachments or additional contents in another table.
+    for key,value in pairs(record) do
+        if key~="materials" and type(value)=="table" and next(value) then return false end
+    end
+    return true
+end
+
 function NHPotion.fillLevel(record)
     local used=0
     for _,n in pairs(record.materials) do used=used+n end

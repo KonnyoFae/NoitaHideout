@@ -142,7 +142,7 @@ for _,empty in ipairs({1,3}) do
     ComponentSetValue2(EntityGetFirstComponentIncludingDisabled(filler,"ItemComponent"),"inventory_slot",empty)
 end
 assert(#EntityGetAllChildren(quick)==4)
-local state={revision=0,nextItemId=18,runSerial=1,profile=1,safeCapacity=2,
+local state={revision=0,nextItemId=18,runSerial=1,profile=1,safeCapacity=2,pouches={},
     warehouse={{id=16,slot=1,item={kind="medkit"}}},docks={},levels={perk_slots=2},
     safe={{id=17,slot=1,item={kind="perk",perk="PROTECTION_FIRE"}}}}
 local function ask(container,storageSlot,perkSlot,id)

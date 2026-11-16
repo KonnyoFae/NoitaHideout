@@ -22,12 +22,14 @@ end
 function DoesWorldExistAt() return world_loaded end
 function EntityAddComponent2(id, kind, fields)
     assert(kind == "VariableStorageComponent")
+    if reject_marker=="zero" then return 0 end
     if reject_marker then return nil end
     entities[id].marker = fields
     return fields
 end
 function EntityGetFirstComponentIncludingDisabled(id, kind, tag)
-    if kind == "VariableStorageComponent" and tag == "noita_hideout_dose_token" then return entities[id].marker end
+    local marker=entities[id].marker
+    if kind=="VariableStorageComponent" and marker and tag==marker._tags then return marker end
 end
 function ComponentGetValue2(c, k) return c[k] end
 function GameGetAllInventoryItems(owner)
@@ -58,30 +60,37 @@ local function pick(id) entities[id].root = player; selected = id end
 
 dofile("mods/noita_hideout/files/store.lua")
 dofile("mods/noita_hideout/files/doses.lua")
+local function starter(s) return s.pouches[s.starterPouchId] end
+local function withdrawStarter(s,cell)
+    return NHDoses.withdraw(s,player,nil,nil,nil,cell,nil,s.starterPouchId)
+end
+local function depositStarter(s,id,cell)
+    return NHDoses.deposit(s,player,id,nil,cell,nil,s.starterPouchId)
+end
 local s = assert(NHStore.load()) -- earlier archive without an issued-dose ledger
 NHStore.newRun(s)
-assert(NHStore.commit(s) and s.pouch.doses == 2 and not s.issuedDoses)
+assert(NHStore.commit(s) and starter(s).doses == 2 and not s.issuedDoses)
 reject_spawn = true
-assert(not NHDoses.withdraw(s,player) and s.pouch.doses == 2)
+assert(not withdrawStarter(s) and starter(s).doses == 2)
 reject_spawn, reject_marker = false, true
-assert(not NHDoses.withdraw(s,player) and not EntityGetIsAlive(next_id) and s.pouch.doses == 2)
+assert(not withdrawStarter(s) and not EntityGetIsAlive(next_id) and starter(s).doses == 2)
 reject_marker, reject_commit = false, true
-assert(not NHDoses.withdraw(s,player) and not EntityGetIsAlive(next_id) and s.pouch.doses == 2)
+assert(not withdrawStarter(s) and not EntityGetIsAlive(next_id) and starter(s).doses == 2)
 reject_commit = false
-local ok, id = NHDoses.withdraw(s,player)
-assert(ok and EntityGetIsAlive(id) and s.pouch.doses == 1)
-assert(not NHDoses.consume(s,player,id) and not NHDoses.deposit(s,player,id))
+local ok, id = withdrawStarter(s)
+assert(ok and EntityGetIsAlive(id) and starter(s).doses == 1)
+assert(not NHDoses.consume(s,player,id) and not depositStarter(s,id))
 pick(id)
 selected = nil
 assert(not NHDoses.consume(s,player,id))
 selected = id
 reject_commit = true
 assert(not NHDoses.consume(s,player,id) and EntityGetIsAlive(id))
-assert(not NHDoses.deposit(s,player,id) and EntityGetIsAlive(id) and s.pouch.doses == 1)
+assert(not depositStarter(s,id) and EntityGetIsAlive(id) and starter(s).doses == 1)
 reject_commit = false
-local ok2, duplicate = NHDoses.withdraw(s,player)
-assert(ok2 and s.pouch.doses == 0)
-assert(not NHDoses.withdraw(s,player))
+local ok2, duplicate = withdrawStarter(s)
+assert(ok2 and starter(s).doses == 0)
+assert(not withdrawStarter(s))
 local extra = NHNative.spawn("dose",25,40)
 entities[extra].marker = entities[id].marker
 assert(NHDoses.reconcile(s,player) and not EntityGetIsAlive(extra) and EntityGetIsAlive(id))
@@ -94,46 +103,46 @@ assert(not NHDoses.consume(s,player,id))
 s = assert(NHStore.load())
 entities[id].alive = true
 pick(id)
-assert(not NHDoses.consume(s,player,id) and not NHDoses.deposit(s,player,id) and s.pouch.doses == 0)
+assert(not NHDoses.consume(s,player,id) and not depositStarter(s,id) and starter(s).doses == 0)
 assert(NHDoses.reconcile(s,player) and not EntityGetIsAlive(id))
-assert(not NHDoses.deposit(s,player,duplicate))
+assert(not depositStarter(s,duplicate))
 pick(duplicate)
-assert(NHDoses.deposit(s,player,duplicate) and s.pouch.doses == 1)
+assert(depositStarter(s,duplicate) and starter(s).doses == 1)
 assert(not EntityGetIsAlive(duplicate))
 entities[duplicate].alive, globals = true, {}
-assert(NHDoses.reconcile(s,player) and not EntityGetIsAlive(duplicate) and s.pouch.doses == 1)
+assert(NHDoses.reconcile(s,player) and not EntityGetIsAlive(duplicate) and starter(s).doses == 1)
 
 -- Normal drop/destruction is not refunded; lost world-side receipt as well
 -- as physical entity permits one refund after the delivery area is loaded.
-local ok3, missing = NHDoses.withdraw(s,player)
-assert(ok3 and s.pouch.doses == 0)
+local ok3, missing = withdrawStarter(s)
+assert(ok3 and starter(s).doses == 0)
 EntityKill(missing)
-assert(NHDoses.reconcile(s,player) and s.pouch.doses == 0)
+assert(NHDoses.reconcile(s,player) and starter(s).doses == 0)
 globals, world_loaded = {}, false
-assert(NHDoses.reconcile(s,player) and s.pouch.doses == 0)
+assert(NHDoses.reconcile(s,player) and starter(s).doses == 0)
 world_loaded = true
 reject_commit = true
-assert(not NHDoses.reconcile(s,player) and s.pouch.doses == 0)
+assert(not NHDoses.reconcile(s,player) and starter(s).doses == 0)
 reject_commit = false
-assert(NHDoses.reconcile(s,player) and s.pouch.doses == 1)
-assert(NHDoses.reconcile(s,player) and s.pouch.doses == 1)
+assert(NHDoses.reconcile(s,player) and starter(s).doses == 1)
+assert(NHDoses.reconcile(s,player) and starter(s).doses == 1)
 entities[missing].alive = true
 assert(NHDoses.reconcile(s,player) and not EntityGetIsAlive(missing))
 
 -- Debug restock replaces the pouch, not an independently issued dose.
-local ok4, outside = NHDoses.withdraw(s,player)
+local ok4, outside = withdrawStarter(s)
 assert(ok4)
 assert(NHStore.restock(s)); assert(NHStore.commit(s))
 pick(outside)
-assert(NHDoses.deposit(s,player,outside) and s.pouch.doses == 3)
-local ok5, lost = NHDoses.withdraw(s,player)
-assert(ok5 and s.pouch.doses == 2)
+assert(depositStarter(s,outside) and starter(s).doses == 3)
+local ok5, lost = withdrawStarter(s)
+assert(ok5 and starter(s).doses == 2)
 assert(NHStore.endRun(s,s.runSerial)); assert(NHStore.commit(s))
-assert(not NHDoses.withdraw(s,player) and s.pouch.doses == 2)
+assert(not withdrawStarter(s) and starter(s).doses == 2)
 NHStore.newRun(s); assert(NHStore.commit(s))
 pick(lost)
 assert(not NHDoses.consume(s,player,lost))
-assert(NHDoses.reconcile(s,player) and not EntityGetIsAlive(lost) and s.pouch.doses == 2)
+assert(NHDoses.reconcile(s,player) and not EntityGetIsAlive(lost) and starter(s).doses == 2)
 print("Doses: native ownership, deposit/consume, duplicate and old-run rejection, commit failures and replay passed.")
 
 local room=assert(NHStore.load())
@@ -141,33 +150,33 @@ NHStore.newRun(room)
 assert(NHStore.restock(room))
 assert(NHStore.commit(room))
 local free=assert(NHStore.freeSafeSlot(room))
-assert(not NHDoses.moveDose(room,room.pouch.slot,true))
-assert(NHDoses.moveDose(room,free,true))
-assert(room.pouch.doses==1 and room.safe[1].slot==free)
-assert(NHDoses.moveDose(room,free,false))
-assert(room.pouch.doses==2 and #room.safe==0)
+assert(not NHDoses.moveDose(room,starter(room).slot,true,nil,nil,room.starterPouchId))
+assert(NHDoses.moveDose(room,free,true,nil,nil,room.starterPouchId))
+assert(starter(room).doses==1 and room.safe[1].slot==free)
+assert(NHDoses.moveDose(room,free,false,nil,nil,room.starterPouchId))
+assert(starter(room).doses==2 and #room.safe==0)
 
 -- Both full injectors can share a cell. Equal wear still cannot merge.
-assert(NHDoses.moveCell(room,1,4))
-assert(room.pouch.cells[4].count==1 and room.pouch.cells[1].count==1)
-assert(NHDoses.moveCell(room,4,1) and room.pouch.cells[1].count==2)
-local _,used=NHDoses.withdraw(room,player,nil,nil,nil,1)
+assert(NHDoses.moveCell(room,1,4,room.starterPouchId))
+assert(starter(room).cells[4].count==1 and starter(room).cells[1].count==1)
+assert(NHDoses.moveCell(room,4,1,room.starterPouchId) and starter(room).cells[1].count==2)
+local _,used=withdrawStarter(room,1)
 pick(used)
 assert(NHDoses.consume(room,player,used))
 assert(NHDoses.remaining(room,used)==2 and EntityGetIsAlive(used))
-assert(not NHDoses.deposit(room,player,used,nil,1) and EntityGetIsAlive(used))
-assert(NHDoses.deposit(room,player,used,nil,4))
-assert(room.pouch.cells[4].remaining==2 and room.pouch.cells[1].remaining==3)
-local _,other=NHDoses.withdraw(room,player,nil,nil,nil,1)
+assert(not depositStarter(room,used,1) and EntityGetIsAlive(used))
+assert(depositStarter(room,used,4))
+assert(starter(room).cells[4].remaining==2 and starter(room).cells[1].remaining==3)
+local _,other=withdrawStarter(room,1)
 pick(other)
 assert(NHDoses.consume(room,player,other))
-assert(not NHDoses.deposit(room,player,other,nil,4))
-assert(NHDoses.deposit(room,player,other,nil,2))
+assert(not depositStarter(room,other,4))
+assert(depositStarter(room,other,2))
 room=assert(NHStore.load())
-assert(not NHDoses.moveCell(room,2,4) and room.pouch.cells[4].count==1)
-assert(NHDoses.moveDose(room,free,true,4))
+assert(not NHDoses.moveCell(room,2,4,room.starterPouchId) and starter(room).cells[4].count==1)
+assert(NHDoses.moveDose(room,free,true,4,nil,room.starterPouchId))
 assert(room.safe[1].item.remaining==2)
-assert(not NHDoses.moveDose(room,free,true,2))
+assert(not NHDoses.moveDose(room,free,true,2,nil,room.starterPouchId))
 local _,returned=NHDoses.withdraw(room,player,nil,nil,free)
 pick(returned)
 assert(NHDoses.remaining(room,returned)==2)
@@ -175,15 +184,15 @@ assert(NHDoses.consume(room,player,returned))
 assert(NHDoses.remaining(room,returned)==1)
 assert(NHDoses.consume(room,player,returned) and not EntityGetIsAlive(returned))
 assert(NHStore.restock(room) and NHStore.commit(room))
-assert(NHDoses.moveDose(room,free,true,1) and NHDoses.moveDose(room,free,true,1))
+assert(NHDoses.moveDose(room,free,true,1,nil,room.starterPouchId) and NHDoses.moveDose(room,free,true,1,nil,room.starterPouchId))
 assert(room.safe[1].item.count==2)
-assert(NHDoses.moveDose(room,free,false,3))
-assert(room.safe[1].item.count==1 and room.pouch.cells[3].remaining==3)
+assert(NHDoses.moveDose(room,free,false,3,nil,room.starterPouchId))
+assert(room.safe[1].item.count==1 and starter(room).cells[3].remaining==3)
 
 assert(NHStore.restock(room) and NHStore.commit(room))
 local safe_count=room.safe[1].item.count
 for i=1,2 do
-    local ok,id=NHDoses.withdraw(room,player,nil,nil,nil,1)
+    local ok,id=withdrawStarter(room,1)
     assert(ok)
     pick(id)
     assert(NHDoses.deposit(room,player,id,3,nil,"warehouse"))
@@ -201,3 +210,103 @@ room=assert(NHStore.load())
 assert(room.warehouse[2].item.remaining==2)
 local ok,worn=NHDoses.withdraw(room,player,nil,nil,4,nil,"warehouse")
 assert(ok and NHDoses.remaining(room,worn)==2)
+
+-- Two crafted bags can contain different durability at the same cell.
+settings,flags,globals={},{},{}
+local bags=assert(NHStore.load())
+NHStore.newRun(bags)
+local a=NHPouches.create(bags,"warehouse",1)
+local b=NHPouches.create(bags,"warehouse",2)
+assert(a~=b and NHStore.commit(bags))
+assert(bags.pouches[a].doses==0 and bags.pouches[b].doses==0)
+assert(NHDoses.moveCell(bags,1,1,bags.starterPouchId,a))
+local _,syringe=withdrawStarter(bags,1)
+pick(syringe)
+assert(NHDoses.consume(bags,player,syringe))
+assert(NHDoses.deposit(bags,player,syringe,nil,1,nil,b))
+reject_commit=true
+assert(not NHDoses.moveCell(bags,1,2,b,a))
+reject_commit=false
+bags=assert(NHStore.load())
+assert(bags.pouches[a].cells[1].remaining==3 and bags.pouches[b].cells[1].remaining==2)
+assert(not NHDoses.moveCell(bags,1,1,b,a))
+assert(NHDoses.moveCell(bags,1,2,b,a) and bags.pouches[b].doses==0)
+assert(NHDoses.moveCell(bags,2,1,a,b))
+local function collect(id) pick(id); return true end
+local okA,itemA=NHDoses.takePouch(bags,player,collect,a)
+local okB,itemB=NHDoses.takePouch(bags,player,collect,b)
+assert(okA and okB and NHDoses.isPouch(bags,itemA)==a and NHDoses.isPouch(bags,itemB)==b)
+assert(not NHDoses.withdraw(bags,player,nil,itemA,nil,1,nil,b))
+local shadow=NHNative.spawn("pouch",25,40)
+entities[shadow].marker=entities[itemB].marker
+assert(NHDoses.reconcile(bags,player) and not EntityGetIsAlive(shadow))
+assert(EntityGetIsAlive(itemA) and EntityGetIsAlive(itemB))
+local drawn,rollbackDose=NHDoses.withdraw(bags,player,nil,itemB,nil,1,nil,b)
+assert(drawn and NHDoses.remaining(bags,rollbackDose)==2)
+EntityKill(rollbackDose)
+globals={}
+assert(NHDoses.reconcile(bags,player))
+assert(bags.pouches[b].cells[1].remaining==2 and bags.pouches[a].cells[1].remaining==3)
+assert(NHDoses.storePouch(bags,player,itemB,2,"warehouse"))
+assert(NHStore.restock(bags) and NHStore.commit(bags))
+assert(bags.pouches[b].doses==1 and bags.pouches[a].doses==1)
+assert(NHStore.endRun(bags,bags.runSerial) and NHStore.commit(bags))
+bags=assert(NHStore.load())
+assert(not bags.pouches[a] and bags.pouches[b].cells[1].remaining==2 and starter(bags).doses==2)
+assert(NHPouches.at(bags,"warehouse",2).id==b)
+
+-- Two missing deliveries that last occupied the same slot must refund separately.
+NHStore.newRun(bags)
+assert(NHStore.commit(bags))
+local took,first=NHDoses.takePouch(bags,player,collect,b)
+assert(took)
+local c=NHPouches.create(bags,"warehouse",2)
+assert(NHStore.commit(bags))
+local took2,second=NHDoses.takePouch(bags,player,collect,c)
+assert(took2)
+EntityKill(first)
+EntityKill(second)
+globals={}
+assert(NHDoses.reconcile(bags,player))
+bags=assert(NHStore.load())
+assert(bags.pouches[b].location=="warehouse" and bags.pouches[c].location=="warehouse")
+assert(bags.pouches[b].slot~=bags.pouches[c].slot and bags.pouches[b].cells[1].remaining==2)
+assert(bags.pouches[c].doses==0)
+
+-- Failed native marker creation can return zero. The provisional entity is
+-- discarded, its bag stays stored, and a subsequent delivery can succeed.
+local original=bags.starterPouchId
+local revision=bags.revision
+reject_marker="zero"
+assert(not NHDoses.takePouch(bags,player,collect,original))
+assert(not EntityGetIsAlive(next_id) and bags.revision==revision and starter(bags).location=="safe")
+reject_marker=false
+local delivered,groundBag=NHDoses.takePouch(bags,player,collect,original)
+assert(delivered)
+entities[groundBag].root=groundBag
+selected=nil
+assert(not NHDoses.storePouch(bags,player,groundBag,1,"safe"))
+assert(NHDoses.reconcile(bags,player) and EntityGetIsAlive(groundBag))
+assert(NHDoses.isPouch(bags,groundBag)==original and starter(bags).location=="bag")
+pick(groundBag)
+local issued,loose=NHDoses.withdraw(bags,player,collect,groundBag,nil,1,nil,original)
+assert(issued and NHDoses.consume(bags,player,loose))
+assert(NHStore.restock(bags) and NHStore.commit(bags))
+assert(bags.starterPouchId~=original and not bags.pouches[original])
+assert(NHDoses.reconcile(bags,player) and not EntityGetIsAlive(groundBag) and EntityGetIsAlive(loose))
+reject_commit=true
+assert(not NHDoses.deposit(bags,player,loose,nil,1,nil,c))
+assert(bags.pouches[c].doses==0 and NHDoses.remaining(bags,loose)==2)
+reject_commit=false
+assert(NHDoses.deposit(bags,player,loose,nil,1,nil,c))
+assert(not EntityGetIsAlive(loose) and bags.pouches[c].cells[1].remaining==2)
+
+local older={nextItemId=47,pouch={location="bag",token="1/1/45",slot=2,doses=1,cells={{remaining=1,count=1}}},
+    issuedDoses={before={cell=2,remaining=2},loose={safeSlot=1,remaining=1}}}
+NHPouches.adopt(older)
+assert(older.pouches[47].token=="1/1/45" and older.pouches[47].cells[1].remaining==1)
+assert(older.starterPouchId==47 and older.nextItemId==48 and older.issuedDoses.before.pouchId==47)
+assert(not older.pouch and not older.issuedDoses.loose.pouchId)
+NHPouches.adopt(older)
+assert(older.nextItemId==48)
+print("Doses: independent bag identity, durability, issued entities, recovery and death passed.")

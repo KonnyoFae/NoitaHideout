@@ -50,11 +50,15 @@ local error_translations = {
     ["Could not create packed perk."] = "未能生成特质物品。",
     ["Another order is active."] = "工坊已有一张在制订单。",
     ["Not enough bulk ingredients."] = "物料库存中的原料不足。",
+    ["Not enough empty containers."] = "容器仓库里可用的空容器不足。",
+    ["Only empty containers can be dismantled."] = "只能拆解仓库内已清空的普通物料容器。",
     ["The selected item is no longer in your quick inventory."] = "这件物品已经离开快捷栏。",
     ["The case is already in your inventory."] = "安全箱就在你的道具栏里。",
     ["The case is already within reach."] = "安全箱就在附近，可按 G 开箱。",
     ["No dose available."] = "针剂包已空。",
-    ["Pouch lost."] = "针剂包已遗失，可到出生点重发测试包。",
+    ["Pouch unavailable."] = "这只针剂包已不在原处。",
+    ["Could not mark the pouch."] = "未能标记这只针剂包。",
+    ["Hold your injector pouch first."] = "请先取回这只针剂包。",
     ["Secure valuables slot is full."] = "贵重物品格已满。",
     ["This syringe is no longer available."] = "这支针剂已经用掉或收回。",
     ["Only a recognized ordinary flask can be stored"] = "未能识别这个瓶子的类型。",
@@ -248,6 +252,10 @@ local function stored_view(entry)
         remaining=item.remaining,count=item.count,dockSlot=NHPotion.dockSlot(item)}
 end
 
+local function pouch_name(id)
+    return tr("针剂包","Injector pouch").." #"..id
+end
+
 local function inventory_view()
     if model_cache and model_cache.revision == state.revision then return model_cache end
     local model = {revision = state.revision, secure_loot = {}, warehouse = {}}
@@ -268,7 +276,12 @@ local function inventory_view()
     end
     for i, entry in ipairs(state.warehouse) do
         local view=stored_view(entry)
-        view.salvage_yield=NHStore.salvageYield(entry.item)
+        local amount,resource=NHStore.salvageYield(entry.item)
+        if amount then
+            view.salvage_yield=amount
+            view.salvage_name=resource=="container_scrap" and tr("容器碎片","Container scrap") or tr("奥术碎片","Arcane scrap")
+            view.salvage_stock=state.resources[resource] or 0
+        end
         warehouse_slot(entry.item.kind,entry.slot or i,view)
     end
     if state.order and state.order.output.item then
@@ -279,16 +292,17 @@ local function inventory_view()
     for _, entry in ipairs(state.safe) do
         model.secure_loot[entry.slot or 1] = stored_view(entry)
     end
-    local pouch={kind="pouch",name=tr("针剂包","Injector pouch"),icon=NHNative.icons.pouch}
-    if state.pouch.location=="safe" then model.secure_loot[state.pouch.slot]=pouch
-    elseif state.pouch.location=="warehouse" then warehouse_slot("pouch",state.pouch.slot,pouch) end
+    for id,pouch in pairs(state.pouches) do
+        local view={id=id,kind="pouch",name=pouch_name(id),icon=NHNative.icons.pouch,doses=pouch.doses}
+        if pouch.location=="safe" then model.secure_loot[pouch.slot]=view
+        elseif pouch.location=="warehouse" then warehouse_slot("pouch",pouch.slot,view) end
+    end
     model.progression=NHStore.progressMenu(state,lang)
     model.warehouse_capacity={}
     for _,category in ipairs({"wand","spell","containers","supplies","equipment","materials"}) do
         model.warehouse_capacity[category]=NHStore.warehouseCapacity(state,category)
     end
     model.salvage_enabled=NHStore.level(state,"salvage")>0
-    model.scrap=state.resources.arcane_scrap or 0
     local facility_names={}
     for _,project in ipairs(model.progression.expansion) do facility_names[project.id]=project.name end
     model.recipes={}
@@ -306,10 +320,14 @@ local function inventory_view()
             table.insert(view.inputs,{name=NHPotion.materialName(input.name),amount=input.amount,
                 available=state.materials[input.name] or 0})
         end
+        if recipe.emptyContainers then
+            table.insert(view.inputs,{name=tr("仓库空容器","Empty containers"),amount=recipe.emptyContainers,
+                available=NHStore.emptyContainerCount(state)})
+        end
         table.insert(model.recipes,view)
         if state.order and recipe.id==(state.order.recipe or "stable") then model.order_name=view.name end
     end
-    model.cells,model.pouchCapacity,model.maxUses=state.pouch.cells,NHStore.pouchCapacity,NHStore.doseDurability
+    model.pouchCapacity,model.maxUses=NHStore.pouchCapacity,NHStore.doseDurability
     model.order_active = state.order ~= false
     model.reward_spent = state.rewardedThrough >= run_id
     model_cache = model
@@ -348,6 +366,7 @@ local function native_slots(player)
                         if slot then
                             slot.entity,slot.kind = id,kind
                             if kind=="dose" then slot.remaining=NHDoses.remaining(state,id) end
+                            if kind=="pouch" then slot.pouchId=NHDoses.isPouch(state,id) end
                             slot.icon = ComponentGetValue2(item,"ui_sprite")
                             if kind=="potion" then
                                 slot.dockSlot=(EntityHasTag(id,"powder_stash") or slot.icon=="data/ui_gfx/items/material_pouch.png") and 2 or 1
@@ -394,12 +413,18 @@ end
 
 local function popup_accessible(player)
     if not popup then return false end
+    local pouch=state.pouches[popup.id]
+    if not pouch then return false end
     if popup.slot then
-        return state.pouch.location==popup.container and state.pouch.slot==popup.slot and GameIsInventoryOpen()
+        return pouch.location==popup.container and pouch.slot==popup.slot and GameIsInventoryOpen()
             and (popup.container=="safe" or near_home(player))
     end
-    return EntityGetIsAlive(popup.entity) and NHDoses.isPouch(state,popup.entity)
+    return EntityGetIsAlive(popup.entity) and NHDoses.isPouch(state,popup.entity)==popup.id
         and EntityGetRootEntity(popup.entity)==player
+end
+
+local function matches_popup(player,id)
+    return popup and popup.id==id and popup_accessible(player)
 end
 
 local function close_panel()
@@ -424,7 +449,7 @@ local function workshop_action(player,action,index)
     if action=="buy_upgrade" and type(index)=="table" then
         commit_edit(NHStore.buyUpgrade,"建设完成。","Construction complete.",index)
     elseif action=="salvage" and type(index)=="table" then
-        commit_edit(NHStore.salvage,"拆解完成，奥术碎片已入库。","Item dismantled. Arcane scrap stored.",index)
+        commit_edit(NHStore.salvage,"拆解完成，碎片已入库。","Item dismantled. Scrap stored.",index)
     elseif action=="order" or (action=="craft" and index and index.id) then
         commit_edit(NHStore.startOrder,"已从物料库扣料，订单已排入。","Ingredients consumed. Order queued.",index and index.id)
     elseif ModSettingGet("noita_hideout.test_tools") ~= false then
@@ -499,17 +524,22 @@ local function dispatch(player, action, index)
             elseif action~="cancel_native" and not ((action=="place" or action=="secure_withdraw") and index.kind=="potion") then return end
         end
         if action=="open_container" then
-            local owner
-            if index.safeSlot and state.pouch.location==container and state.pouch.slot==index.safeSlot then owner={slot=index.safeSlot,container=container}
-            elseif index.entity and NHDoses.isPouch(state,index.entity) and EntityGetRootEntity(index.entity)==player then owner={entity=index.entity} end
-            if owner then popup=owner end
+            if not index.pouchId then return end
+            if index.safeSlot then
+                local pouch=NHPouches.at(state,container,index.safeSlot)
+                if case_open and GameIsInventoryOpen() and pouch and pouch.id==index.pouchId then
+                    popup={id=pouch.id,slot=pouch.slot,container=container}
+                end
+            elseif index.entity and NHDoses.isPouch(state,index.entity)==index.pouchId and EntityGetRootEntity(index.entity)==player then
+                popup={id=index.pouchId,entity=index.entity}
+            end
             return
         end
         if action=="unpack_dose" or action=="pack_dose" or action=="move_cell" then
-            if not popup_accessible(player) then return end
+            if not matches_popup(player,index.pouchId) then return end
             local ok,reason
-            if action=="move_cell" then ok,reason=NHDoses.moveCell(state,index.sourceCell,index.targetCell)
-            else ok,reason=NHDoses.moveDose(state,index.safeSlot,action=="unpack_dose",index.sourceCell or index.targetCell,container) end
+            if action=="move_cell" then ok,reason=NHDoses.moveCell(state,index.sourceCell,index.targetCell,popup.id)
+            else ok,reason=NHDoses.moveDose(state,index.safeSlot,action=="unpack_dose",index.sourceCell or index.targetCell,container,popup.id) end
             if not ok then report(reason) else status="" end
             return
         end
@@ -519,12 +549,20 @@ local function dispatch(player, action, index)
             return
         end
         if action=="move_pouch" then
-            if state.pouch.location==container and state.pouch.slot==index.from then
-                commit_edit(function(draft)
-                    if not NHStore.freeSlot(draft,container,index.safeSlot,"pouch") then return false,"Secure valuables slot is full." end
-                    draft.pouch.slot=index.safeSlot
-                    return true
-                end)
+            local from,to=index.source,index.destination
+            if not case_open or not GameIsInventoryOpen() or not index.safeSlot
+                or (from~="warehouse" and from~="safe") or (to~="warehouse" and to~="safe")
+                or ((from=="warehouse" or to=="warehouse") and not near_home(player)) then return end
+            local moved=commit_edit(function(draft)
+                local pouch=NHPouches.at(draft,from,index.from)
+                if not pouch or pouch.id~=index.pouchId or not NHStore.freeSlot(draft,to,index.safeSlot,"pouch") then
+                    return false,"Inventory slot changed."
+                end
+                pouch.location,pouch.slot=to,index.safeSlot
+                return true
+            end)
+            if moved and popup and popup.id==index.pouchId then
+                popup={id=index.pouchId,container=to,slot=index.safeSlot}
             end
             return
         end
@@ -563,8 +601,8 @@ local function dispatch(player, action, index)
             if container=="docks" then ok,result=NHTransfers.deposit(state,player,container,id,index.safeSlot)
             elseif kind=="pouch" and index.safeSlot then ok,result=NHDoses.storePouch(state,player,id,index.safeSlot,container)
             elseif kind=="dose" then
-                if not index.safeSlot and not (index.intoContainer and popup_accessible(player)) then return end
-                ok,result=NHDoses.deposit(state,player,id,index.safeSlot,index.targetCell,container)
+                if not index.safeSlot and not (index.intoContainer and matches_popup(player,index.pouchId)) then return end
+                ok,result=NHDoses.deposit(state,player,id,index.safeSlot,index.targetCell,container,index.pouchId)
             else ok,result=NHTransfers.deposit(state,player,container,id,index.safeSlot) end
         else
             if slot.entity then return end
@@ -574,11 +612,12 @@ local function dispatch(player, action, index)
                 if not ok then report(result) else status="" end
                 return
             elseif action=="take_pouch" then
-                if state.pouch.location~=container or state.pouch.slot~=index.safeSlot then return end
-                ok,result=NHDoses.takePouch(state,player,deliver)
+                local pouch=NHPouches.at(state,container,index.safeSlot)
+                if not pouch or pouch.id~=index.pouchId then return end
+                ok,result=NHDoses.takePouch(state,player,deliver,pouch.id)
             elseif action=="take_dose" then
-                if not popup_accessible(player) then return end
-                ok,result=NHDoses.withdraw(state,player,deliver,popup.entity,nil,index.sourceCell)
+                if not matches_popup(player,index.pouchId) then return end
+                ok,result=NHDoses.withdraw(state,player,deliver,popup.entity,nil,index.sourceCell,container,popup.id)
             elseif action=="secure_withdraw" then
                 local row = NHStore.slotIndex(state,container,index.safeSlot,index.kind)
                 if not row or state[container][row].id~=index.storedId then return end
@@ -670,8 +709,9 @@ function OnWorldPostUpdate()
     elseif used then
         local item = NHNative.held(player)
         local kind = NHNative.kind(item)
-        if kind == "pouch" and NHDoses.isPouch(state, item) then
-            opened,popup = true,{entity=item}
+        if kind == "pouch" then
+            local id=NHDoses.isPouch(state,item)
+            if id then opened,popup=true,{id=id,entity=item} end
         elseif kind == "dose" then use_dose(player, item)
         elseif item and NHProducts.use(player,item) then mouse_release=true end
     end
@@ -679,6 +719,9 @@ function OnWorldPostUpdate()
     local model = opened and inventory_view() or {}
     if opened and (case_open or popup) then model.native_slots = native_slots(player) end
     model.popup = popup ~= nil
+    model.pouchId=popup and popup.id
+    model.pouchName=popup and pouch_name(popup.id)
+    model.cells=popup and state.pouches[popup.id].cells
     model.mode = case_open and "case" or (popup and "container" or "closed")
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
 

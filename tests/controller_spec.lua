@@ -126,6 +126,10 @@ local function tick(key,action,arg,down)
     return model
 end
 local function state() return assert(NHStore.load()) end
+local function starter()
+    local saved=state()
+    return saved.pouches[saved.starterPouchId]
+end
 local function new_world()
     world,ending,fire,inventory_open={},false,false,false
     reset_entities()
@@ -136,22 +140,24 @@ assert(#EntityGetWithTag("noita_hideout_case")==0)
 OnPlayerSpawned(player)
 assert(#EntityGetWithTag("noita_hideout_case")==0 and state().runSerial==1)
 tick()
-local function tool(id,slot) return {parent=quick,lane="tool",xslot=2,yslot=0,entity=id,safeSlot=slot,intoContainer=not slot} end
+local function tool(id,slot)
+    return {parent=quick,lane="tool",xslot=2,yslot=0,entity=id,safeSlot=slot,intoContainer=not slot,pouchId=state().starterPouchId}
+end
 inventory_open=true
-assert(tick(nil,"take_dose",tool()).mode=="case" and state().pouch.doses==2) -- opening click cannot withdraw
+assert(tick(nil,"take_dose",tool()).mode=="case" and starter().doses==2) -- opening click cannot withdraw
 tick(nil,"take_dose",tool())
-assert(state().pouch.doses==2)
-tick(nil,"open_container",{safeSlot=2})
-tick(nil,"unpack_dose",{safeSlot=1})
-assert(state().pouch.doses==1 and state().safe[1].item.kind=="dose")
-tick(nil,"pack_dose",{safeSlot=1})
-assert(state().pouch.doses==2 and #state().safe==0)
+assert(starter().doses==2)
+tick(nil,"open_container",{pouchId=state().starterPouchId,safeSlot=2})
+tick(nil,"unpack_dose",{pouchId=state().starterPouchId,safeSlot=1})
+assert(starter().doses==1 and state().safe[1].item.kind=="dose")
+tick(nil,"pack_dose",{pouchId=state().starterPouchId,safeSlot=1})
+assert(starter().doses==2 and #state().safe==0)
 tick(nil,"take_dose",tool())
 local dose=assert(EntityGetWithTag("noita_hideout_dose")[1])
-assert(state().pouch.doses==1 and EntityGetRootEntity(dose)==player)
+assert(starter().doses==1 and EntityGetRootEntity(dose)==player)
 held=0 -- drag a specific item while another slot is active
 tick(nil,"place",tool(dose))
-assert(not EntityGetIsAlive(dose) and state().pouch.doses==2)
+assert(not EntityGetIsAlive(dose) and starter().doses==2)
 tick(nil,"take_dose",tool())
 dose=assert(EntityGetWithTag("noita_hideout_dose")[1])
 inventory_open=false
@@ -182,9 +188,9 @@ tick(nil,nil,nil,true)
 assert(NHDoses.remaining(state(),dose)==1)
 tick()
 tick(nil,nil,nil,true)
-assert(not EntityGetIsAlive(dose) and #EntityGetWithTag("noita_hideout_stimulant")==1 and state().pouch.doses==1)
+assert(not EntityGetIsAlive(dose) and #EntityGetWithTag("noita_hideout_stimulant")==1 and starter().doses==1)
 boot()
-assert(state().runSerial==1 and state().pouch.doses==1)
+assert(state().runSerial==1 and starter().doses==1)
 -- The HUD opens away from spawn, and the pouch is a real quickbar entity.
 entities[player].x=500
 tick()
@@ -193,12 +199,12 @@ inventory_open=true
 assert(tick().mode=="case")
 tick(nil,"take_pouch",tool(nil,2))
 local pouch=assert(EntityGetWithTag("noita_hideout_pouch")[1])
-assert(EntityGetRootEntity(pouch)==player and state().pouch.location=="bag")
+assert(EntityGetRootEntity(pouch)==player and starter().location=="bag")
 held=pouch
 tick(nil,"place",tool(pouch,1))
-assert(not EntityGetIsAlive(pouch) and state().pouch.slot==1)
+assert(not EntityGetIsAlive(pouch) and starter().slot==1)
 tick(nil,"take_pouch",tool(nil,1))
-assert(state().pouch.location=="bag")
+assert(starter().location=="bag")
 pouch=assert(EntityGetWithTag("noita_hideout_pouch")[1])
 inventory_open=false
 tick()
@@ -208,20 +214,20 @@ tick()
 GamePickUpInventoryItem(player,pouch)
 held=pouch
 tick(nil,nil,nil,true)
-assert(state().pouch.doses==1 and #EntityGetWithTag("noita_hideout_dose")==0)
+assert(starter().doses==1 and #EntityGetWithTag("noita_hideout_dose")==0)
 assert(tick().mode=="container")
 local emptyTool=tool()
 emptyTool.xslot=3
 tick(nil,"take_dose",emptyTool)
-assert(state().pouch.doses==0 and #EntityGetWithTag("noita_hideout_dose")==1)
+assert(starter().doses==0 and #EntityGetWithTag("noita_hideout_dose")==1)
 OnPlayerDied()
-assert(state().closedThrough==1 and state().pouch.location=="lost")
+assert(state().closedThrough==1 and not starter())
 new_world()
-assert(not tick(11,"restock").open and state().pouch.location=="lost")
+assert(not tick(11,"restock").open and not starter())
 inventory_open=true
 tick()
 tick(nil,"restock")
-assert(state().runSerial==2 and state().pouch.location=="safe")
+assert(state().runSerial==2 and starter().location=="safe")
 function CellFactory_GetAllLiquids() return {"magic_liquid_teleportation"} end
 function CellFactory_GetAllSands() return {"sand"} end
 function CellFactory_GetType(name) return name=="magic_liquid_teleportation" and 7 or -1 end
@@ -250,7 +256,7 @@ assert(state().order and not next(state().materials))
 ending=true
 OnPlayerDied()
 OnPlayerDied()
-assert(state().finished==1 and #state().warehouse==1 and state().materials.magic_liquid_teleportation==500 and state().pouch.doses==2)
+assert(state().finished==1 and #state().warehouse==1 and state().materials.magic_liquid_teleportation==500 and starter().doses==2)
 new_world()
 settings["noita_hideout.test_tools"]=false
 inventory_open=true
@@ -320,29 +326,29 @@ local native_card=assert(EntityGetAllChildren(3)[1])
 local native_item=EntityGetFirstComponentIncludingDisabled(native_card,"ItemComponent")
 assert(native_item.slotX==7 and native_item.uses_remaining==3 and not tick().warehouse.spell)
 -- A stored pouch opens only from its own container, in reach.
-tick(nil,"take_pouch",tool(nil,state().pouch.slot))
+tick(nil,"take_pouch",tool(nil,starter().slot))
 local bag=assert(EntityGetWithTag("noita_hideout_pouch")[1])
 local to_stash=tool(bag,1)
 to_stash.container="warehouse"
 tick(nil,"place",to_stash)
 local stored_bag=tick()
-assert(state().pouch.location=="warehouse" and stored_bag.warehouse.equipment[1].kind=="pouch")
+assert(starter().location=="warehouse" and stored_bag.warehouse.equipment[1].kind=="pouch")
 assert(not stored_bag.warehouse.supplies and #EntityGetWithTag("noita_hideout_pouch")==0)
-tick(nil,"open_container",{safeSlot=1,container="warehouse"})
+tick(nil,"open_container",{pouchId=state().starterPouchId,safeSlot=1,container="warehouse"})
 assert(tick().popup)
 -- The same number can hold a loose injector and its pouch in separate categories.
-tick(nil,"unpack_dose",{container="warehouse",safeSlot=1,sourceCell=1})
+tick(nil,"unpack_dose",{pouchId=state().starterPouchId,container="warehouse",safeSlot=1,sourceCell=1})
 local separated=tick()
 assert(separated.warehouse.supplies[1].kind=="dose" and separated.warehouse.equipment[1].kind=="pouch")
-tick(nil,"pack_dose",{container="warehouse",safeSlot=1,targetCell=1})
-local packed_count=state().pouch.doses
+tick(nil,"pack_dose",{pouchId=state().starterPouchId,container="warehouse",safeSlot=1,targetCell=1})
+local packed_count=starter().doses
 entities[player].x=1000
 assert(not tick().popup)
 
 -- Move an empty flask from the stash and fill it with the workshop output, then
 -- return the same container with its new exact contents to a warehouse cell.
 entities[player].x=227
-tick(nil,"move_pouch",{container="warehouse",from=1,safeSlot=2})
+tick(nil,"move_pouch",{pouchId=state().starterPouchId,source="warehouse",destination="warehouse",from=1,safeSlot=2})
 boot()
 local moved=tick()
 assert(moved.warehouse.equipment[2].kind=="pouch" and not moved.warehouse.equipment[1])
@@ -352,7 +358,7 @@ tick(nil,"take_pouch",take_bag)
 local bags=EntityGetWithTag("noita_hideout_pouch")
 assert(#bags==1 and EntityGetRootEntity(bags[1])==player and not tick().warehouse.equipment)
 tick(nil,"place",tool(bags[1],2))
-assert(tick().secure_loot[2].kind=="pouch" and state().pouch.doses==packed_count)
+assert(tick().secure_loot[2].kind=="pouch" and starter().doses==packed_count)
 local product=state().warehouse[1]
 assert(product)
 local dock_move={container="docks",source="warehouse",destination="docks",from=product.slot,safeSlot=2,entity=product.id}
@@ -418,11 +424,11 @@ assert(tick().warehouse_capacity.equipment==72 and tick().warehouse_capacity.sup
 
 -- Locked recipes remain readable in their own category; the backend rechecks access.
 local catalog=tick().recipes
-assert(#catalog==4)
+assert(#catalog==5)
 local alchemy=assert(has_project(catalog,"stable"))
 assert(alchemy.category=="alchemy" and alchemy.unlocked and not alchemy.ready and alchemy.reason)
-local expected_category={medical="medical",injector="medical",grenade="weapons"}
-for _,id in ipairs({"medical","injector","grenade"}) do
+local expected_category={medical="medical",injector="medical",grenade="weapons",pouch="equipment"}
+for _,id in ipairs({"medical","injector","grenade","pouch"}) do
     local locked=assert(has_project(catalog,id))
     assert(locked.category==expected_category[id] and not locked.unlocked and not locked.ready)
     assert(locked.facility_name and locked.reason:find(locked.facility_name,1,true))
@@ -565,3 +571,60 @@ assert(unavailable.unlocked and not unavailable.ready and unavailable.reason)
 tick(nil,"craft",{id="medical"})
 assert(not state().order and state().materials.water==100 and state().materials.blood==50)
 print("Controller: workshop categories, unlocks, readiness and equipment slots passed.")
+
+-- Reopening a different physical pouch need not change the profile revision.
+-- Cells must follow the selected ID, including when a prior drag is replayed.
+local pair=state()
+local first_id=pair.starterPouchId
+local first_pouch=assert(pair.pouches[first_id])
+first_pouch.cells={[1]={remaining=2,count=1},[2]={remaining=3,count=1}}
+first_pouch.doses=2
+local second_id=NHPouches.create(pair,"warehouse",1,0)
+assert(NHStore.commit(pair))
+boot()
+local both=tick()
+assert(both.secure_loot[first_pouch.slot].id==first_id and both.warehouse.equipment[1].id==second_id)
+local open_first={safeSlot=first_pouch.slot,pouchId=first_id}
+local open_second={safeSlot=1,container="warehouse",pouchId=second_id}
+tick(nil,"open_container",open_first)
+assert(tick().cells[1].remaining==2)
+local cell=tool()
+cell.sourceCell=1
+tick(nil,"take_dose",cell)
+local injector=assert(EntityGetWithTag("noita_hideout_dose")[1])
+assert(NHDoses.remaining(state(),injector)==2)
+tick(nil,"open_container",open_second)
+local second_view=tick()
+assert(second_view.pouchId==second_id and not next(second_view.cells))
+tick(nil,"place",tool(injector)) -- stale target, retained in quick inventory
+assert(EntityGetIsAlive(injector) and state().pouches[second_id].doses==0)
+local insert=tool(injector)
+insert.pouchId,insert.targetCell=second_id,4
+tick(nil,"place",insert)
+assert(not EntityGetIsAlive(injector) and tick().cells[4].remaining==2)
+tick(nil,"open_container",open_first)
+local first_view=tick()
+assert(first_view.pouchId==first_id and first_view.cells[2].remaining==3 and not first_view.cells[4])
+tick(nil,"open_container",{pouchId=second_id,safeSlot=first_pouch.slot})
+assert(tick().pouchId==first_id) -- stale record cannot open a new occupant of that slot
+boot()
+tick()
+tick(nil,"open_container",open_second)
+assert(tick().cells[4].remaining==2 and state().pouches[first_id].doses==1)
+local to_case={pouchId=second_id,container="warehouse",source="warehouse",destination="safe",from=1,safeSlot=1}
+tick(nil,"move_pouch",to_case)
+local after_move=tick()
+assert(after_move.secure_loot[1].id==second_id and after_move.pouchId==second_id and after_move.cells[4].remaining==2)
+local return_to_stash={pouchId=second_id,container="safe",source="safe",destination="warehouse",from=1,safeSlot=2}
+entities[player].x=900
+tick(nil,"move_pouch",return_to_stash)
+assert(state().pouches[second_id].location=="safe")
+entities[player].x=227
+return_to_stash.pouchId=first_id
+tick(nil,"move_pouch",return_to_stash)
+assert(state().pouches[second_id].location=="safe")
+return_to_stash.pouchId=second_id
+tick(nil,"move_pouch",return_to_stash)
+local returned=tick()
+assert(returned.warehouse.equipment[2].id==second_id and returned.pouchId==second_id and returned.cells[4].remaining==2)
+print("Controller: independent selected pouches, durability, stale drag cancellation and reload passed.")

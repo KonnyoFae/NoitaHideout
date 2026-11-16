@@ -1,6 +1,7 @@
 -- Two revisioned snapshots in Noita's normal mod settings. A complete
 -- readback checks the settings API; it does not force the engine to flush.
 NHStore = {}
+dofile("mods/noita_hideout/files/pouches.lua")
 local progression=dofile("mods/noita_hideout/files/progression.lua")
 local max_bytes = 1024 * 1024
 local max_depth = 40
@@ -11,18 +12,16 @@ local cached_profile
 NHStore.pouchCapacity = 4
 NHStore.doseDurability = 3
 
-local function initial_doses(count)
-    return count>0 and {{remaining=NHStore.doseDurability,count=count}} or {}
-end
-
 local function fresh(profile)
-    return {
+    local s={
         version = 1, profile = profile, revision = 0,
         runSerial = 0, rewardedThrough = 0, closedThrough = 0,
         nextItemId = 1, materials = {}, docks = {}, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true,
-        pouch = {location = "safe", slot = 2, doses = 2, cells = initial_doses(2)},
+        pouches = {},
         order = false, finished = 0, levels = {}, storageBase = {}, resources = {},
     }
+    s.starterPouchId=NHPouches.create(s,"safe",2,2)
+    return s
 end
 
 local function whole(n)
@@ -50,12 +49,10 @@ end
 
 function NHStore.freeSafeSlot(s, preferred)
     local capacity = NHStore.safeCapacity(s)
-    local occupied = s.pouch and s.pouch.location=="safe" and s.pouch.slot
-    if preferred then
-        if preferred~=occupied and whole(preferred) and preferred >= 1 and preferred <= capacity and not NHStore.safeIndex(s,preferred) then return preferred end
-        return nil
+    if preferred and (not whole(preferred) or preferred<1 or preferred>capacity) then return nil end
+    for i=preferred or 1,preferred or capacity do
+        if not NHStore.safeIndex(s,i) and not NHPouches.at(s,"safe",i) then return i end
     end
-    for i=1,capacity do if i~=occupied and not NHStore.safeIndex(s,i) then return i end end
 end
 
 -- Each item kind resolves to one warehouse grid for both live items and saved rows.
@@ -88,7 +85,11 @@ function NHStore.freeSlot(s,container,preferred,kind)
     end
     local occupied={}
     local category=NHStore.category(kind)
-    if category=="equipment" and s.pouch and s.pouch.location=="warehouse" then occupied[s.pouch.slot]=true end
+    if category=="equipment" then
+        for _,pouch in pairs(s.pouches) do
+            if pouch.location=="warehouse" then occupied[pouch.slot]=true end
+        end
+    end
     for i,row in ipairs(s.warehouse) do
         if NHStore.category(row.item.kind)==category then occupied[row.slot or i]=true end
     end
@@ -154,38 +155,28 @@ local function validate(s)
     assert(whole(capacity) and capacity>=1, "Invalid secure inventory capacity")
     for _,row in ipairs(s.safe) do
         local slot = row.slot or 1
-        assert(whole(slot) and slot>=1 and slot<=capacity and not seen[slot],"Invalid secure inventory slot")
+        assert(row.item.kind~="pouch" and whole(slot) and slot>=1 and slot<=capacity and not seen[slot],"Invalid secure inventory slot")
         seen[slot]=true
     end
-    if s.sharedSlots and s.pouch.location=="safe" then
-        local slot=s.pouch.slot
-        assert(whole(slot) and slot>=1 and slot<=capacity and not seen[slot],"Invalid pouch slot")
-    end
-    assert(type(s.pouch) == "table" and whole(s.pouch.doses), "Invalid injector case")
-    assert(s.pouch.location == "safe" or s.pouch.location == "warehouse" or s.pouch.location == "bag" or s.pouch.location == "lost",
-           "Invalid injector case location")
-    local total=0
     local function validDose(remaining,count)
         return whole(remaining) and remaining>=1 and remaining<=NHStore.doseDurability
             and whole(count) and count>=1 and (remaining==NHStore.doseDurability or count==1)
     end
-    for slot,cell in pairs(s.pouch.cells) do
-        assert(whole(slot) and slot>=1 and slot<=NHStore.pouchCapacity and validDose(cell.remaining,cell.count),"Invalid pouch contents")
-        total=total+cell.count
-    end
-    assert(total==s.pouch.doses,"Invalid injector count")
+    NHPouches.validate(s,whole,validDose)
     for _,row in ipairs(s.safe) do
         if row.item.kind=="dose" then assert(validDose(row.item.remaining or NHStore.doseDurability,row.item.count or 1),"Invalid stored injector") end
     end
     local warehouseSlots=warehouse_grids()
-    if s.pouch.location=="warehouse" then
-        assert(whole(s.pouch.slot) and s.pouch.slot>=1 and s.pouch.slot<=NHStore.warehouseCapacity(s,"equipment"),"Invalid warehouse pouch slot")
-        warehouseSlots.equipment[s.pouch.slot]=true
+    for _,pouch in pairs(s.pouches) do
+        if pouch.location=="warehouse" then warehouseSlots.equipment[pouch.slot]=true
+        elseif s.sharedSlots and pouch.location=="safe" then
+            assert(not seen[pouch.slot],"Secure slot already occupied")
+        end
     end
     for i,row in ipairs(s.warehouse) do
         local slot=row.slot or i
         local used=warehouseSlots[NHStore.category(row.item.kind)]
-        assert(whole(slot) and slot>=1 and slot<=NHStore.warehouseCapacity(s,NHStore.category(row.item.kind)) and not used[slot],"Invalid warehouse slot")
+        assert(row.item.kind~="pouch" and whole(slot) and slot>=1 and slot<=NHStore.warehouseCapacity(s,NHStore.category(row.item.kind)) and not used[slot],"Invalid warehouse slot")
         used[slot]=true
         if row.item.kind=="dose" then assert(validDose(row.item.remaining or NHStore.doseDurability,row.item.count or 1),"Invalid warehouse injector") end
     end
@@ -305,9 +296,12 @@ local function unpack_slot(raw)
     assert(expected == checksum(payload), "Snapshot checksum mismatch")
     local s = decode(payload)
     s.materials,s.docks=s.materials or {},s.docks or {}
+    NHPouches.adopt(s)
     -- Old warehouse records had only a list order. Give them stable grid positions.
     local used=warehouse_grids()
-    if s.pouch.location=="warehouse" then used.equipment[s.pouch.slot]=true end
+    for _,pouch in pairs(s.pouches) do
+        if pouch.location=="warehouse" then used.equipment[pouch.slot]=true end
+    end
     for _,row in ipairs(s.warehouse) do
         if row.slot then used[NHStore.category(row.item.kind)][row.slot]=true end
     end
@@ -320,15 +314,14 @@ local function unpack_slot(raw)
             row.slot,used[category][slot],cursor[category]=slot,true,slot+1
         end
     end
-    if not s.pouch.cells then s.pouch.cells=initial_doses(s.pouch.doses) end
     progression.adopt(s)
-    validate(s)
     if not s.sharedSlots then
         s.safeCapacity = NHStore.safeCapacity(s)+1
         s.sharedSlots = true
-        if s.pouch.location=="safe" then s.pouch.slot=s.safeCapacity end
-        validate(s)
+        local starter=s.pouches[s.starterPouchId]
+        if starter and starter.location=="safe" then starter.slot=s.safeCapacity end
     end
+    validate(s)
     return s
 end
 
@@ -412,9 +405,7 @@ function NHStore.endRun(state, run_id)
         return false, "Run already closed or inactive."
     end
     state.closedThrough = id
-    if state.pouch.location == "bag" then
-        state.pouch = {location = "lost", doses = 0, cells = {}}
-    end
+    NHPouches.endRun(state)
     return true, "Run closed."
 end
 
@@ -449,12 +440,7 @@ function NHStore.takePouchDose(pouch,slot)
     return cell.remaining
 end
 
-function NHStore.restock(state)
-    local slot = state.pouch.location=="safe" and state.pouch.slot or NHStore.freeSafeSlot(state)
-    if not slot then return false, "Secure valuables slot is full." end
-    state.pouch = {location = "safe", slot=slot, doses = 2, cells = initial_doses(2)}
-    return true, "Two test doses placed in secure case."
-end
+NHStore.restock=NHPouches.restock
 
 -- Inputs and the paid order are committed together. Only loose stock is spendable.
 NHStore.recipes={
@@ -466,6 +452,8 @@ NHStore.recipes={
         item={kind="dose",remaining=3,count=1}},
     {id="grenade",category="weapons",facility="grenade",zh="魔法手雷",en="Magic grenade",inputs={{name="sand",amount=100},{name="slime",amount=50}},
         item={kind="grenade",name="$nh_hideout_grenade",icon="mods/noita_hideout/files/items/grenade.png"}},
+    {id="pouch",category="equipment",facility="injector",zh="空针剂包",en="Empty injector pouch",
+        inputs={{name="slime",amount=50}},emptyContainers=1,item={kind="pouch"}},
 }
 NHStore.recipe=NHStore.recipes[1]
 
@@ -482,6 +470,9 @@ function NHStore.canStartBatch(state,recipe)
         if (state.materials[input.name] or 0)<input.amount then return false,"Not enough bulk ingredients." end
         payment[input.name]=input.amount
     end
+    if recipe.emptyContainers and NHStore.emptyContainerCount(state)<recipe.emptyContainers then
+        return false,"Not enough empty containers."
+    end
     if recipe.item then
         local slot=NHStore.freeSlot(state,"warehouse",nil,recipe.item.kind)
         if not slot then return false,"Product storage is full." end
@@ -496,6 +487,10 @@ function NHStore.startOrder(state,id)
     if not recipe then return false,"Unknown recipe." end
     local ready,slot=NHStore.canStartBatch(state,recipe)
     if not ready then return false,slot end
+    if recipe.emptyContainers then
+        local ok,reason=NHStore.spendEmptyContainers(state,recipe.emptyContainers)
+        if not ok then return false,reason end
+    end
     local output={item=recipe.item,slot=slot,materials=recipe.materials}
     for _,input in ipairs(recipe.inputs) do
         local left=state.materials[input.name]-input.amount
@@ -506,8 +501,9 @@ function NHStore.startOrder(state,id)
 end
 
 function NHStore.salvageYield(item)
-    if item.kind=="wand" then return 3 end
-    if item.kind=="spell" then return item.card.stack or 1 end
+    if item.kind=="wand" then return 3,"arcane_scrap" end
+    if item.kind=="spell" then return item.card.stack or 1,"arcane_scrap" end
+    if item.kind=="potion" and NHPotion.isEmptyContainer(item) then return 1,"container_scrap" end
 end
 
 function NHStore.salvage(state,request)
@@ -515,10 +511,12 @@ function NHStore.salvage(state,request)
     local index=NHStore.slotIndex(state,"warehouse",request.slot,request.kind)
     local row=index and state.warehouse[index]
     if not row or row.id~=request.id or row.item.kind~=request.kind then return false,"Inventory slot changed." end
-    local amount=NHStore.salvageYield(row.item)
-    if not amount then return false,"Unsupported salvage item." end
+    local amount,resource=NHStore.salvageYield(row.item)
+    if not amount then
+        return false,row.item.kind=="potion" and "Only empty containers can be dismantled." or "Unsupported salvage item."
+    end
     table.remove(state.warehouse,index)
-    state.resources.arcane_scrap=(state.resources.arcane_scrap or 0)+amount
+    state.resources[resource]=(state.resources[resource] or 0)+amount
     return true
 end
 
@@ -532,7 +530,9 @@ function NHStore.reward(state, run_id)
     state.order.progress = state.order.progress + 1
     if state.order.progress >= state.order.required then
         local output=state.order.output
-        if output.item then
+        if output.item and output.item.kind=="pouch" then
+            NHPouches.create(state,"warehouse",output.slot,0)
+        elseif output.item then
             table.insert(state.warehouse,{id=state.nextItemId,slot=output.slot,item=output.item})
             state.nextItemId=state.nextItemId+1
         else

@@ -22,34 +22,35 @@ local function save(s)
     return load()
 end
 
+local function starter(s) return s.pouches[s.starterPouchId] end
+
 local state = load()
 assert(state.profile == 1 and state.revision == 0)
 local first = NHStore.newRun(state)
-assert(first == 1 and state.pouch.location == "safe" and state.pouch.doses == 2)
+assert(first == 1 and starter(state).location == "safe" and starter(state).doses == 2)
 state.safe[1] = {id = state.nextItemId, item = {kind = "wand", name = "Varpuluuta"}}
 state.nextItemId = state.nextItemId + 1
-assert(NHStore.takePouchDose(state.pouch,1))
+assert(NHStore.takePouchDose(starter(state),1))
 state = save(state)
-assert(state.pouch.doses == 1)
+assert(starter(state).doses == 1)
 assert(NHStore.endRun(state, first))
 assert(not NHStore.endRun(state, first))
 assert(not NHStore.reward(state, first))
 state = save(state)
-assert(state.closedThrough == first and state.pouch.doses == 1)
+assert(state.closedThrough == first and starter(state).doses == 1)
 assert(#state.safe == 1 and state.safe[1].item.name == "Varpuluuta")
 local second = NHStore.newRun(state)
-state.pouch.location = "bag"
+starter(state).location = "bag"
 state = save(state)
-assert(state.pouch.location == "bag" and state.pouch.doses == 1)
+assert(starter(state).location == "bag" and starter(state).doses == 1)
 -- Starting a fresh world also settles an abandoned run when no death callback ran.
 local third = NHStore.newRun(state)
 assert(not NHStore.endRun(state, second))
-assert(state.pouch.location == "lost" and state.pouch.doses == 0)
-assert(not NHStore.takePouchDose(state.pouch,1))
+assert(not starter(state))
 assert(NHStore.restock(state))
-state.pouch.location = "bag"
+starter(state).location = "bag"
 assert(NHStore.endRun(state, third))
-assert(state.pouch.location == "lost")
+assert(not starter(state))
 state = save(state)
 
 local fourth = NHStore.newRun(state)
@@ -121,7 +122,7 @@ assert(load().runSerial == 1)
 selected = 3
 local trial = load()
 local head_key = "noita_hideout.p3_revision"
-assert(NHStore.takePouchDose(trial.pouch,1))
+assert(NHStore.takePouchDose(starter(trial),1))
 -- Failing even to initialize a head leaves no staged item at all.
 blocked_key, blocked_value = head_key, 0
 assert(not NHStore.commit(trial))
@@ -130,23 +131,23 @@ assert(not settings["noita_hideout.p3_a"] and load().revision == 0)
 blocked_value = 1
 assert(not NHStore.commit(trial))
 assert(settings["noita_hideout.p3_a"] and settings[head_key] == 0)
-assert(load().revision == 0 and load().pouch.doses == 2)
+assert(load().revision == 0 and starter(load()).doses == 2)
 blocked_key = nil
 trial = save(trial)
-assert(trial.revision == 1 and trial.pouch.doses == 1)
+assert(trial.revision == 1 and starter(trial).doses == 1)
 -- Established profile: staged removal of the last dose must remain invisible.
-assert(NHStore.takePouchDose(trial.pouch,1))
+assert(NHStore.takePouchDose(starter(trial),1))
 blocked_key, blocked_value = head_key, 2
 assert(not NHStore.commit(trial))
-assert(load().revision == 1 and load().pouch.doses == 1)
+assert(load().revision == 1 and starter(load()).doses == 1)
 blocked_key = nil
 trial = save(trial)
-assert(trial.revision == 2 and trial.pouch.doses == 0)
+assert(trial.revision == 2 and starter(trial).doses == 0)
 -- A setter that threw *after* advancing the head is a successful commit.
 assert(NHStore.restock(trial))
 blocked_key, blocked_value, fail_after = head_key, 3, true
 trial = save(trial)
-assert(trial.revision == 3 and trial.pouch.doses == 2)
+assert(trial.revision == 3 and starter(trial).doses == 2)
 assert(NHStore.expandSafe(trial,7))
 trial=save(trial)
 assert(NHStore.safeCapacity(trial)==7 and not NHStore.expandSafe(trial,6))
@@ -159,13 +160,13 @@ print("Store: safe/carry loss, paid production, no double reward, save isolation
 selected=4
 profiles[4]={}
 local old=load()
-old.sharedSlots,old.safeCapacity,old.pouch.slot=nil,3,nil
+old.sharedSlots,old.safeCapacity,starter(old).slot=nil,3,nil
 for i=1,3 do old.safe[i]={id=i,slot=i,item={kind="wand",name="Wand"}} end
 old=save(old)
-assert(old.safeCapacity==4 and old.pouch.slot==4 and not NHStore.freeSafeSlot(old))
+assert(old.safeCapacity==4 and starter(old).slot==4 and not NHStore.freeSafeSlot(old))
 old=save(old)
 assert(old.safeCapacity==4 and old.safe[3].slot==3)
-old.pouch.location="bag"
+starter(old).location="bag"
 assert(NHStore.freeSafeSlot(old,4)==4)
 
 function CellFactory_GetAllLiquids() return {"water","slime"} end

@@ -117,7 +117,13 @@ local function item_details(slot,model,tr)
         end
         return lines
     end
-    if slot.kind=="pouch" then return {tr("针剂包","Injector pouch"),tr("点击打开，拖动移动","Click to open or drag to move")} end
+    if slot.kind=="pouch" then
+        local details={slot.name,tr("点击打开，拖动移动","Click to open or drag to move")}
+        if slot.view and slot.view.doses then
+            table.insert(details,2,tr("针剂数量 ","Injectors: ")..slot.view.doses)
+        end
+        return details
+    end
     if slot.kind=="dose" then
         return {tr("耐火激活剂","Fire injector"),tr("耐久 ","Durability ")..(slot.remaining or model.maxUses).."/"..model.maxUses
             ..tr("   数量 ","   Count ")..(slot.count or 1)}
@@ -196,9 +202,9 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     end
     local salvage
     if salvage_target and model.salvage_enabled then
-        local category=model.warehouse[salvage_target.kind]
+        local category=model.warehouse[NHStore.category(salvage_target.kind)]
         salvage=category and category[salvage_target.slot]
-        if not salvage or salvage.id~=salvage_target.id then salvage_target,salvage=nil,nil end
+        if not salvage or salvage.id~=salvage_target.id or not salvage.salvage_yield then salvage_target,salvage=nil,nil end
     end
     local category_nav
     if crafting and not selected and not salvage then category_nav,body=position_tabs(recipe_tabs,body) end
@@ -267,8 +273,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     if salvage then
         label(body,tr("拆解","Dismantle"),gold)
         label(body+13,salvage.name)
-        label(body+27,tr("奥术碎片 +","Arcane scrap +")..salvage.salvage_yield,green)
-        label(body+39,tr("现有碎片 ","Current scrap ")..compact(model.scrap),muted)
+        label(body+27,salvage.salvage_name.." +"..salvage.salvage_yield,green)
+        label(body+39,tr("现有碎片 ","Current scrap ")..compact(salvage.salvage_stock),muted)
         if button(260,6,body+53,tr("确认拆解","Dismantle item")) then
             dispatch("salvage",salvage_target)
             salvage_target=nil
@@ -371,7 +377,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     local function slot(column,y,key,kind,name,icon,entity,left,top)
         local x = 8 + column * qw
         slots[#slots+1] = {x=(left or ox)+x*scale, y=(top or oy)+y*scale, key=key, kind=kind,
-            name=name, icon=icon, entity=entity}
+            name=name, icon=icon, entity=entity, pouchId=kind=="pouch" and entity or nil}
     end
 
     local standalone = model.mode=="container"
@@ -398,7 +404,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             GuiZSetForNextWidget(gui,-79)
             GuiImageNinePiece(gui,37,ox,oy+popupY*scale,pw*scale,61*scale,1)
         end
-        label(8,popupY+5,tr("针剂包","Injector pouch"),pw-43,white)
+        label(8,popupY+5,model.pouchName,pw-43,white)
         if GuiButton(gui,38,ox+(pw-34)*scale,oy+(popupY+5)*scale,tr("关闭","Close"),scale) then
             drag=nil
             dispatch("close_container")
@@ -408,7 +414,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             local cell=model.cells[i]
             slot(i-1,popupY+23,"dose",cell and "dose",cell and tr("耐火激活剂","Fire injector") or tr("空格","Empty slot"))
             local v=slots[#slots]
-            v.cell=i
+            v.cell,v.pouchId=i,model.pouchId
             if cell then v.remaining,v.count=cell.remaining,cell.count end
         end
     end
@@ -443,6 +449,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         if warehouse_hover and drag and not folded then
             local src=drag.source
             if src.key=="dose" then warehouse_tab="supplies"
+            elseif src.key=="valuable" and src.kind=="pouch" then warehouse_tab="equipment"
             elseif src.key=="native" and src.kind~="other" and (warehouse_tab~="materials" or src.kind~="potion") then
                 warehouse_tab=NHStore.category(src.kind)
             end
@@ -587,14 +594,14 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     if not hovered and mx>=ox and my>=oy+(model.popup and popupY or 0)*scale and mx<ox+pw*scale and my<oy+72*scale then
         hovered = {key="panel"}
     end
-    if drag and model.revision~=drag.revision then drag=nil end
+    if drag and (model.revision~=drag.revision or model.pouchId~=drag.popupId) then drag=nil end
     if model.salvage_enabled and hovered and hovered.key=="warehouse" and hovered.view and hovered.view.salvage_yield
         and not fresh and not drag and InputIsMouseButtonJustDown(2) then
         salvage_target={id=hovered.entity,kind=hovered.kind,slot=hovered.safeSlot}
         workshop_folded=false
     end
     if not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind and hovered.kind~="reserved" then
-        drag={source=hovered,revision=model.revision,x=mx,y=my}
+        drag={source=hovered,revision=model.revision,popupId=model.pouchId,x=mx,y=my}
     end
     if drag and ((mx-drag.x)^2+(my-drag.y)^2)>9*scale^2 then drag.moved=true end
     local source=drag and drag.source
@@ -612,7 +619,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                 return "store_equipped_perk",source
             end
         end
-        if source.kind=="pouch" and from_store and source.key==target.key and not target.kind then
+        if source.kind=="pouch" and from_store and to_store and not target.kind
+            and (target.key=="valuable" or warehouse_tab=="equipment") then
             return "move_pouch",source,target.safeSlot
         end
         if target.key=="docks" and not target.kind and source.kind=="potion" and source.dockSlot==target.safeSlot then
@@ -680,7 +688,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     end
     for i,v in ipairs(slots) do
         local placement=drop(v)
-        if placement=="place" or placement=="equip_stored_perk" or placement=="store_equipped_perk" then tint(green) end
+        if placement=="place" or placement=="move_pouch" or placement=="equip_stored_perk" or placement=="store_equipped_perk" then tint(green) end
         GuiImage(gui,1000+i,v.x,v.y,tile,1,scale)
         if v.kind=="reserved" then GuiText(gui,v.x+5*scale,v.y+3*scale,"...",scale)
         elseif v.kind then sprite(v,2000+i,v.x+qw*scale/2,v.y+qh*scale/2,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and source.perkSlot==v.perkSlot and 0.35 or 1)
@@ -721,6 +729,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                 source=storage_key(source.key),destination=storage_key(hovered.key),
                 container=(source.key=="docks" or hovered.key=="docks") and "docks" or storage_key(source.key) or storage_key(hovered.key) or "safe",
                 sourceCell=source.cell,targetCell=hovered and hovered.cell,
+                pouchId=source.pouchId or hovered.pouchId,
                 intoContainer=hovered and hovered.key=="dose"}
             dispatch(action,request)
         end

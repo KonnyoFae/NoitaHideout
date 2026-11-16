@@ -68,7 +68,7 @@ assert(NHPotion.transferMaterial(s,req) and s.materials.water==12 and s.material
 -- Reservations participate in capacity tests before their order completes.
 s.order={output={item={kind="dose"},slot=5}}
 assert(not NHStore.freeSlot(s,"warehouse",5,"medkit") and NHStore.freeSlot(s,"warehouse",5,"pouch")==5)
-s.pouch.location,s.pouch.slot="warehouse",5
+s.pouches[s.starterPouchId].location,s.pouches[s.starterPouchId].slot="warehouse",5
 s.order.progress,s.order.required=0,1
 assert(NHStore.commit(s) and not NHStore.freeSlot(s,"warehouse",5,"pouch"))
 s.order={output={materials={product=20}}}
@@ -76,7 +76,7 @@ for i=1,7 do s.materials["extra"..i]=1 end
 assert(not NHStore.canStockMaterials(s,{foreign=1}) and NHStore.canStockMaterials(s,{product=1}))
 
 -- Profiles created with the old unlimited warehouse keep their occupied high slots.
-local legacy={warehouse={{id=1,item={kind="wand"},slot=111}},pouch={location="warehouse",slot=51},materials={}}
+local legacy={warehouse={{id=1,item={kind="wand"},slot=111}},pouches={[2]={id=2,location="warehouse",slot=51}},materials={}}
 for i=1,21 do legacy.materials["m"..i]=1 end
 local progression=dofile("mods/noita_hideout/files/progression.lua")
 progression.adopt(legacy)
@@ -85,8 +85,8 @@ assert(NHStore.warehouseCapacity(legacy,"materials")==21 and NHStore.warehouseCa
 assert(not NHStore.freeSlot(legacy,"warehouse",112,"wand"))
 -- An existing 0.10.0 supply-grid pouch above the equipment limit keeps its contents.
 local current={levels={warehouse_supplies=1},storageBase={},warehouse={{id=9,item={kind="dose"},slot=1}},
-    pouch={location="warehouse",slot=60,doses=1,cells={{remaining=2,count=1}}}}
+    pouches={[10]={id=10,location="warehouse",slot=60,doses=1,cells={{remaining=2,count=1}}}}}
 progression.adopt(current)
-assert(current.pouch.slot==1 and current.pouch.cells[1].remaining==2 and current.warehouse[1].slot==1)
+assert(current.pouches[10].slot==1 and current.pouches[10].cells[1].remaining==2 and current.warehouse[1].slot==1)
 assert(not NHStore.freeSlot(current,"warehouse",1,"pouch") and not NHStore.freeSlot(current,"warehouse",1,"dose"))
 print("Progression costs, stale confirmations, independent capacities, order reservations and legacy stock passed.")

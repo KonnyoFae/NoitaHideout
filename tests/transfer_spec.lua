@@ -97,7 +97,7 @@ NHStore.commit = function(s)
 end
 dofile("mods/noita_hideout/files/transfers.lua")
 local function state()
-    return {warehouse = {}, safe = {}, nextItemId = 1, runSerial = 1, revision = 0, profile = 1}
+    return {warehouse = {}, safe = {}, pouches = {}, nextItemId = 1, runSerial = 1, revision = 0, profile = 1}
 end
 local s = state()
 local e = make("potion", true)
