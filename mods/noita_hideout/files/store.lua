@@ -14,6 +14,7 @@ NHStore.pouchCapacity = 4
 NHStore.doseDurability = 3
 NHStore.checkpointFrames = 60 * 60
 NHStore.maxGold = max_safe_integer
+NHStore.maxMaterialAmount = max_safe_integer
 
 function NHStore.productionFrames(recipe)
     return (recipe and recipe.durationFrames) or 2 * 60 * 60
@@ -224,6 +225,12 @@ local function validate(s)
             assert(type(output.materials)=="table" and next(output.materials),"Missing order yield")
             for name,amount in pairs(output.materials) do
                 assert(type(name)=="string" and whole(amount) and amount>0,"Invalid order yield")
+            end
+        end
+        if s.order.catalysts then
+            assert(type(s.order.catalysts)=="table" and type(output.materials)=="table","Invalid held catalyst")
+            for name,amount in pairs(s.order.catalysts) do
+                assert(whole(amount) and amount>0 and (output.materials[name] or 0)>=amount,"Invalid held catalyst")
             end
         end
     end
@@ -500,6 +507,12 @@ local function alchemyBatch(id,zh,en,product,ingredients)
         materials={[product]=yield},count=yield,reversible=true}
 end
 
+local function catalyticBatch(id,zh,en,ingredient,catalyst,product)
+    return {id=id,category="alchemy",alchemyMode="synthesis",zh=zh,en=en,
+        inputs={{name=ingredient,amount=250}},catalysts={{name=catalyst,amount=1}},
+        materials={[product]=250},count=250}
+end
+
 -- Inputs and the paid order are committed together. Only loose stock is spendable.
 NHStore.recipes={
     alchemyBatch("stable","稳定传送液","Teleportatium","magic_liquid_teleportation",
@@ -512,12 +525,43 @@ NHStore.recipes={
     -- keeps the recovered ingredient unambiguous when a batch is decomposed.
     alchemyBatch("levitatium","漂浮基质","Levitatium","magic_liquid_faster_levitation",
         {"material_confusion","copper"}),
+    {id="levitatium_metals",category="alchemy",alchemyMode="synthesis",zh="漂浮基质（替代金属粉）",en="Levitatium (metal powders)",
+        inputs={{name="material_confusion",amount=250},{name="metal_sand",amount=250,
+            alternatives={"metal_sand","steel_sand","brass","silver","gold_radioactive","gold","diamond"},
+            labelZh="替代金属粉",labelEn="Metal powders"}},
+        materials={magic_liquid_faster_levitation=500},count=500,
+        noteZh="分解漂浮基质固定返还除草基质和铜。",noteEn="Decomposition always returns flummoxium and copper."},
     alchemyBatch("hastium","迅速基质","Hastium","magic_liquid_faster_levitation_and_movement",
         {"magic_liquid_faster_levitation","magic_liquid_movement_faster"}),
     alchemyBatch("unstable_polymorphine","不稳变形魔药","Unstable polymorphine","magic_liquid_unstable_polymorph",
         {"material_confusion","blood","oil"}),
     alchemyBatch("diminution","缩小","Diminution","magic_liquid_weakness",
         {"vomit","bone"}),
+    {id="ambrosia",category="alchemy",alchemyMode="synthesis",zh="灵丹妙药",en="Ambrosia",
+        inputs={{name="honey",amount=250},{name="diamond",amount=250}},
+        materials={magic_liquid_protection_all=250,poison=250},count=500,reversible=true},
+    catalyticBatch("mana","扩制汇聚法力","Multiply concentrated mana",
+        "water","magic_liquid_mana_regeneration","magic_liquid_mana_regeneration"),
+    catalyticBatch("chaotic_polymorphine","混乱变形魔药","Chaotic polymorphine",
+        "magic_liquid_polymorph","radioactive_liquid","magic_liquid_random_polymorph"),
+    catalyticBatch("midas","扩制点金之水","Multiply Draught of Midas",
+        "midas_precursor","midas","midas"),
+    alchemyBatch("purifying_powder","净化粉末","Purifying powder","purifying_powder",{"brass","diamond"}),
+    {id="purifying_powder_silver",category="alchemy",alchemyMode="synthesis",zh="净化粉末（银）",en="Purifying powder (silver)",
+        inputs={{name="diamond",amount=250},{name="silver",amount=250},{name="blood_worm",amount=250}},
+        materials={purifying_powder=250},count=250,
+        noteZh="烟雾在反应中逸散。",noteEn="Smoke dissipates during the reaction."},
+    {id="guiding_powder",category="alchemy",alchemyMode="synthesis",zh="导引粉末",en="Guiding powder",
+        inputs={{name="material_confusion",amount=250},{name="magic_liquid_unstable_teleportation",amount=250}},
+        materials={orb_powder=250},count=250,
+        noteZh="反应产生的火焰会消散。",noteEn="Fire dissipates during the reaction."},
+    {id="void_diamond",category="alchemy",alchemyMode="synthesis",zh="虚无液体（钻石）",en="Void liquid (diamond)",
+        inputs={{name="diamond",amount=250},{name="magic_liquid_random_polymorph",amount=250},{name="radioactive_liquid",amount=250}},
+        materials={void_liquid=750},count=750},
+    {id="void_fungus",category="alchemy",alchemyMode="synthesis",zh="虚无液体（怪异真菌）",en="Void liquid (weird fungus)",
+        inputs={{name="radioactive_liquid",amount=250},{name="blood_worm",amount=250},{name="fungi",amount=250}},
+        materials={void_liquid=500},count=500,
+        noteZh="原版列出两份液体产物，每批回收 500。",noteEn="The vanilla reaction yields two parts of liquid. This batch recovers 500."},
     {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",inputs={{name="water",amount=100},{name="blood",amount=50}},
         item={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"}},
     {id="injector",category="medical",facility="injector",zh="耐火激活剂",en="Fire injector",inputs={{name="water",amount=100},{name="lava",amount=25}},
@@ -532,7 +576,7 @@ NHStore.recipe=NHStore.recipes[1]
 -- A reversible material recipe spends the entire original yield and returns
 -- exactly one batch of its original ingredients. Items are never disassembled here.
 local function reverseRecipe(recipe)
-    assert(recipe.category=="alchemy" and not recipe.item and not recipe.emptyContainers
+    assert(recipe.category=="alchemy" and not recipe.item and not recipe.emptyContainers and not recipe.catalysts
         and type(recipe.materials)=="table" and next(recipe.materials) and #recipe.inputs>0,
         "Only bulk alchemy recipes can be reversed")
     local inputs={}
@@ -589,10 +633,7 @@ function NHStore.canBuyGood(state,good)
     if state.bankGold<good.price then return false,"Not enough stored gold." end
     if good.material then
         local incoming={[good.material]=good.quantity}
-        local reserved=state.order and state.order.output.materials
-        local owed=reserved and reserved[good.material] or 0
-        if (state.materials[good.material] or 0)>max_safe_integer-good.quantity-owed
-            or not NHStore.canStockMaterials(state,incoming) then return false,"Material storage is full." end
+        if not NHStore.canStockMaterials(state,incoming) then return false,"Material storage is full." end
         return true
     end
     local kind=good.item.kind
@@ -661,16 +702,52 @@ local function allocateIngredient(stock,sources,needed,payment)
     return false
 end
 
+-- If the preferred payment cannot free room, consuming the smallest stocks
+-- first clears the most alternative type slots for a given ingredient amount.
+local function smallestFirst(stock,sources,payment)
+    local sorted,priority={},{}
+    for i,name in ipairs(sources) do sorted[i],priority[name]=name,i end
+    table.sort(sorted,function(a,b)
+        local left=(stock[a] or 0)-(payment[a] or 0)
+        local right=(stock[b] or 0)-(payment[b] or 0)
+        if left==right then return priority[a]<priority[b] end
+        return left<right
+    end)
+    return sorted
+end
+
+local function batchPayment(stock,inputs,held,freeSlots)
+    local payment,alternative={},false
+    for name,amount in pairs(held or {}) do payment[name]=amount end
+    for _,input in ipairs(inputs) do
+        local sources=ingredientSources(input)
+        if input.alternatives then
+            alternative=true
+            if freeSlots then sources=smallestFirst(stock,sources,payment) end
+        end
+        if not allocateIngredient(stock,sources,input.amount,payment) then return nil end
+    end
+    return payment,alternative
+end
+
 function NHStore.canStartBatch(state,recipe)
     recipe=recipe or NHStore.recipe
     if recipe.facility and NHStore.level(state,recipe.facility)==0 then return false,"Facility is locked." end
     if state.order then return false,"Another order is active." end
-    local payment={}
-    for _,input in ipairs(recipe.inputs) do
-        if not allocateIngredient(state.materials,ingredientSources(input),input.amount,payment) then
-            return false,"Not enough bulk ingredients."
+    local delivery=recipe.materials
+    local held
+    if recipe.catalysts then
+        delivery,held={},{}
+        for name,amount in pairs(recipe.materials) do delivery[name]=amount end
+        -- Remove the sample from available stock while the batch runs.
+        -- The paid order records every particle owed, even after a reload.
+        for _,sample in ipairs(recipe.catalysts) do
+            if not allocateIngredient(state.materials,{sample.name},sample.amount,held) then return false,"Missing catalyst." end
+            delivery[sample.name]=(delivery[sample.name] or 0)+sample.amount
         end
     end
+    local payment,alternative=batchPayment(state.materials,recipe.inputs,held)
+    if not payment then return false,"Not enough bulk ingredients." end
     if recipe.emptyContainers and NHStore.emptyContainerCount(state)<recipe.emptyContainers then
         return false,"Not enough empty containers."
     end
@@ -679,17 +756,10 @@ function NHStore.canStartBatch(state,recipe)
         if not slot then return false,"Product storage is full." end
         return true,slot,payment
     end
-    for name,amount in pairs(recipe.materials) do
-        if (state.materials[name] or 0)-(payment[name] or 0)>max_safe_integer-amount then return false,"Material storage is full." end
-    end
-    if NHStore.canStockMaterials(state,recipe.materials,payment) then return true,nil,payment end
-    local input=recipe.inputs[1]
-    if #recipe.inputs==1 and input.alternatives and #input.alternatives==2 then
-        -- Emptying the other source first can free the missing output slot.
-        local first,second=unpack(input.alternatives)
-        local swapped={}
-        if allocateIngredient(state.materials,{second,first},input.amount,swapped)
-            and NHStore.canStockMaterials(state,recipe.materials,swapped) then return true,nil,swapped end
+    if NHStore.canStockMaterials(state,delivery,payment) then return true,nil,payment,delivery,held end
+    if alternative then
+        local swapped=batchPayment(state.materials,recipe.inputs,held,true)
+        if swapped and NHStore.canStockMaterials(state,delivery,swapped) then return true,nil,swapped,delivery,held end
     end
     return false,"Material storage is full."
 end
@@ -697,18 +767,18 @@ end
 function NHStore.startOrder(state,id)
     local recipe=findRecipe(id or "stable")
     if not recipe then return false,"Unknown recipe." end
-    local ready,slot,payment=NHStore.canStartBatch(state,recipe)
+    local ready,slot,payment,delivery,held=NHStore.canStartBatch(state,recipe)
     if not ready then return false,slot end
     if recipe.emptyContainers then
         local ok,reason=NHStore.spendEmptyContainers(state,recipe.emptyContainers)
         if not ok then return false,reason end
     end
-    local output={item=recipe.item,slot=slot,materials=recipe.materials}
+    local output={item=recipe.item,slot=slot,materials=delivery}
     for name,amount in pairs(payment) do
         local left=state.materials[name]-amount
         state.materials[name]=left>0 and left or nil
     end
-    state.order={id=state.finished+1,recipe=recipe.id,progress=0,required=NHStore.productionFrames(recipe),output=output}
+    state.order={id=state.finished+1,recipe=recipe.id,progress=0,required=NHStore.productionFrames(recipe),output=output,catalysts=held}
     return true
 end
 

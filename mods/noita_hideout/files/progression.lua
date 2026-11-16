@@ -106,6 +106,13 @@ local function material_slots(s,incoming,outgoing)
 end
 
 function NHStore.canStockMaterials(s,incoming,outgoing)
+    -- Keep enough numeric headroom for any paid delivery (including its
+    -- borrowed samples), even if a flask is unloaded before the order finishes.
+    local reserved=s.order and s.order.output and s.order.output.materials
+    for name,count in pairs(incoming or {}) do
+        local stock=(s.materials[name] or 0)-((outgoing and outgoing[name]) or 0)
+        if count>NHStore.maxMaterialAmount-stock-((reserved and reserved[name]) or 0) then return false end
+    end
     return material_slots(s,incoming,outgoing)<=NHStore.warehouseCapacity(s,"materials")
 end
 

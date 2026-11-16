@@ -1,3 +1,3 @@
 <Mod name="Hideout Prototype | 藏身处测试版"
-     description="0.17.0 | Open your inventory near spawn to use the hideout. Separate stored gunpowder into Healthium and Purifying Powder in the alchemy workshop."
+     description="0.18.0 | Edit wands near spawn and use the hideout workshop for alchemy. Catalyst samples are returned with finished orders. Take Draught of Midas into the world to turn materials into gold."
      request_no_api_restrictions="0" />

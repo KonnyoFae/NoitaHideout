@@ -273,7 +273,9 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if item.id==selected_entry then selected=item; break end
     end
     local outputs=crafting and selected and selected.outputs
-    local show_outputs=outputs and (#outputs>1 or (#outputs==1 and outputs[1].name~=selected.name))
+    local catalysts=crafting and selected and selected.catalysts
+    local catalyst_count=catalysts and #catalysts or 0
+    local show_outputs=outputs and (#outputs>1 or (#outputs==1 and (outputs[1].name~=selected.name or catalyst_count>0)))
     local savings,wrap_savings
     if shopping and selected then
         savings=string.format("%.0f",model.bankGold)
@@ -301,7 +303,9 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     if salvage then body_height=77
     elseif crafting and selected then
         body_height=68+12*#selected.inputs
+        if catalyst_count>0 then body_height=body_height+13+12*catalyst_count end
         if show_outputs then body_height=body_height+13+12*#outputs end
+        if selected.note then body_height=body_height+13 end
         if model.order_active and selected.unlocked==false then body_height=body_height+13 end
     elseif shopping and selected then body_height=wrap_savings and 112 or 99
     elseif selected then body_height=80+12*#selected.costs
@@ -311,6 +315,11 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if crafting and model.order_active then body_height=body_height+15 end
     end
     local height=workshop_folded and 18 or body+body_height
+    if crafting and selected and height*scale>sh-10 then
+        local panel_width=width*scale
+        scale=(sh-10)/height
+        width=panel_width/scale
+    end
     local top=sh-5-height*scale
     local function label(y,value,color)
         local txt,short=fit(value,(width-12)*scale,scale)
@@ -400,13 +409,31 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             y=y+12
             cost(y,input.name,input.available,input.amount,input.detail)
         end
+        if catalyst_count>0 then
+            y=y+13
+            label(y,tr("催化剂（完工归还）","Catalyst (returned)"),muted)
+            local detail=tr("开工时暂存，完成后原数归还。","Held when the batch starts and returned in full at completion.")
+            for _,sample in ipairs(catalysts) do
+                y=y+12
+                if sample.held and sample.held>0 then
+                    local held=tr("暂存 ","Held ")..string.format("%.0f",sample.held)
+                    value_row(y,sample.name,held,green,held,tr("当前库存 ","Stock ")..string.format("%.0f",sample.available).."\n"..detail)
+                else
+                    cost(y,sample.name,sample.available,sample.amount,detail)
+                end
+            end
+        end
         if show_outputs then
             y=y+13
-            label(y,tr("每批产出","Batch output"),muted)
+            label(y,catalyst_count>0 and tr("净产出","Net output") or tr("每批产出","Batch output"),muted)
             for _,result in ipairs(outputs) do
                 y=y+12
                 value_row(y,result.name,"×"..compact(result.amount),white,result.name.." ×"..result.amount)
             end
+        end
+        if selected.note then
+            y=y+13
+            label(y,selected.note,muted)
         end
         y=y+15
         if model.order_active then

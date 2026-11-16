@@ -2,6 +2,7 @@ local files = "mods/noita_hideout/files/"
 dofile_once(files .. "store.lua")
 dofile_once(files .. "bank.lua")
 dofile_once(files .. "workshop_clock.lua")
+dofile_once(files .. "home_wand_edit.lua")
 dofile_once(files .. "wand.lua")
 dofile_once(files .. "potion.lua")
 dofile_once(files .. "transfers.lua")
@@ -54,6 +55,7 @@ local error_translations = {
     ["Could not create packed perk."] = "未能生成特质物品。",
     ["Another order is active."] = "工坊已有一张在制订单。",
     ["Not enough bulk ingredients."] = "物料库存中的原料不足。",
+    ["Missing catalyst."] = "物料库中缺少所需的催化样品。",
     ["Invalid gold transfer."] = "无法识别这笔存取操作。",
     ["Invalid gold amount."] = "请输入有效的金币数额。",
     ["Not enough carried gold."] = "随身金币不足。",
@@ -376,7 +378,8 @@ local function inventory_view()
         local ready,reason,payment=NHStore.canStartBatch(state,recipe)
         local view={id=recipe.id,category=recipe.category,alchemyMode=recipe.alchemyMode,
             name=tr(recipe.zh,recipe.en),output=recipe.count or 1,
-            inputs={},outputs={},duration=math.ceil(NHStore.productionFrames(recipe)/60),
+            inputs={},outputs={},catalysts={},note=recipe.noteZh and tr(recipe.noteZh,recipe.noteEn),
+            duration=math.ceil(NHStore.productionFrames(recipe)/60),
             ready=ready,unlocked=not recipe.facility or NHStore.level(state,recipe.facility)>0,
             facility_name=facility_names[recipe.facility] or recipe.facility}
         if not view.unlocked then
@@ -388,7 +391,8 @@ local function inventory_view()
             local name=NHPotion.materialName(input.name,lang)
             local detail
             if input.alternatives then
-                name=NHPotion.materialName(input.name)..tr("（合计）"," (total)")
+                local group=input.labelZh and tr(input.labelZh,input.labelEn) or NHPotion.materialName(input.name)
+                name=group..tr("（合计）"," (total)")
                 local lines={payment and tr("库存 / 本批扣料","Stock / used this batch")
                     or tr("可混用，按优先顺序列出","Combined stock, in preferred order")}
                 for _,key in ipairs(input.alternatives) do
@@ -399,6 +403,11 @@ local function inventory_view()
                 detail=table.concat(lines,"\n")
             end
             table.insert(view.inputs,{name=name,amount=input.amount,detail=detail,available=NHStore.ingredientStock(state,input)})
+        end
+        local held=state.order and state.order.recipe==recipe.id and state.order.catalysts
+        for _,sample in ipairs(recipe.catalysts or {}) do
+            table.insert(view.catalysts,{name=NHPotion.materialName(sample.name,lang),amount=sample.amount,
+                available=state.materials[sample.name] or 0,held=held and held[sample.name] or 0})
         end
         for name,amount in pairs(recipe.materials or {}) do
             table.insert(view.outputs,{key=name,name=NHPotion.materialName(name),amount=amount})
@@ -743,6 +752,7 @@ end
 
 function OnWorldInitialized()
     NHClock.reset()
+    NHHomeWandEdit.reset()
     bank_synced=false
     next_room_check,pending_visit=0,nil
     state, run_id, home_x, home_y, player_id = nil, nil, nil, nil, nil
@@ -756,6 +766,7 @@ end
 function OnPlayerSpawned(player)
     player_id = player
     set_home(player, true)
+    NHHomeWandEdit.update(player,near_home(player))
     if attach() and active_run() then
         NHClock.observe(state,GameGetFrameNum())
         NHPerks.update(state,player)
@@ -769,8 +780,10 @@ local function current_player()
 end
 
 function OnWorldPreUpdate()
-    if not opened and not mouse_release then return end
     local player = current_player()
+    if player then set_home(player,false) end
+    NHHomeWandEdit.update(player,player and (not state or active_run()) and near_home(player))
+    if not opened and not mouse_release then return end
     if GameIsInventoryOpen() then return end
     if not player then
         opened, case_open, mouse_release = false, nil, false
@@ -855,6 +868,7 @@ function OnWorldPostUpdate()
 end
 
 function OnPlayerDied()
+    NHHomeWandEdit.update(nil,false)
     popup=nil
     opened, case_open = false, nil
     if GlobalsGetValue(run_key, "") == "" then return end

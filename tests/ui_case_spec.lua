@@ -422,6 +422,54 @@ assert(action=="craft" and param.id=="separate_gunpowder")
 render(model,240)
 table.remove(model.recipes)
 
+-- The sample is reserved separately. Net yield excludes that sample even when
+-- the product name matches the recipe name.
+local sample={name="Concentrated mana",available=1,amount=1}
+local mana={id="mana",category="alchemy",alchemyMode="synthesis",name=sample.name,duration=120,ready=true,
+    inputs={{name="Water",available=300,amount=250}},catalysts={sample},outputs={{name=sample.name,amount=250}}}
+model.recipes[#model.recipes+1]=mana
+render(model,254)
+render(model,245)
+for _,lang in ipairs({"en","zh"}) do
+    model.lang=lang
+    for _,size in ipairs({{320,180},{427,240},{640,360}}) do
+        width,height=size[1],size[2]
+        render(model)
+        local b,bench=assert(buttons[214]),panels[210]
+        assert(bench.y>=0 and b.y>=bench.y and b.y+9<=bench.y+bench.h)
+        assert(drawn[lang=="zh" and "催化剂（完工归还）" or "Catalyst (returned)"])
+        assert(drawn[lang=="zh" and "净产出" or "Net output"] and drawn["300 / 250"] and drawn["1 / 1"])
+        local info=tips["Concentrated mana  1 / 1"]
+        assert(info and info~="" and tips["Concentrated mana ×250"] and not tips["Concentrated mana ×251"])
+    end
+end
+model.lang="en"
+width,height=320,240
+sample.available=0
+mana.ready,mana.reason=false,"Missing catalyst sample"
+assert(not render(model,214) and drawn["0 / 1"] and (drawn[mana.reason] or tips[mana.reason]))
+sample.available,mana.ready=1,true
+action,param=render(model,214)
+assert(action=="craft" and param.id=="mana")
+model.order_active,model.order_name,model.order_remaining=true,mana.name,67
+sample.available,sample.held=0,1
+assert(not render(model,214) and drawn["Held 1"] and drawn["1:07"] and drawn["Net output"])
+assert(tips["Held 1"]:find("Stock 0",1,true))
+model.order_active=false
+render(model,240)
+table.remove(model.recipes)
+-- Omitted gas and fire must remain readable on narrow screens.
+local note="Smoke escapes during this reaction."
+model.recipes[#model.recipes+1]={id="powder",category="alchemy",alchemyMode="synthesis",name="Purifying powder",
+    duration=120,ready=true,output=250,inputs={{name="Diamond",available=250,amount=250}},
+    outputs={{name="Purifying powder",amount=250}},note=note}
+render(model,245)
+render(model)
+assert(tips[note] and green_button(214))
+render(model,240)
+table.remove(model.recipes)
+render(model,255)
+
 -- Both alchemy lists page independently, including when production is active.
 for _,mode in ipairs({"synthesis","decomposition"}) do
     for i=2,6 do

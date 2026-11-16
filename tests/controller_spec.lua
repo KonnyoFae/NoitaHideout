@@ -35,6 +35,7 @@ function EntityHasTag(id,tag) return entities[id] ~= nil and entities[id].tags[t
 function EntityAddTag(id,tag) entities[id].tags[tag]=true end
 function EntityGetIsAlive(id) return entities[id] ~= nil end
 function EntityGetParent(id) return entities[id].parent end
+function EntityRemoveFromParent(id) entities[id].parent=0 end
 function EntityGetName(id) return entities[id].name or "" end
 function EntityGetRootEntity(id)
     if EntityGetParent(id) == 0 then return id end
@@ -69,9 +70,9 @@ function BiomeMapGetName(x,y)
     end
     return "$biome_coalmine"
 end
-function EntityGetAllChildren(parent)
+function EntityGetAllChildren(parent,tag)
     local list={}
-    for id,e in pairs(entities) do if e.parent==parent then list[#list+1]=id end end
+    for id,e in pairs(entities) do if e.parent==parent and (not tag or e.tags[tag]) then list[#list+1]=id end end
     table.sort(list)
     return list
 end
@@ -106,6 +107,7 @@ function EntityLoad(path,x,y)
     next_id=next_id+1
     entities[next_id]={x=x,y=y,parent=0,tags={["noita_hideout_"..file]=true},comps={}}
     if file=="stimulant" then EntityAddComponent2(next_id,"GameEffectComponent",{frames=3600})
+    elseif file=="home_wand_edit" then EntityAddComponent2(next_id,"GameEffectComponent",{effect="EDIT_WANDS_EVERYWHERE",frames=3})
     else EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=""}) end
     return next_id
 end
@@ -459,7 +461,7 @@ for _,recipe in ipairs(NHStore.recipes) do
         assert(entry.duration==math.ceil(NHStore.productionFrames(recipe)/60))
         assert(#entry.inputs==#recipe.inputs and #entry.outputs>0)
         for i,input in ipairs(recipe.inputs) do
-            local name=input.alternatives and NHPotion.materialName(input.name).." (total)" or NHPotion.materialName(input.name,"en")
+            local name=input.alternatives and (input.labelEn or NHPotion.materialName(input.name)).." (total)" or NHPotion.materialName(input.name,"en")
             assert(entry.inputs[i].name==name and entry.inputs[i].amount==input.amount)
         end
         local shown={}
@@ -568,7 +570,6 @@ function EntityLoad(path,x,y)
     end
     return id
 end
-function EntityRemoveFromParent(id) entities[id].parent=0 end
 function EntityRemoveComponent(id,component)
     for key,value in pairs(entities[id].comps) do
         if value==component then entities[id].comps[key]=nil; return end
@@ -1034,3 +1035,55 @@ local function testPowderSeparation()
 end
 testPowderSeparation()
 print("Controller: combined gunpowder stock, separated inputs and liquid/powder delivery passed.")
+
+local function testCatalyticWorkshop()
+    settings,flags={},{}
+    new_world()
+    local stock=state()
+    stock.materials={midas_precursor=500,midas=1,water=250}
+    assert(NHStore.commit(stock))
+    boot()
+    inventory_open=true
+    local menu=tick().recipes
+    local midas=assert(has_project(menu,"midas"))
+    assert(midas.ready and #midas.catalysts==1 and midas.catalysts[1].available==1)
+    assert(#midas.outputs==1 and midas.outputs[1].amount==250 and midas.outputs[1].key=="midas")
+    assert(not has_project(menu,"mana").ready and has_project(menu,"mana").reason=="Missing catalyst.")
+    for _,recipe in ipairs(menu) do
+        for _,result in ipairs(recipe.outputs) do assert(result.key~="gold") end
+    end
+    tick(nil,"craft",{id="midas"})
+    boot()
+    local inProgress=has_project(tick().recipes,"midas")
+    assert(inProgress.catalysts[1].held==1 and inProgress.catalysts[1].available==0)
+    assert(inProgress.outputs[1].amount==250 and not state().materials.midas)
+    advance(NHStore.productionFrames())
+    assert(state().materials.midas==251 and state().materials.midas_precursor==250)
+    assert(not state().materials.gold and state().bankGold==0 and not state().order)
+end
+testCatalyticWorkshop()
+
+local function testSafehouseWandEditing()
+    new_world()
+    local tag="noita_hideout_home_wand_edit"
+    local function effects() return EntityGetAllChildren(player,tag) end
+    assert(#effects()==1 and not inventory_open)
+    local first=effects()[1]
+    local native=EntityLoad("native_perk.xml",227,-85)
+    EntityAddComponent2(native,"GameEffectComponent",{effect="EDIT_WANDS_EVERYWHERE",frames=-1})
+    EntityAddChild(player,native)
+    entities[player].x=227+80
+    inventory_open=true
+    assert(tick().near and effects()[1]==first)
+    entities[player].x=227+81
+    assert(not tick().near and #effects()==0 and EntityGetIsAlive(native))
+    entities[player].x=227
+    assert(tick().near and #effects()==1)
+    boot()
+    assert(#effects()==1)
+    OnPlayerDied()
+    tick()
+    assert(#effects()==0 and EntityGetIsAlive(native))
+end
+testSafehouseWandEditing()
+print("Controller: held catalyst, net delivery, field-only gold and native home wand editing passed.")

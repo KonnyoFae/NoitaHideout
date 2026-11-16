@@ -1,0 +1,4 @@
+<Entity tags="noita_hideout_home_wand_edit">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="EDIT_WANDS_EVERYWHERE" frames="3" />
+</Entity>
