@@ -11,7 +11,7 @@ local function fresh(profile)
     return {
         version = 1, profile = profile, revision = 0,
         runSerial = 0, rewardedThrough = 0, closedThrough = 0,
-        nextItemId = 1, warehouse = {}, safe = {},
+        nextItemId = 1, warehouse = {}, safe = {}, safeCapacity = 1,
         pouch = {location = "safe", doses = 2},
         order = false, finished = 0,
     }
@@ -19,6 +19,34 @@ end
 
 local function whole(n)
     return type(n) == "number" and n >= 0 and n <= 9007199254740991 and n == math.floor(n)
+end
+
+function NHStore.safeCapacity(s)
+    return s.safeCapacity or 1
+end
+
+-- Call on the same draft as the upgrade payment, then commit both together.
+function NHStore.expandSafe(s, capacity)
+    if not whole(capacity) or capacity < NHStore.safeCapacity(s) then
+        return false, "Invalid secure inventory upgrade."
+    end
+    s.safeCapacity = capacity
+    return true
+end
+
+function NHStore.safeIndex(s, slot)
+    for index, row in ipairs(s.safe) do
+        if (row.slot or 1) == slot then return index end
+    end
+end
+
+function NHStore.freeSafeSlot(s, preferred)
+    local capacity = NHStore.safeCapacity(s)
+    if preferred then
+        if whole(preferred) and preferred >= 1 and preferred <= capacity and not NHStore.safeIndex(s,preferred) then return preferred end
+        return nil
+    end
+    for i=1,capacity do if not NHStore.safeIndex(s,i) then return i end end
 end
 
 -- Persistent flags belong to the game's save slot. Mod settings can be shared.
@@ -57,6 +85,13 @@ local function validate(s)
     assert(s.profile >= 1 and s.rewardedThrough <= s.runSerial and s.closedThrough <= s.runSerial
         and s.nextItemId >= 1, "Invalid profile counters")
     assert(type(s.warehouse) == "table" and type(s.safe) == "table", "Invalid inventory")
+    local capacity, seen = NHStore.safeCapacity(s), {}
+    assert(whole(capacity) and capacity>=1, "Invalid secure inventory capacity")
+    for _,row in ipairs(s.safe) do
+        local slot = row.slot or 1
+        assert(whole(slot) and slot>=1 and slot<=capacity and not seen[slot],"Invalid secure inventory slot")
+        seen[slot]=true
+    end
     assert(type(s.pouch) == "table" and whole(s.pouch.doses), "Invalid injector case")
     assert(s.pouch.location == "safe" or s.pouch.location == "bag" or s.pouch.location == "lost",
            "Invalid injector case location")

@@ -7,6 +7,7 @@ local entities, next_id, held
 local function reset_entities()
     entities = {
         [player] = {tags={player_unit=true}, x=227, y=-85, parent=0, comps={}},
+        [3] = {tags={}, x=0,y=0,parent=player,name="inventory_full",comps={}},
         [quick] = {tags={}, x=0, y=0, parent=player, name="inventory_quick", comps={}},
     }
     next_id, held = 100, 0
@@ -65,7 +66,7 @@ end
 local controls = {}
 function EntityGetFirstComponentIncludingDisabled(id,kind,tag)
     if id==player and kind=="ControlsComponent" then return controls end
-    if id==player and kind=="Inventory2Component" then return {mActiveItem=held} end
+    if id==player and kind=="Inventory2Component" then return {mActiveItem=held,full_inventory_slots_x=16,full_inventory_slots_y=1} end
     local e=entities[id]
     return e and e.comps[kind .. (tag or "")]
 end
@@ -75,9 +76,13 @@ function ComponentGetValue2(c,key)
         if key=="mButtonFrameFire" then return fire_stamp end
         return false
     end
+    if key=="inventory_slot" then return c.slotX or 0,c.slotY or 0 end
     return c[key]
 end
-function ComponentSetValue2(c,key,v) if c~=controls then c[key]=v end end
+function ComponentSetValue2(c,key,v,y)
+    if key=="inventory_slot" then c.slotX,c.slotY=v,y elseif c~=controls then c[key]=v end
+end
+function EntitySetComponentsWithTagEnabled() end
 function EntityLoad(path,x,y)
     local file=path:match("([^/]+)%.xml$")
     if file=="stimulant" and fail_effect then return 0 end
@@ -130,16 +135,19 @@ assert(#EntityGetWithTag("noita_hideout_case")==0)
 OnPlayerSpawned(player)
 assert(#EntityGetWithTag("noita_hideout_case")==0 and state().runSerial==1)
 tick()
-assert(tick(10,"take_dose").mode=="case" and state().pouch.doses==2) -- opening click cannot withdraw
-tick(nil,"take_dose")
+local function tool(id) return {parent=quick,lane="tool",xslot=2,yslot=0,entity=id} end
+inventory_open=true
+assert(tick(nil,"take_dose",tool()).mode=="case" and state().pouch.doses==2) -- opening click cannot withdraw
+tick(nil,"take_dose",tool())
 local dose=assert(EntityGetWithTag("noita_hideout_dose")[1])
 assert(state().pouch.doses==1 and EntityGetRootEntity(dose)==player)
 held=0 -- drag a specific item while another slot is active
-tick(nil,"place",dose)
+tick(nil,"place",tool(dose))
 assert(not EntityGetIsAlive(dose) and state().pouch.doses==2)
-tick(nil,"take_dose")
+tick(nil,"take_dose",tool())
 dose=assert(EntityGetWithTag("noita_hideout_dose")[1])
-tick(nil,"close")
+inventory_open=false
+tick()
 held=dose
 tick(13) -- J no longer spends a dose
 assert(EntityGetIsAlive(dose) and #EntityGetWithTag("noita_hideout_stimulant")==0)
@@ -166,17 +174,20 @@ assert(state().runSerial==1 and state().pouch.doses==1)
 -- The HUD opens away from spawn, and the pouch is a real quickbar entity.
 entities[player].x=500
 tick()
-assert(tick(10).mode=="case")
-tick(nil,"take_pouch")
+assert(not tick(10).open)
+inventory_open=true
+assert(tick().mode=="case")
+tick(nil,"take_pouch",tool())
 local pouch=assert(EntityGetWithTag("noita_hideout_pouch")[1])
 assert(EntityGetRootEntity(pouch)==player and state().pouch.location=="bag")
 held=pouch
-tick(nil,"place",pouch)
+tick(nil,"place",tool(pouch))
 assert(not EntityGetIsAlive(pouch) and state().pouch.location=="safe")
-tick(nil,"take_pouch")
+tick(nil,"take_pouch",tool())
 assert(state().pouch.location=="bag")
 pouch=assert(EntityGetWithTag("noita_hideout_pouch")[1])
-tick(nil,"close")
+inventory_open=false
+tick()
 entities[pouch].parent=0
 held=0
 tick()
@@ -214,3 +225,40 @@ tick(nil,"simulate")
 assert(state().rewardedThrough==3 and state().finished==1)
 print("Controller: HUD case, inventory transfer, click gating, failed injection, consume, access, death and orders passed.")
 
+
+-- Simulate the native outside-inventory drop before our release callback.
+function EntityGetComponentIncludingDisabled(id,kind)
+    local first=EntityGetFirstComponentIncludingDisabled(id,kind)
+    return first and {first} or {}
+end
+function CreateItemActionEntity(action,x,y)
+    local id=EntityLoad("spell.xml",x,y)
+    EntityAddComponent2(id,"ItemActionComponent",{action_id=action})
+    EntityAddComponent2(id,"ItemComponent",{item_name="Bomb",ui_sprite="data/ui_gfx/gun_actions/bomb.png",
+        permanently_attached=false,uses_remaining=3,is_frozen=false,is_identified=true,has_been_picked_by_player=true})
+    return id
+end
+local expanded=state()
+assert(NHStore.expandSafe(expanded,5))
+assert(NHStore.commit(expanded))
+boot()
+inventory_open=true
+tick()
+local card=CreateItemActionEntity("BOMB",200,-80)
+EntityAddChild(3,card)
+local item=EntityGetFirstComponentIncludingDisabled(card,"ItemComponent")
+ComponentSetValue2(item,"inventory_slot",5,0)
+tick()
+entities[card].parent=0
+tick(nil,"place",{parent=3,lane="spell",xslot=5,yslot=0,entity=card,safeSlot=5})
+local row=state().safe[1]
+assert(row.slot==5 and row.item.card.id=="BOMB" and not EntityGetIsAlive(card))
+local target={parent=3,lane="spell",xslot=9,yslot=0,safeSlot=5,storedId=row.id}
+fail_commit=true
+tick(nil,"secure_withdraw",target)
+assert(#state().safe==1 and #EntityGetAllChildren(3)==0)
+fail_commit=false
+tick(nil,"secure_withdraw",target)
+local delivered=assert(EntityGetAllChildren(3)[1])
+item=EntityGetFirstComponentIncludingDisabled(delivered,"ItemComponent")
+assert(item.slotX==9 and item.slotY==0 and item.uses_remaining==3 and #state().safe==0)

@@ -209,6 +209,9 @@ end
 local function item_label(entry)
     local item = entry.item
     if item.kind == "potion" then return NHPotion.label(item, lang) end
+    if item.kind == "spell" then
+        return GameTextGetTranslatedOrNot("$action_" .. item.card.id:lower()) .. (item.card.stack and (" ×" .. item.card.stack) or "")
+    end
     local name = item.name or ""
     if name ~= "" then name = GameTextGetTranslatedOrNot(name) end
     if not name or name == "" then name = tr("魔杖", "Wand") end
@@ -224,11 +227,10 @@ local function inventory_view()
             model.recipe_indices[#model.recipe_indices + 1] = i
         end
     end
-    for i, entry in ipairs(state.safe) do model.secure_loot[i] = item_label(entry) end
-    if state.safe[1] then
-        local entry = state.safe[1]
-        model.secure_kind, model.secure_id = entry.item.kind, entry.id
-        model.secure_icon = entry.item.sprite and entry.item.sprite.image_file
+    model.capacity = NHStore.safeCapacity(state)
+    for _, entry in ipairs(state.safe) do
+        model.secure_loot[entry.slot or 1] = {id=entry.id, kind=entry.item.kind,name=item_label(entry),
+            icon=entry.item.icon or (entry.item.sprite and entry.item.sprite.image_file)}
     end
     local plan = NHStore.planBatch(state)
     model.batch_available = plan ~= nil
@@ -248,33 +250,76 @@ local function inventory_view()
     return model
 end
 
--- Resolve drag sources from the live quick inventory, even when another item is held.
-local function case_inventory(player)
-    local rows = {}
-    for _, id in ipairs(NHTransfers.carried(player)) do
-        local item = EntityGetFirstComponentIncludingDisabled(id, "ItemComponent")
-        if item then
-            local kind = NHNative.kind(id) or NHTransfers.item_kind(id) or "other"
-            local icon = ComponentGetValue2(item, "ui_sprite")
-            local name = ComponentGetValue2(item, "item_name")
-            if kind == "wand" then
-                local ability = EntityGetFirstComponentIncludingDisabled(id, "AbilityComponent")
-                if ability then
-                    icon = ComponentGetValue2(ability, "sprite_file")
-                    if not ComponentGetValue2(item, "always_use_item_name_in_ui") then
-                        name = ComponentGetValue2(ability, "ui_name")
+-- Quick wands and tools have independent x coordinates. Loose cards use
+-- the full inventory's actual row and column; children of wands are excluded.
+local function native_slots(player)
+    local inv = EntityGetFirstComponentIncludingDisabled(player,"Inventory2Component")
+    if not inv then return {} end
+    local slots = {}
+    for _, parent in ipairs(EntityGetAllChildren(player) or {}) do
+        local name = EntityGetName(parent)
+        local full = name == "inventory_full"
+        if full or name == "inventory_quick" then
+            local columns = full and ComponentGetValue2(inv,"full_inventory_slots_x") or 8
+            local rows = full and ComponentGetValue2(inv,"full_inventory_slots_y") or 1
+            local grid = {}
+            for y=0,rows-1 do
+                for col=0,columns-1 do
+                    local lane = full and "spell" or (col<4 and "wand" or "tool")
+                    local x = lane=="tool" and col-4 or col
+                    local slot = {key="native", lane=lane, parent=parent, xslot=x, yslot=y, col=col}
+                    slots[#slots+1] = slot
+                    grid[y*columns+col] = slot
+                end
+            end
+            for _, id in ipairs(EntityGetAllChildren(parent) or {}) do
+                local item = EntityGetFirstComponentIncludingDisabled(id,"ItemComponent")
+                if item then
+                    local kind = NHNative.kind(id) or NHTransfers.item_kind(id) or "other"
+                    local x,y = ComponentGetValue2(item,"inventory_slot")
+                    if x and y and x>=0 and y>=0 and x<(full and columns or 4) and y<rows then
+                        local slot = grid[y*columns+x+(not full and kind~="wand" and 4 or 0)]
+                        if slot then
+                            slot.entity,slot.kind = id,kind
+                            slot.icon = ComponentGetValue2(item,"ui_sprite")
+                        end
                     end
                 end
             end
-            rows[#rows+1] = {entity=id, kind=kind, icon=icon, name=GameTextGetTranslatedOrNot(name or ""),
-                slot=ComponentGetValue2(item, "inventory_slot") or -1}
         end
     end
-    table.sort(rows, function(a,b)
-        if a.slot ~= b.slot then return a.slot < b.slot end
-        return a.entity < b.entity
-    end)
-    return rows
+    return slots
+end
+
+local function matching_slot(player, wanted)
+    for _, slot in ipairs(native_slots(player)) do
+        if slot.parent==wanted.parent and slot.lane==wanted.lane and
+            slot.xslot==wanted.xslot and slot.yslot==wanted.yslot then return slot end
+    end
+end
+
+local function place_in_slot(player, id, slot)
+    local live = matching_slot(player,slot)
+    if not live or live.entity or EntityGetRootEntity(id) ~= id then return false end
+    local item = EntityGetFirstComponentIncludingDisabled(id,"ItemComponent")
+    if not item then return false end
+    local kind = NHTransfers.item_kind(id)
+    local lane = kind=="spell" and "spell" or (kind=="wand" and "wand" or "tool")
+    if lane ~= slot.lane then return false end
+    if lane=="spell" then
+        EntityAddChild(slot.parent,id)
+    else
+        GamePickUpInventoryItem(player,id,false)
+        if EntityGetParent(id)~=slot.parent then return false end
+    end
+    ComponentSetValue2(item,"inventory_slot",slot.xslot,slot.yslot)
+    EntitySetComponentsWithTagEnabled(id,"enabled_in_hand",false)
+    EntitySetComponentsWithTagEnabled(id,"enabled_in_world",false)
+    EntitySetComponentsWithTagEnabled(id,"enabled_in_inventory",true)
+    local inv = EntityGetFirstComponentIncludingDisabled(player,"Inventory2Component")
+    ComponentSetValue2(inv,"mForceRefresh",true)
+    local x,y = ComponentGetValue2(item,"inventory_slot")
+    return EntityGetParent(id)==slot.parent and x==slot.xslot and y==slot.yslot
 end
 
 local function has_belt_space(player, kind)
@@ -310,53 +355,38 @@ local function dispatch(player, action, index)
     if action == "close" then close_panel(); return end
     if not opened or not active_run() then return end
     if case_open then
-        local kind
-        if action == "take_pouch" or action == "take_dose" then kind = "item"
-        elseif action == "secure_withdraw" and state.safe[index] then kind = state.safe[index].item.kind end
-        if kind and not has_belt_space(player, kind) then
-            report(tr("对应的快捷栏已满，请先腾出一格。", "Free a matching quickbar slot first."))
-            return
+        if not GameIsInventoryOpen() or type(index) ~= "table" then return end
+        local slot = matching_slot(player,index)
+        if not slot then return end
+        local ok,result
+        if action=="place" or action=="cancel_native" then
+            local id = index.entity
+            if not id or not EntityGetIsAlive(id) then return end
+            -- Vanilla can complete its outside-inventory throw before the post
+            -- callback. Reclaim only this drag's original entity and empty slot.
+            if not slot.entity and EntityGetRootEntity(id)==id then
+                if not place_in_slot(player,id,slot) then return end
+            elseif slot.entity~=id then return end
+            local inv = EntityGetFirstComponentIncludingDisabled(player,"Inventory2Component")
+            if ComponentGetValue2(inv,"mThrowItem")==id then ComponentSetValue2(inv,"mThrowItem",0) end
+            if action=="cancel_native" then return end
+            local kind = NHNative.kind(id)
+            if kind=="pouch" then ok,result=NHDoses.storePouch(state,player,id)
+            elseif kind=="dose" then ok,result=NHDoses.deposit(state,player,id)
+            else ok,result=NHTransfers.deposit(state,player,"safe",id,index.safeSlot) end
+        else
+            if slot.entity then return end
+            local function deliver(id) return place_in_slot(player,id,slot) end
+            if action=="take_pouch" then ok,result=NHDoses.takePouch(state,player,deliver)
+            elseif action=="take_dose" then ok,result=NHDoses.withdraw(state,player,deliver)
+            elseif action=="secure_withdraw" then
+                local row = NHStore.safeIndex(state,index.safeSlot)
+                if not row or state.safe[row].id~=index.storedId then return end
+                ok,result=NHTransfers.withdraw(state,player,row,"safe",deliver)
+            else return end
         end
-        local ok, result
-        if action == "take_pouch" then
-            ok, result = NHDoses.takePouch(state, player)
-            if ok then
-                local collected = collect_item(player, result)
-                feedback(collected and tr("针剂包已取回。", "Pouch returned to inventory.")
-                    or tr("针剂包在脚边。", "Pouch dropped at your feet."))
-            end
-        elseif action == "take_dose" then
-            ok, result = NHDoses.withdraw(state, player)
-            if ok then
-                local collected = collect_item(player, result)
-                feedback(collected and tr("针剂已放进快捷栏，选中后点击注射。", "Injector on your belt. Select it and use it.")
-                    or tr("针剂在脚边，可按拾取键拿起。", "Injector at your feet. Pick it up when ready."))
-            end
-        elseif action == "place" then
-            local carried = false
-            for _, id in ipairs(NHTransfers.carried(player)) do
-                if id == index then carried = true; break end
-            end
-            if not carried then
-                report(tr("所选物品已移走。", "Selected item is no longer available.")); return
-            end
-            if NHNative.kind(index) == "pouch" then
-                ok, result = NHDoses.storePouch(state, player, index)
-            elseif NHNative.kind(index) == "dose" and state.pouch.location == "safe" then
-                ok, result = NHDoses.deposit(state, player, index)
-            else
-                ok, result = NHTransfers.deposit(state, player, "safe", index)
-            end
-            if ok then feedback(tr("已放入。", "Item stored.")) end
-        elseif action == "secure_withdraw" then
-            ok, result = NHTransfers.withdraw(state, player, index, "safe")
-            if ok then
-                local collected = collect_item(player, result)
-                feedback(collected and tr("已取到快捷栏。", "Moved to your quick inventory.")
-                    or tr("已取出，请在脚边拾取。", "Withdrawn. Pick it up at your feet."))
-            end
-        else return end
-        if not ok then transfer_error(result, action == "place" and index) end
+        if not ok then transfer_error(result,action=="place" and index.entity)
+        else status="" end
         return
     end
     if not near_home(player) then close_panel(); return end
@@ -422,7 +452,8 @@ end
 function OnWorldPreUpdate()
     if not opened and not mouse_release then return end
     local player = current_player()
-    if not player or GameIsInventoryOpen() then
+    if GameIsInventoryOpen() then return end
+    if not player then
         opened, case_open, mouse_release = false, nil, false
         return
     end
@@ -442,7 +473,6 @@ function OnWorldPostUpdate()
     if not player or not active_run() then opened, case_open = false, nil; return end
     local inventory_open = GameIsInventoryOpen()
     local used = NHNative.pressed(player, inventory_open or opened or mouse_release)
-    if inventory_open then opened, case_open = false, nil; return end
     local frame = GameGetFrameNum()
     if frame % 60 == 0 then
         local ok, err = NHTransfers.reconcile(state, player)
@@ -451,13 +481,15 @@ function OnWorldPostUpdate()
     end
     local nearby = near_home(player)
     local was_open = opened
-    if opened then
+    if inventory_open then
+        opened,case_open=true,true
+    elseif case_open then
+        close_panel()
+    elseif opened then
         local out_of_reach = not case_open and not nearby
-        if out_of_reach or InputIsKeyJustDown(11) or (case_open and InputIsKeyJustDown(10)) then close_panel() end
+        if out_of_reach or InputIsKeyJustDown(11) then close_panel() end
     elseif InputIsKeyJustDown(11) and nearby then -- H: spawn hideout
         opened, case_open = true, nil
-    elseif InputIsKeyJustDown(10) then
-        opened, case_open = true, true
     elseif used then
         local item = NHNative.held(player)
         local kind = NHNative.kind(item)
@@ -468,7 +500,7 @@ function OnWorldPostUpdate()
     end
     if not active_run() then return end
     local model = opened and inventory_view() or {}
-    if opened and case_open then model.carried = case_inventory(player) end
+    if opened and case_open then model.native_slots = native_slots(player) end
     model.mode = case_open and "case" or "home"
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
 
@@ -476,8 +508,7 @@ function OnWorldPostUpdate()
     model.active = opened and find_stimulant(player) ~= nil
     NHUI.draw(model, function(action, index)
         -- Ignore transfers on the frame that opens the panel.
-        if action == "open_case" and not opened then opened, case_open = true, true
-        elseif was_open and opened then dispatch(player, action, index) end
+        if was_open and opened then dispatch(player, action, index) end
     end)
 end
 

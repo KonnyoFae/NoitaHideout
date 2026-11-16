@@ -89,11 +89,12 @@ function NHPotion.discard(id, p)
     entities[id].safely_emptied = true
     if p then GameKillInventoryItem(p, id) else EntityKill(id) end
 end
-NHStore = {commit = function(s)
+dofile("mods/noita_hideout/files/store.lua")
+NHStore.commit = function(s)
     if fail then return nil, "rejected" end
     s.revision = s.revision + 1
     return true
-end}
+end
 dofile("mods/noita_hideout/files/transfers.lua")
 local function state()
     return {warehouse = {}, safe = {}, nextItemId = 1, runSerial = 1, revision = 0, profile = 1}
@@ -181,3 +182,11 @@ assert(not NHTransfers.deposit(s, player, "warehouse", ground_item) and EntityGe
 local nested = make("potion", true)
 entities[nested].parent = other
 assert(not NHTransfers.deposit(s, player, "warehouse", nested) and EntityGetIsAlive(nested))
+
+assert(NHStore.expandSafe(s,4))
+local extra = make("wand",true)
+assert(NHTransfers.deposit(s,player,"safe",extra,4))
+assert(not NHTransfers.withdraw(s,player,2,"safe",function() return false end))
+assert(s.safe[2].slot==4 and #s.safe==2)
+assert(NHTransfers.withdraw(s,player,1,"safe"))
+assert(NHStore.safeIndex(s,4)==1 and not NHStore.safeIndex(s,1))

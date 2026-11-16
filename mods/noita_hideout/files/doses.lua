@@ -55,7 +55,7 @@ function NHDoses.isPouch(s, entity)
     return c and ComponentGetValue2(c, "value_string") == s.pouch.token
 end
 
-function NHDoses.takePouch(s, player)
+function NHDoses.takePouch(s, player, deliver)
     if not is_open_run(s) or s.pouch.location ~= "safe" then return nil, "Pouch unavailable." end
     local x, y = EntityGetTransform(player)
     local id, err = NHNative.spawn("pouch", x, y - 4)
@@ -70,8 +70,12 @@ function NHDoses.takePouch(s, player)
     end
     changed.pouch.location, changed.pouch.token = "bag", token
     changed.nextItemId = changed.nextItemId + 1
+    if deliver and not deliver(id) then
+        dispose(player, id)
+        return nil, "Inventory slot changed."
+    end
     local ok, reason = commit(s, changed)
-    if not ok then EntityKill(id); return nil, reason end
+    if not ok then dispose(player, id); return nil, reason end
     GlobalsSetValue(receipt(token), "1")
     return true, id
 end
@@ -88,7 +92,7 @@ function NHDoses.storePouch(s, player, id)
     return true
 end
 
-function NHDoses.withdraw(s, player)
+function NHDoses.withdraw(s, player, deliver)
     if not is_open_run(s) then return nil, "Run already closed." end
     if s.pouch.location == "lost" or s.pouch.doses < 1 then return nil, "No dose available." end
     if s.pouch.location == "bag" and not NHDoses.isPouch(s, NHNative.held(player)) then return nil, "Hold your injector pouch first." end
@@ -108,8 +112,12 @@ function NHDoses.withdraw(s, player)
     changed.nextItemId = changed.nextItemId + 1
     changed.pouch.doses = changed.pouch.doses - 1
     changed.issuedDoses[token] = {x = x, y = y}
+    if deliver and not deliver(entity) then
+        dispose(player, entity)
+        return nil, "Inventory slot changed."
+    end
     local ok, problem = commit(s, changed)
-    if not ok then EntityKill(entity); return nil, problem end
+    if not ok then dispose(player, entity); return nil, problem end
     GlobalsSetValue(receipt(token), "1")
     return true, entity
 end

@@ -18,7 +18,8 @@ function GuiColorSetForNextWidget() end
 function GuiImageNinePiece() end
 function GuiImage() end
 function GuiTooltip() end
-function GuiGetImageDimensions() return 14, 8 end
+function GuiGetImageDimensions() return 20,20 end
+function MagicNumbersGetValue(k) return k=="UI_FULL_INVENTORY_OFFSET_X" and "170" or "20" end
 function GuiGetTextDimensions(_, value, scale)
     local w = 0
     for letter in value:gmatch("[^\128-\191][\128-\191]*") do
@@ -44,48 +45,48 @@ local function render(model, widget)
     return action, argument
 end
 
-local model={lang="en", open=false, near=false, status=""}
-assert(render(model,2)=="open_case")
-model.open, model.mode, model.pouch_location, model.case_count=true,"case","safe",2
-model.revision,model.carried=4,{{kind="wand",entity=42,name="Wand"},{kind="dose",entity=43,name="Dose"}}
+local function native(lane,col,x,id,kind)
+    return {key="native",lane=lane,col=col,xslot=x,yslot=0,entity=id,kind=kind,parent=lane=="spell" and 3 or 2}
+end
+local model={lang="en",open=false,near=false,status=""}
+assert(not render(model,2))
+model.open,model.mode,model.pouch_location,model.case_count=true,"case","safe",2
+model.capacity,model.revision,model.secure_loot=4,1,{}
+model.native_slots={native("wand",0,0,42,"wand"),native("tool",4,0,43,"dose"),
+    native("spell",0,0,44,"spell"),native("spell",5,5),native("tool",6,2),native("wand",3,3)}
 local function point(x,y,event)
-    pointer={x=width-187-5+x,y=height-116-5+y,down=event=="press" or event=="hold",
-        pressed=event=="press",released=event=="release"}
+    pointer={x=x,y=y,down=event=="press",pressed=event=="press",released=event=="release"}
     return render(model)
 end
+local cx,cy=width-187-5,height-72-5
 render(model)
-assert(not point(12,77,"press"))
-assert(not point(12,77,"release"),"clicking a source must not transfer it")
-point(12,77,"press")
-assert(not point(12,36,"release"),"wand cannot go in pouch")
-point(12,77,"press")
-local cmd,id=point(123,36,"release")
-assert(cmd=="place" and id==42)
-point(35,77,"press")
-cmd,id=point(12,36,"release")
-assert(cmd=="place" and id==43)
-point(12,36,"press")
-assert(point(164,78,"release")=="take_pouch")
-point(65,36,"press")
-assert(point(65,78,"release")=="take_dose")
-model.secure_loot,model.secure_kind,model.secure_id={"Starter wand"},"wand",15
-point(123,36,"press")
-assert(not point(12,77,"release"),"occupied target")
-point(123,36,"press")
-assert(not point(-20,-10,"release"),"outside cancels")
-point(123,36,"press")
-cmd,id=point(164,78,"release")
-assert(cmd=="secure_withdraw" and id==1)
-point(123,36,"press")
-model.secure_id=16
-assert(not point(164,78,"release"),"stored source was replaced")
-point(35,77,"press")
-model.carried[2]=nil
-assert(not point(12,36,"release"),"carried source was removed")
-point(12,36,"press")
+point(28,28,"press")
+local cmd,arg=point(cx+123,cy+36,"release")
+assert(cmd=="place" and arg.entity==42 and arg.safeSlot==1)
+point(198,28,"press")
+cmd,arg=point(cx+144,cy+36,"release")
+assert(cmd=="place" and arg.entity==44 and arg.safeSlot==2)
+model.secure_loot[2]={kind="spell",name="Bomb",id=22}
+point(cx+144,cy+36,"press")
+assert(not point(88,28,"release"),"spell cannot go in wand row")
+point(cx+144,cy+36,"press")
+cmd,arg=point(298,28,"release")
+assert(cmd=="secure_withdraw" and arg.xslot==5 and arg.storedId==22 and arg.safeSlot==2)
+point(cx+12,cy+36,"press")
+cmd,arg=point(148,28,"release")
+assert(cmd=="take_pouch" and arg.xslot==2)
+point(108,28,"press")
+cmd,arg=point(cx+12,cy+36,"release")
+assert(cmd=="place" and arg.entity==43)
+point(198,28,"press")
+assert(not point(298,28,"release"),"vanilla reorder")
+render(model,36)
+point(198,28,"press")
+cmd,arg=point(cx+123,cy+36,"release")
+assert(arg.safeSlot==4)
+point(cx+12,cy+36,"press")
 model.open=false
 render(model)
 model.open=true
-assert(not point(164,78,"release"),"closing cancels")
-assert(render(model,11)=="close")
-print("Case HUD: drag both ways, correct entity, incompatible targets, stale items and cancellation passed.")
+assert(not point(148,28,"release"))
+print("Native inventory drag, spell row, exact slot, upgrade pages and close cancellation passed.")

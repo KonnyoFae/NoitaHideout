@@ -84,6 +84,7 @@ end
 
 function NHTransfers.item_kind(entity)
     if EntityHasTag(entity, "wand") then return "wand" end
+    if EntityGetFirstComponentIncludingDisabled(entity,"ItemActionComponent") then return "spell" end
     if NHPotion.isFlask(entity) then return "potion" end
     local ability = EntityGetFirstComponentIncludingDisabled(entity, "AbilityComponent")
     if ability and ComponentGetValue2(ability, "use_gun_script") then return "wand" end
@@ -102,6 +103,7 @@ local function dispose(entity, player)
 end
 
 local function codec(kind)
+    if kind == "spell" then return NHSpell end
     if kind == "wand" then return NHWand end
     if kind == "potion" then return NHPotion end
 end
@@ -149,12 +151,15 @@ local function quick_item(player, item)
     return false
 end
 
-function NHTransfers.deposit(s, player, container, selected)
+function NHTransfers.deposit(s, player, container, selected, preferred)
     local dest = container_name(container)
     if not dest then return nil, "Unknown container." end
     local inv = EntityGetFirstComponentIncludingDisabled(player, "Inventory2Component")
     local item = selected or (inv and ComponentGetValue2(inv, "mActiveItem"))
-    if not quick_item(player, item) then
+    local parent = item and item ~= 0 and EntityGetIsAlive(item) and EntityGetParent(item)
+    local loose = dest == "safe" and parent and parent ~= 0 and EntityGetName(parent) == "inventory_full"
+        and EntityGetParent(parent) == player and NHTransfers.item_kind(item) == "spell"
+    if not loose and not quick_item(player, item) then
         if selected then return nil, "The selected item is no longer in your quick inventory." end
         return nil, "Hold a wand or flask first."
     end
@@ -166,7 +171,11 @@ function NHTransfers.deposit(s, player, container, selected)
             return nil, "The stored item was already transferred."
         end
     end
-    if dest == "safe" and #s.safe >= 1 then return nil, "Secure valuables slot is full." end
+    local slot
+    if dest == "safe" then
+        slot = NHStore.freeSafeSlot(s,preferred)
+        if not slot then return nil, "Secure valuables slot is full." end
+    end
 
     local kind = NHTransfers.item_kind(item)
     local adapter = codec(kind)
@@ -181,7 +190,7 @@ function NHTransfers.deposit(s, player, container, selected)
 
     local changed = draft(s)
     changed.nextItemId = id + 1
-    table.insert(changed[dest], {id = id, item = record, origin = source})
+    table.insert(changed[dest], {id = id, item = record, origin = source, slot = slot})
     -- Keep retirement after a stored flask's contents are spent or the item
     -- is withdrawn. A replayed source object must never become spendable.
     changed.transit.retired[source] = true
@@ -192,7 +201,7 @@ function NHTransfers.deposit(s, player, container, selected)
     return true
 end
 
-function NHTransfers.withdraw(s, player, index, container)
+function NHTransfers.withdraw(s, player, index, container, deliver)
     local src = container_name(container)
     if not src then return nil, "Unknown container." end
     local row = s[src][index]
@@ -209,6 +218,10 @@ function NHTransfers.withdraw(s, player, index, container)
         return nil, "Could not mark the delivery; item remains in storage."
     end
 
+    if deliver and not deliver(entity) then
+        dispose(entity, player)
+        return nil, "Inventory slot changed."
+    end
     local changed = draft(s)
     table.remove(changed[src], index)
     changed.nextItemId = ticket + 1
@@ -270,9 +283,13 @@ function NHTransfers.reconcile(s, player)
                 math.ceil(release.x) + 16, math.ceil(release.y) + 16) then
             changed = changed or draft(s)
             local dest = release.container
-            if dest == "safe" and #changed.safe >= 1 then dest = "warehouse" end
+            local row = copy(release.row)
+            if dest == "safe" then
+                row.slot = NHStore.freeSafeSlot(changed,row.slot or 1) or NHStore.freeSafeSlot(changed)
+                if not row.slot then dest = "warehouse" end
+            end
             if not ids[release.row.id] then
-                table.insert(changed[dest], release.row)
+                table.insert(changed[dest], row)
                 ids[release.row.id] = true
             end
             changed.transit.retired[token] = true

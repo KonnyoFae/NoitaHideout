@@ -32,7 +32,8 @@ local function fit(value, available, scale)
 end
 
 local drag, last_case_frame
-local carried_page = 1
+local page = 1
+local full_tile = "data/ui_gfx/inventory/full_inventory_box.png"
 local tile = "data/ui_gfx/inventory/quick_inventory_box.png"
 local icons = {
     pouch = "mods/noita_hideout/files/items/pouch.png",
@@ -40,10 +41,10 @@ local icons = {
     wand = "data/items_gfx/handgun.png", potion = "data/items_gfx/potion.png",
 }
 
-local function draw_case(model, ox, oy, scale, sw, sh, tr, label, button, dispatch)
+local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
     local frame = GameGetFrameNum()
     local fresh = last_case_frame ~= frame - 1
-    if fresh then drag, carried_page = nil, 1 end
+    if fresh then drag,page = nil,1 end
     last_case_frame = frame
     local wx, wy = DEBUG_GetMouseWorld()
     local cx, cy, cw, ch = GameGetCameraBounds()
@@ -55,52 +56,67 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, button, dispat
     end
 
     local protected = model.pouch_location == "safe"
-    local valuable = (model.secure_loot or {})[1]
+    local pages = math.ceil(model.capacity/3)
+    page = math.min(page,pages)
+    if pages>1 then
+        if GuiButton(gui,35,ox+110*scale,oy+5*scale,"<",scale) and not drag then page=math.max(1,page-1) end
+        label(130,5,page.."/"..pages,31,muted)
+        if GuiButton(gui,36,ox+167*scale,oy+5*scale,">",scale) and not drag then page=math.min(pages,page+1) end
+    end
     label(8,19,tr("针剂包", "Pouch"),46,muted)
     label(61,19,tr("针剂", "Injector"),46,muted)
     label(119,19,tr("贵重物品", "Valuable"),60,muted)
     slot(8,32,"pouch",protected and "pouch",tr("针剂包", "Injector pouch"))
     slot(61,32,"dose",protected and model.case_count > 0 and "dose",tr("取一支针剂", "Take one injector"))
-    slot(119,32,"valuable",model.secure_kind,valuable or tr("贵重物品格", "Valuable slot"),model.secure_icon,model.secure_id)
+    for i=1,math.min(3,model.capacity-(page-1)*3) do
+        local n = (page-1)*3+i
+        local v = model.secure_loot[n] or {}
+        slot(119+21*(i-1),32,"valuable",v.kind,v.name or tr("贵重物品格","Valuable slot"),v.icon,v.id)
+        slots[#slots].safeSlot=n
+    end
     if protected then label(85,36,"×"..model.case_count,29,muted) end
 
-    local carried = model.carried or {}
-    local pages = math.max(1, math.ceil(#carried/6))
-    carried_page = math.min(pages, carried_page)
-    label(8,59,tr("随身物品", "Carried items"),93,white)
-    if pages > 1 then
-        if not drag and button(35,102,59,"<") then carried_page = math.max(1,carried_page-1) end
-        label(116,59,carried_page.."/"..pages,27,muted)
-        if not drag and button(36,144,59,">") then carried_page = math.min(pages,carried_page+1) end
+    local native_x = tonumber(MagicNumbersGetValue("UI_BARS_POS_X"))
+    local native_y = tonumber(MagicNumbersGetValue("UI_BARS_POS_Y"))
+    local full_offset = tonumber(MagicNumbersGetValue("UI_FULL_INVENTORY_OFFSET_X"))
+    local qw,qh = GuiGetImageDimensions(gui,tile)
+    local fw,fh = GuiGetImageDimensions(gui,full_tile)
+    local hovered
+    -- Hit-test the vanilla widgets without drawing over them or consuming
+    -- their clicks. Normal reordering and wand editing remain engine-owned.
+    for _, v in ipairs(model.native_slots) do
+        local full = v.lane=="spell"
+        local w,h = full and fw or qw,full and fh or qh
+        local x = native_x + (full and full_offset or 0) + v.col*w
+        local y = native_y + v.yslot*h
+        if mx>=x and my>=y and mx<x+w and my<y+h then hovered=v; break end
     end
-    for i=1,6 do
-        local item = carried[(carried_page-1)*6+i]
-        slot(8+(i-1)*23,73,"belt",item and item.kind,item and item.name,item and item.icon,item and item.entity)
+    for _,v in ipairs(slots) do
+        if mx>=v.x and my>=v.y and mx<v.x+20*scale and my<v.y+20*scale then hovered=v end
     end
-    -- Always offer a return target, even when this page shows six occupied tiles.
-    slot(158,73,"return",nil,tr("取回随身栏", "Return to inventory"))
-    local hovered, source
-    for _, v in ipairs(slots) do
-        if mx >= v.x and my >= v.y and mx < v.x+20*scale and my < v.y+20*scale then hovered=v end
-        if drag and drag.key==v.key and drag.entity==v.entity and drag.kind==v.kind then source=v end
+    if not hovered and mx>=ox and my>=oy and mx<ox+187*scale and my<oy+72*scale then
+        hovered = {key="panel"}
     end
-    if drag and (not source or model.revision ~= drag.revision) then drag=nil; source=nil end
-    if not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind and hovered.kind ~= "other" then
-        drag={key=hovered.key, entity=hovered.entity, kind=hovered.kind, revision=model.revision}
-        source=hovered
+    if drag and model.revision~=drag.revision then drag=nil end
+    if not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind then
+        drag={source=hovered,revision=model.revision}
     end
+    local source=drag and drag.source
     local function drop(target)
         if not source or not target then return end
-        if source.key=="belt" then
+        if source.key=="native" then
             if (target.key=="pouch" and ((source.kind=="pouch" and not protected) or (source.kind=="dose" and protected)))
                 or (target.key=="dose" and source.kind=="dose" and protected)
-                or (target.key=="valuable" and not valuable and (source.kind=="wand" or source.kind=="potion")) then
-                return "place",source.entity
+                or (target.key=="valuable" and not target.entity and (source.kind=="wand" or source.kind=="potion" or source.kind=="spell")) then
+                return "place",source,target.safeSlot
             end
-        elseif target.key=="return" or (target.key=="belt" and not target.entity) then
-            if source.key=="pouch" then return "take_pouch" end
-            if source.key=="dose" then return "take_dose" end
-            if source.key=="valuable" then return "secure_withdraw",1 end
+            if target.key~="native" then return "cancel_native",source end
+        elseif target.key=="native" and not target.entity then
+            local lane=source.kind=="spell" and "spell" or (source.kind=="wand" and "wand" or "tool")
+            if target.lane~=lane then return end
+            if source.key=="valuable" then return "secure_withdraw",target,source.safeSlot,source.entity end
+            if source.key=="dose" then return "take_dose",target end
+            if source.key=="pouch" then return "take_pouch",target end
         end
     end
     local function sprite(v,id,x,y,alpha)
@@ -117,22 +133,26 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, button, dispat
         GuiImage(gui,id,x-w*zoom/2,y-h*zoom/2,image,alpha,zoom)
     end
     for i,v in ipairs(slots) do
-        if drop(v) then tint(green) end
+        if drop(v)=="place" then tint(green) end
         GuiImage(gui,100+i,v.x,v.y,tile,1,scale)
-        if v.kind then sprite(v,130+i,v.x+10*scale,v.y+10*scale,source==v and 0.35 or 1)
-        elseif v.key=="return" then label(164,77,"+",12,green) end
+        if v.kind then sprite(v,130+i,v.x+10*scale,v.y+10*scale,source and source.key==v.key and source.safeSlot==v.safeSlot and 0.35 or 1)
+        end
     end
     local hint = hovered and hovered.name
     if source then
-        sprite(source,160,mx,my,0.95)
-        if hovered and drop(hovered) then hint=tr("松开放置", "Release to place")
-        else hint=tr("拖至可用格，松手放置", "Drag to a highlighted slot") end
+        if source.key~="native" then sprite(source,160,mx,my,0.95) end
+        if hovered and drop(hovered) and drop(hovered)~="cancel_native" then hint=tr("松开放置", "Release to place")
+        else hint=tr("拖至对应空格", "Drag to a matching slot") end
     end
-    label(8,99,hint or (model.status ~= "" and model.status) or tr("拖动物品以存取", "Drag items to transfer"),172,muted)
+    label(8,56,hint or (model.status ~= "" and model.status) or tr("拖动物品以存取", "Drag items to transfer"),172,muted)
     if drag and InputIsMouseButtonJustUp(1) then
-        local action, arg = drop(hovered)
+        local action, arg, safeSlot, storedId = drop(hovered)
         drag=nil
-        if action then dispatch(action,arg) end
+        if action then
+            local request = {parent=arg.parent,lane=arg.lane,xslot=arg.xslot,yslot=arg.yslot,
+                entity=arg.entity,safeSlot=safeSlot,storedId=storedId}
+            dispatch(action,request)
+        end
     elseif not InputIsMouseButtonDown(1) then drag=nil end
 end
 
@@ -145,9 +165,6 @@ function NHUI.draw(model, dispatch)
     local sw, sh = GuiGetScreenDimensions(gui)
     local function tr(zh, en) return model.lang == "zh" and zh or en end
     if not model.open then
-        local caption = tr("[G] 安全箱", "[G] Secure case")
-        local w = GuiGetTextDimensions(gui, caption)
-        if GuiButton(gui, 2, sw - w - 9, sh - 16, caption) then dispatch("open_case") end
         if not model.near then return end
         local caption = tr("[H] 藏身处", "[H] Hideout")
         local text_w = GuiGetTextDimensions(gui, caption)
@@ -161,7 +178,7 @@ function NHUI.draw(model, dispatch)
     end
 
     local case = model.mode == "case"
-    local pw, ph = case and 187 or panel_width, case and 116 or panel_height
+    local pw, ph = case and 187 or panel_width, case and 72 or panel_height
     local s = math.min(1, (sw - 10) / pw, (sh - 10) / ph)
     if s <= 0 then return end
     local ox = case and sw - pw*s - 5 or math.floor((sw - pw*s)/2)
@@ -186,13 +203,12 @@ function NHUI.draw(model, dispatch)
     end
 
     label(9, 5, case and tr("安全箱", "Secure case") or tr("藏身处", "Hideout"), case and 98 or 198, white)
-    command(11, case and 151 or 252, 5, tr("关闭", "Close"), "close")
     if case then
-        if next_action then drag=nil; dispatch(next_action); return end
-        draw_case(model,ox,oy,s,sw,sh,tr,label,button,dispatch)
+        draw_case(model,ox,oy,s,sw,sh,tr,label,dispatch)
         return
     end
 
+    command(11,252,5,tr("关闭","Close"),"close")
     local tabs = {
         { "stash", tr("仓库", "Stash") },
         { "orders", tr("生产", "Production") },

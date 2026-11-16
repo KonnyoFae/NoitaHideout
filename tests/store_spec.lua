@@ -163,6 +163,10 @@ assert(NHStore.restock(trial))
 blocked_key, blocked_value, fail_after = head_key, 3, true
 trial = save(trial)
 assert(trial.revision == 3 and trial.pouch.doses == 2)
+assert(NHStore.expandSafe(trial,7))
+trial=save(trial)
+assert(NHStore.safeCapacity(trial)==7 and not NHStore.expandSafe(trial,6))
+assert(NHStore.safeCapacity({safe={}})==1)
 settings[head_key] = nil
 assert(not NHStore.load())  -- Missing head on established data cannot reset inventory.
 print("Store: safe/carry loss, paid production, no double reward, save isolation and recovery passed.")

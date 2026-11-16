@@ -1,3 +1,3 @@
 <Mod name="Hideout Prototype | 藏身处测试版"
-     description="0.3.1 | G opens the secure inventory. Drag items between your belt and secure slots. H opens the warehouse at spawn."
+     description="0.4.0 | Open your inventory to access the secure case. Drag gear or loose spells to and from native slots. H opens the warehouse at spawn."
      request_no_api_restrictions="0" />

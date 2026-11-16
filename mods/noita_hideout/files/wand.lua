@@ -311,10 +311,17 @@ local function capture_card(entity, action)
     local id = get(action, "action_id")
     assert(type(id) == "string" and id ~= "", "Spell has no action ID")
     assert(not (EntityGetAllChildren(entity) or {})[1], "Unsupported spell attachment: " .. id)
-    assert(not first(entity, "VariableStorageComponent"), "Unsupported spell variable: " .. id)
+    local stack
+    for _, var in ipairs(EntityGetComponentIncludingDisabled(entity,"VariableStorageComponent") or {}) do
+        local name = get(var,"name")
+        if name == "stackable_spells_count" then
+            stack = get(var,"value_int")
+            assert(stack >= 1 and stack == math.floor(stack), "Invalid spell stack")
+        else assert(name == transfer_marker, "Unsupported spell variable: " .. tostring(name)) end
+    end
     local item = required(entity, "ItemComponent")
     local x, y = get(item, "inventory_slot")
-    return {id = id, x = x, y = y, item = fields(item, card_fields), pickups = pickup_states(entity, id)}
+    return {id = id, stack = stack, x = x, y = y, item = fields(item, card_fields), pickups = pickup_states(entity, id)}
 end
 
 local function capture(entity)
@@ -378,13 +385,11 @@ local function prepare(entity)
     return ability
 end
 
-local function add_card(entity, card, x, y, restoring)
-    local child = CreateItemActionEntity(card.id, x, y)
-    assert(child and child ~= 0, "Unavailable spell: " .. card.id)
-    EntityAddChild(entity, child) -- also owns cleanup if a later check fails
+local function configure_card(child, card, restoring)
     assert(get(required(child, "ItemActionComponent"), "action_id") == card.id, "Spell unavailable: " .. card.id)
     local item = required(child, "ItemComponent")
     apply(item, card.item)
+    if card.stack then assert(EntityAddComponent2(child,"VariableStorageComponent",{name="stackable_spells_count", value_int=card.stack})) end
     set(item, "inventory_slot", card.x, card.y)
     EntitySetComponentsWithTagEnabled(child, "enabled_in_hand", false)
     EntitySetComponentsWithTagEnabled(child, "enabled_in_world", false)
@@ -399,6 +404,39 @@ local function add_card(entity, card, x, y, restoring)
             end
         end
     end
+end
+
+local function add_card(entity, card, x, y, restoring)
+    local child = CreateItemActionEntity(card.id, x, y)
+    assert(child and child ~= 0, "Unavailable spell: " .. card.id)
+    EntityAddChild(entity, child)
+    configure_card(child, card, restoring)
+end
+
+NHSpell = {}
+function NHSpell.capture(entity)
+    local ok, result = pcall(function()
+        local card = capture_card(entity, required(entity,"ItemActionComponent"))
+        local item = required(entity,"ItemComponent")
+        assert(not first(entity,"ItemCostComponent"), "Cannot store a shop spell")
+        local icon = get(item,"ui_sprite")
+        if not icon or icon == "" then
+            local sprite = first(entity,"SpriteComponent")
+            icon = sprite and get(sprite,"image_file")
+        end
+        return {kind="spell", name=get(item,"item_name"), icon=icon, card=card}
+    end)
+    if ok then return result end
+    return nil, tostring(result)
+end
+
+function NHSpell.restore(record,x,y)
+    local child = CreateItemActionEntity(record.card.id,x,y)
+    if not child or child == 0 then return nil, "Unavailable spell: " .. record.card.id end
+    local ok, reason = pcall(configure_card,child,record.card,true)
+    if ok then return child end
+    EntityKill(child)
+    return nil,tostring(reason)
 end
 
 local function build(path, x, y, configure)
