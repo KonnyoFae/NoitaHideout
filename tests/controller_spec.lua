@@ -475,9 +475,10 @@ local alchemy=assert(has_project(catalog,"stable"))
 assert(alchemy.category=="alchemy" and alchemy.unlocked and not alchemy.ready and alchemy.reason)
 local reverse=assert(has_project(catalog,"reverse_stable"))
 assert(reverse.category=="alchemy" and reverse.unlocked and #reverse.inputs==1 and #reverse.outputs==2)
-local expected_category={medical="medical",medkit_essence="medical",injector="medical",injector_essence="medical",
+local expected_category={medical="medical",injector="medical",injector_essence="medical",
     grenade="weapons",grenade_essence="weapons",pouch="equipment"}
-for _,id in ipairs({"medical","medkit_essence","injector","injector_essence","grenade","grenade_essence","pouch"}) do
+assert(not has_project(catalog,"medkit_essence"))
+for _,id in ipairs({"medical","injector","injector_essence","grenade","grenade_essence","pouch"}) do
     local locked=assert(has_project(catalog,id))
     assert(locked.category==expected_category[id] and not locked.unlocked and not locked.ready)
     assert(locked.facility_name and locked.reason:find(locked.facility_name,1,true))
@@ -562,13 +563,9 @@ assert(state().resources.arcane_scrap==1 and not tick().warehouse.spell)
 do
     local key=NHEssences.byAction.HEAL_BULLET
     local profile=NHEssences.healingProfiles.HEAL_BULLET
-    local medkit=assert(has_project(tick().recipes,"medkit_essence"))
-    assert(medkit.unlocked and not medkit.ready and medkit.reason=="Not enough workshop resources.")
-    assert(#medkit.inputs==1 and medkit.inputs[1].available==0 and medkit.inputs[1].amount==30)
-    assert(medkit.inputs[1].name==NHEssences.types[key].en)
     for _,test in ipairs({{"grenade_essence","essence_high_energy",30},{"injector_essence","essence_fire",180}}) do
         local recipe=assert(has_project(tick().recipes,test[1]))
-        assert(recipe.unlocked and not recipe.ready and recipe.reason==medkit.reason)
+        assert(recipe.unlocked and not recipe.ready and recipe.reason=="Not enough workshop resources.")
         assert(#recipe.inputs==1 and recipe.inputs[1].name==NHEssences.types[test[2]].en)
         assert(recipe.inputs[1].available==0 and recipe.inputs[1].amount==test[3])
     end
@@ -589,9 +586,7 @@ do
         assert(balance.amount==(balance.key==key and 3*profile.amount or 0))
         assert(balance.name==NHEssences.types[balance.key].en)
     end
-    medkit=assert(has_project(tick().recipes,"medkit_essence"))
-    assert(medkit.ready and medkit.inputs[1].available==3*profile.amount)
-    assert(tick().essence_medkit_cost==medkit.inputs[1].amount)
+    assert(not has_project(tick().recipes,"medkit_essence"))
     local previous=GameTextGetTranslatedOrNot
     function GameTextGetTranslatedOrNot(key)
         if key=="$action_teleport_closer" then return "Homebringer Teleport Bolt" end
@@ -1117,6 +1112,34 @@ local function testCatalyticWorkshop()
     assert(not state().materials.gold and state().bankGold==0 and not state().order)
 end
 testCatalyticWorkshop()
+
+local function testLegacyMedkitOrder()
+    settings,flags={},{}
+    new_world()
+    local stock=state()
+    stock.resources.essence_healing=25
+    stock.order={id=stock.finished+1,recipe="medkit_essence",progress=60,required=180,
+        output={slot=1,item={kind="medkit",remaining=3,name="$nh_hideout_medkit"}}}
+    assert(NHStore.commit(stock))
+    local previous=GameTextGetTranslatedOrNot
+    function GameTextGetTranslatedOrNot(key)
+        if key=="$nh_hideout_medkit" then return "Medkit" end
+        return previous(key)
+    end
+    boot()
+    inventory_open=true
+    local view=tick()
+    assert(view.order_active and view.order_name=="Medkit" and view.order_remaining==2)
+    assert(not has_project(view.recipes,"medkit_essence") and view.warehouse.supplies[1].kind=="reserved")
+    advance(60)
+    assert(tick().order_remaining==1)
+    advance(60)
+    local delivered=state()
+    assert(not delivered.order and delivered.warehouse[1].item.kind=="medkit")
+    assert(delivered.resources.essence_healing==25)
+    GameTextGetTranslatedOrNot=previous
+end
+testLegacyMedkitOrder()
 
 local function testSafehouseWandEditing()
     new_world()

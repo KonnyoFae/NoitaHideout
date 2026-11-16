@@ -515,7 +515,6 @@ local function catalyticBatch(id,zh,en,ingredient,catalyst,product)
         materials={[product]=250},count=250}
 end
 
-local medkit={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"}
 local fireInjector={kind="dose",remaining=3,count=1}
 local magicGrenade={kind="grenade",name="$nh_hideout_grenade",icon="mods/noita_hideout/files/items/grenade.png"}
 
@@ -569,9 +568,8 @@ NHStore.recipes={
         materials={void_liquid=500},count=500,
         noteZh="原版列出两份液体产物，每批回收 500。",noteEn="The vanilla reaction yields two parts of liquid. This batch recovers 500."},
     {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",
-        inputs={{name="water",amount=100},{name="blood",amount=50}},item=medkit},
-    {id="medkit_essence",category="medical",facility="medical",zh="医疗包（治疗精华）",en="Medkit (healing essence)",
-        inputs={},resources={essence_healing=30},item=medkit,
+        inputs={{name="water",amount=100},{name="blood",amount=50}},
+        item={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"},
         noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
     {id="injector",category="medical",facility="injector",zh="耐火激活剂",en="Fire injector",inputs={{name="water",amount=100},{name="lava",amount=25}},
         item=fireInjector},

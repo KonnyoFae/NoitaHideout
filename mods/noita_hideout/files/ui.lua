@@ -434,11 +434,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
                 local full=tr("每张满额","Per full card")
                 local detail=salvage.essence.basis
                 if detail then
-                    local cost_per_kit=model.essence_medkit_cost
-                    local kits=math.floor(per_card/cost_per_kit)
-                    detail=detail.."\n"..string.format(
-                        tr("每包 %d 精华，可制 %d 包，余 %d 精华。","%d essence per medkit\nMedkits ×%d, %d essence left."),
-                        cost_per_kit,kits,per_card%cost_per_kit)
+                    detail=detail.."\n"..tr("每 1 点标称治疗量折合 1 个治疗精华。",
+                        "1 HP of potential healing yields 1 healing essence.")
                 else
                     detail=tr("按原版满次数估算伤害或功能价值。\n无限次按 20 次计。超过 375 的部分\n按八分之一折算，整卡四舍五入。",
                         "Priced by damage or utility at full charges.\nUnlimited spells use a 20-cast reference.\nValue above 375 counts at one eighth.\nThe total is rounded to the nearest unit.")

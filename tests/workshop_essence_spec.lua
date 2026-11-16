@@ -10,42 +10,43 @@ local recipes={}
 for _,entry in ipairs(NHStore.recipes) do
     recipes[entry.id]=entry
 end
-local recipe=recipes.medkit_essence
-assert(recipe and recipe.category=="medical" and recipe.facility=="medical")
-local cost=recipe.resources.essence_healing
-assert(cost==30 and recipe.item.kind=="medkit" and recipe.item.remaining==3)
+local recipe=assert(recipes.medical)
+assert(recipe.category=="medical" and recipe.facility=="medical" and not recipe.resources)
+assert(recipe.item.kind=="medkit" and recipe.item.remaining==3)
+assert(not recipes.medkit_essence)
+for _,entry in ipairs(NHStore.recipes) do
+    if entry.item and entry.item.kind=="medkit" then assert(not entry.resources) end
+end
 
 local s=assert(NHStore.load())
 local run=NHStore.newRun(s)
-s.resources.essence_healing=2*cost
+s.resources.essence_healing=175
 assert(not NHStore.startOrder(s,recipe.id) and not s.order)
 s.levels.medical=1
--- The workshop spends only the corresponding hideout resource. A material
--- or unrelated essence of the same amount cannot pay for a missing unit.
-s.materials={essence_healing=cost,water=100,blood=50}
-s.resources.essence_high_energy=cost
-s.resources.essence_healing=cost-1
+local ok,reason=NHStore.startOrder(s,"medkit_essence")
+assert(not ok and reason=="Unknown recipe." and not s.order and s.resources.essence_healing==175)
+s.materials={water=100,blood=49}
 local started,reason=NHStore.startOrder(s,recipe.id)
-assert(not started and reason=="Not enough workshop resources." and not s.order)
-assert(s.resources.essence_healing==cost-1 and s.materials.essence_healing==cost)
+assert(not started and reason=="Not enough bulk ingredients." and not s.order)
+assert(s.materials.water==100 and s.materials.blood==49 and s.resources.essence_healing==175)
 
-s.resources.essence_healing=2*cost
+s.materials.blood=50
 assert(NHStore.commit(s))
 for slot=1,NHStore.warehouseCapacity(s,"supplies") do
     s.warehouse[slot]={slot=slot,id=s.nextItemId,item={kind="medkit",remaining=3}}
     s.nextItemId=s.nextItemId+1
 end
 started,reason=NHStore.startOrder(s,recipe.id)
-assert(not started and reason=="Product storage is full." and s.resources.essence_healing==2*cost)
+assert(not started and reason=="Product storage is full." and s.materials.water==100 and s.materials.blood==50)
 
 s=assert(NHStore.load())
 local stale=assert(NHStore.load())
 assert(NHStore.startOrder(s,recipe.id) and NHStore.commit(s))
-assert(s.resources.essence_healing==cost and s.resources.essence_high_energy==cost)
+assert(not s.materials.water and not s.materials.blood and s.resources.essence_healing==175)
 assert(not NHStore.freeSlot(s,"warehouse",s.order.output.slot,"medkit"))
 assert(NHStore.startOrder(stale,recipe.id) and not NHStore.commit(stale))
 s=assert(NHStore.load())
-assert(not NHStore.startOrder(s,recipe.id) and s.resources.essence_healing==cost)
+assert(not NHStore.startOrder(s,recipe.id) and s.resources.essence_healing==175)
 
 local function deliver()
     assert(s.order and NHStore.commit(s))
@@ -59,13 +60,19 @@ local function deliver()
 end
 deliver()
 assert(#s.warehouse==1 and s.warehouse[1].item.kind=="medkit" and s.warehouse[1].item.remaining==3)
-assert(NHStore.startOrder(s,recipe.id) and not s.resources.essence_healing)
+
+-- A prepaid 0.20.0 order already contains its output and reserved slot.
+-- Loading it in the new version must deliver exactly once without another charge.
+s.order={id=s.finished+1,recipe="medkit_essence",progress=60,required=7200,output={item={
+    kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png",
+},slot=2}}
+s.resources.essence_healing=145
+assert(NHStore.commit(s))
+s=assert(NHStore.load())
+assert(s.order.progress==60 and not NHStore.freeSlot(s,"warehouse",2,"medkit"))
 deliver()
-assert(#s.warehouse==2 and s.warehouse[1].id~=s.warehouse[2].id)
-assert(s.materials.water==100 and s.materials.blood==50 and s.materials.essence_healing==cost)
-assert(NHStore.startOrder(s,"medical") and not s.materials.water and not s.materials.blood)
-deliver()
-assert(#s.warehouse==3 and s.finished==3 and s.resources.essence_high_energy==cost)
+assert(#s.warehouse==2 and s.finished==2 and s.resources.essence_healing==145)
+assert(s.warehouse[2].slot==2 and s.warehouse[2].item.kind=="medkit" and s.warehouse[2].item.remaining==3)
 
 for _,example in ipairs({
     {id="injector_essence",base="injector",category="medical",key="essence_fire",cost=180,kind="dose"},
@@ -79,11 +86,14 @@ for _,example in ipairs({
     assert(not ok and reason=="Facility is locked." and s.resources[example.key]==example.cost)
     s.levels[entry.facility]=1
     s.resources[example.key]=example.cost-1
+    -- A material with a matching name cannot substitute for hideout resources.
+    s.materials[example.key]=example.cost
     ok,reason=NHStore.startOrder(s,entry.id)
     assert(not ok and reason=="Not enough workshop resources." and not s.order)
     s.resources[example.key]=example.cost
     for _,part in ipairs(original.inputs) do s.materials[part.name]=part.amount end
     assert(NHStore.startOrder(s,entry.id) and not s.resources[example.key])
+    assert(s.materials[example.key]==example.cost)
     assert(not NHStore.startOrder(s,entry.id))
     deliver()
     local item=s.warehouse[#s.warehouse].item
@@ -94,10 +104,9 @@ for _,example in ipairs({
     deliver()
     assert(s.warehouse[#s.warehouse].item.kind==example.kind)
 end
-assert(s.finished==7 and #s.warehouse==7)
+assert(s.finished==6 and #s.warehouse==6)
 
--- A spent healing bolt must fund the same five complete medkits as a fresh
--- card. Saving after each delivery preserves the 25 HP of unused buying power.
+-- Healing spells still fund the hideout's healing essence balance.
 s.levels.salvage=1
 local spellId=s.nextItemId
 s.nextItemId=spellId+1
@@ -105,13 +114,7 @@ s.warehouse[#s.warehouse+1]={slot=1,id=spellId,item={
     kind="spell",card={id="HEAL_BULLET",item={uses_remaining=0}},
 }}
 assert(NHStore.salvage(s,{kind="spell",slot=1,id=spellId,mode="essence"}))
-assert(s.resources.essence_healing==175)
-for i=1,5 do
-    assert(NHStore.startOrder(s,"medkit_essence"))
-    deliver()
-    local kit=s.warehouse[#s.warehouse].item
-    assert(kit.kind=="medkit" and kit.remaining==3)
-    assert(s.resources.essence_healing==175-30*i)
-end
-assert(not NHStore.startOrder(s,"medkit_essence") and s.resources.essence_healing==25)
-print("Workshop essences: exact payment for medkits, fire injectors and grenades, source isolation, reserved storage and single delivery passed.")
+assert(s.resources.essence_healing==145+175 and NHStore.commit(s))
+s=assert(NHStore.load())
+assert(s.resources.essence_healing==320 and not NHStore.startOrder(s,"medkit_essence"))
+print("Workshop: material-funded medkits, prepaid kit delivery, healing essence savings, fire injectors and grenades passed.")

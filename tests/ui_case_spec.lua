@@ -511,16 +511,16 @@ render(model,244)
 action,param=render(model,214)
 assert(action=="craft" and param.id=="medical")
 do
-    local recipe={id="medkit_essence",category="medical",name="Medkit (healing essence)",output=1,duration=120,
-        ready=false,reason="Not enough workshop resources.",inputs={{name="Healing essence",available=29,amount=30}}}
+    local recipe={id="injector_essence",category="medical",name="Fire injector (fire essence)",output=1,duration=120,
+        ready=false,reason="Not enough workshop resources.",inputs={{name="Fire essence",available=179,amount=180}}}
     table.insert(model.recipes,recipe)
     render(model,240)
     render(model,246)
-    assert(not render(model,214) and drawn["29 / 30"] and tips["Healing essence  29 / 30"])
+    assert(not render(model,214) and drawn["179 / 180"] and tips["Fire essence  179 / 180"])
     assert(drawn[recipe.reason] or tips[recipe.reason])
-    recipe.ready,recipe.inputs[1].available=true,30
+    recipe.ready,recipe.inputs[1].available=true,180
     local order,request=render(model,214)
-    assert(drawn["30 / 30"] and order=="craft" and request.id=="medkit_essence")
+    assert(drawn["180 / 180"] and order=="craft" and request.id=="injector_essence")
     render(model,240)
     table.remove(model.recipes)
     render(model,244)
@@ -719,7 +719,6 @@ do
     local profile=NHEssences.healingProfiles.HEAL_BULLET
     view.essence={key="essence_healing",name="Healing essence",amount=3*profile.amount,stock=1000,
         per_card=profile.amount,basis=profile.en}
-    model.essence_medkit_cost=30
     local old_width,old_height=width,height
     for _,lang in ipairs({"en","zh"}) do
         model.lang=lang
@@ -727,8 +726,9 @@ do
         view.essence.basis=profile[lang]
         render(model)
         local explanation=tips[lang=="zh" and "每张满额" or "Per full card"]
-        assert(explanation:find(profile[lang],1,true) and explanation:find("30",1,true))
-        assert(explanation:find(tostring(math.floor(profile.amount/30)),1,true))
+        assert(explanation:find(profile[lang],1,true))
+        assert(explanation:find(lang=="zh" and "1 点标称治疗量折合 1 个治疗精华" or "1 HP of potential healing",1,true))
+        assert(not explanation:find(lang=="zh" and "医疗包" or "medkit",1,true))
         assert(drawn[tostring(profile.amount)] and drawn["+"..(3*profile.amount)])
         assert(buttons[260] and panels[210].y>=0 and buttons[261].y<height)
     end

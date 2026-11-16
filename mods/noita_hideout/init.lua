@@ -442,7 +442,6 @@ local function inventory_view()
             local kind=NHEssences.types[key]
             table.insert(view.inputs,{name=tr(kind.zh,kind.en),amount=amount,available=state.resources[key] or 0})
         end
-        if recipe.id=="medkit_essence" then model.essence_medkit_cost=recipe.resources.essence_healing end
         local held=state.order and state.order.recipe==recipe.id and state.order.catalysts
         for _,sample in ipairs(recipe.catalysts or {}) do
             table.insert(view.catalysts,{name=NHPotion.materialName(sample.name,lang),amount=sample.amount,
@@ -458,6 +457,10 @@ local function inventory_view()
         end
         table.insert(model.recipes,view)
         if state.order and recipe.id==(state.order.recipe or "stable") then model.order_name=view.name end
+    end
+    if state.order and not model.order_name then
+        local product=state.order.output.item
+        model.order_name=translated(product and product.name) or tr("工坊订单","Workshop order")
     end
     model.pouchCapacity,model.maxUses=NHStore.pouchCapacity,NHStore.doseDurability
     model.order_active = state.order ~= false
