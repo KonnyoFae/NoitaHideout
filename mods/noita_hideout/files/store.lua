@@ -559,6 +559,77 @@ local function findRecipe(id)
     for _,recipe in ipairs(NHStore.recipes) do if recipe.id==id then return recipe end end
 end
 
+local function materialGood(material,zh,en,price)
+    return {id=material,material=material,zh=zh,en=en,category="materials",price=price,quantity=250}
+end
+
+local function supplyGood(id,recipeId,price)
+    local recipe=findRecipe(recipeId)
+    return {id=id,item=recipe.item,zh=recipe.zh,en=recipe.en,category="supplies",price=price,quantity=1}
+end
+
+NHStore.shopGoods={
+    materialGood("water","水","Water",20),
+    materialGood("sand","沙","Sand",25),
+    materialGood("oil","油","Oil",40),
+    materialGood("slime","黏液","Slime",50),
+    supplyGood("medkit","medical",120),
+    supplyGood("injector","injector",160),
+}
+
+function NHStore.canBuyGood(state,good)
+    if state.bankGold<good.price then return false,"Not enough stored gold." end
+    if good.material then
+        local incoming={[good.material]=good.quantity}
+        local reserved=state.order and state.order.output.materials
+        local owed=reserved and reserved[good.material] or 0
+        if (state.materials[good.material] or 0)>max_safe_integer-good.quantity-owed
+            or not NHStore.canStockMaterials(state,incoming) then return false,"Material storage is full." end
+        return true
+    end
+    local kind=good.item.kind
+    if kind=="dose" then
+        for _,row in ipairs(state.warehouse) do
+            local item=row.item
+            if item.kind==kind and (item.remaining or NHStore.doseDurability)==NHStore.doseDurability
+                and (item.count or 1)<max_safe_integer then return true,row.slot,row end
+        end
+    end
+    local slot=NHStore.freeSlot(state,"warehouse",nil,kind)
+    if not slot or state.nextItemId>=max_safe_integer then return false,"Supplies storage is full." end
+    return true,slot
+end
+
+local function stockItem(state,slot,item)
+    table.insert(state.warehouse,{id=state.nextItemId,slot=slot,item=item})
+    state.nextItemId=state.nextItemId+1
+end
+
+-- The request names the offer. Price, quantity and destination come from the
+-- catalog and are checked on the same draft that pays and receives the goods.
+function NHStore.buyGood(state,request)
+    if type(request)~="table" then return false,"Unknown shop item." end
+    local good
+    for _,offer in ipairs(NHStore.shopGoods) do
+        if offer.id==request.id then good=offer; break end
+    end
+    if not good then return false,"Unknown shop item." end
+    local ready,slot,stack=NHStore.canBuyGood(state,good)
+    if not ready then return false,slot end
+    local paid,reason=NHStore.spendGold(state,good.price)
+    if not paid then return false,reason end
+    if good.material then
+        state.materials[good.material]=(state.materials[good.material] or 0)+good.quantity
+    elseif stack then
+        stack.item={kind="dose",remaining=NHStore.doseDurability,count=(stack.item.count or 1)+1}
+    else
+        local item={}
+        for key,value in pairs(good.item) do item[key]=value end
+        stockItem(state,slot,item)
+    end
+    return true
+end
+
 function NHStore.canStartBatch(state,recipe)
     recipe=recipe or NHStore.recipe
     if recipe.facility and NHStore.level(state,recipe.facility)==0 then return false,"Facility is locked." end
@@ -643,8 +714,7 @@ function NHStore.advanceProduction(state,request)
     if output.item and output.item.kind=="pouch" then
         NHPouches.create(state,"warehouse",output.slot,0)
     elseif output.item then
-        table.insert(state.warehouse,{id=state.nextItemId,slot=output.slot,item=output.item})
-        state.nextItemId=state.nextItemId+1
+        stockItem(state,output.slot,output.item)
     else
         for name,amount in pairs(output.materials) do state.materials[name]=(state.materials[name] or 0)+amount end
     end

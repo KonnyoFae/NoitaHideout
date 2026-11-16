@@ -504,6 +504,63 @@ render(model,211)
 model.debug=false
 render(model)
 assert(not render(model,217) and drawn.Workshop and not drawn["Reissue test pouch"])
+-- Purchases use savings; an active workshop order does not gate the shop.
+model.shopGoods={
+    {id="water",category="materials",name="Water",quantity=250,price=20,ready=true},
+    {id="dose",category="supplies",name="Fire injector",quantity=1,price=160,ready=true},
+}
+for i=2,6 do
+    model.shopGoods[#model.shopGoods+1]={id="bulk"..i,category="materials",name="Material "..i,
+        quantity=10,price=5,ready=true}
+end
+model.bankGold,model.walletGold,model.order_active=200,0,true
+assert(not render(model,220))
+render(model)
+assert(drawn.Shop and buttons[256].name=="Materials" and buttons[257].name=="Consumables"
+    and green_button(244) and buttons[244].name=="Water" and not buttons[258])
+assert(not render(model,244))
+render(model)
+assert(drawn["Water"] and drawn["250"] and drawn["Materials"] and drawn["20"] and drawn["200"])
+model.bankGold=NHStore.maxGold
+for _,lang in ipairs({"zh","en"}) do
+    model.lang=lang
+    for _,sw in ipairs({320,427,640}) do
+        width=sw
+        render(model)
+        local bench,b=panels[210],assert(buttons[258])
+        assert(bench.y>=0 and b.x>=bench.x and b.x+GuiGetTextDimensions(nil,b.name)<=bench.x+bench.w
+            and b.y+9<=bench.y+bench.h and green_button(258))
+        assert(drawn[lang=="zh" and "确认购买" or "Confirm purchase"])
+        assert(drawn[lang=="zh" and "存款余额" or "Savings"] and drawn[lang=="zh" and "价格" or "Price"])
+        assert(drawn["9007199254740991"])
+    end
+end
+action,param=render(model,258)
+assert(action=="shop_buy" and param.id=="water")
+model.bankGold,model.walletGold,model.shopGoods[1].ready,model.shopGoods[1].reason=19,10000,false,"Not enough stored gold."
+assert(not render(model,258) and drawn["Not enough stored gold."] and drawn["19"])
+model.bankGold,model.shopGoods[1].reason=100,"Material storage is full."
+assert(not render(model,258) and drawn["Material storage is full."])
+render(model,240)
+render(model,243)
+render(model)
+assert(buttons[244].name=="Material 6" and drawn["2/2"])
+render(model,257)
+model.bankGold=200
+render(model)
+assert(buttons[244].name=="Fire injector" and not buttons[245] and not buttons[243])
+render(model,244)
+render(model)
+assert(drawn.Supplies and drawn["160"] and drawn["1"])
+action,param=render(model,258)
+assert(action=="shop_buy" and param.id=="dose")
+render(model,240)
+render(model,256)
+render(model)
+assert(drawn["2/2"] and buttons[244].name=="Material 6")
+render(model,212)
+model.order_active=false
+width=320
 -- Return to the remembered spell page. Clamp it if the high slots disappear.
 render(model,76)
 render(model)

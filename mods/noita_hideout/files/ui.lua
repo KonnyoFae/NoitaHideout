@@ -16,11 +16,13 @@ local list_pages={}
 local entries_per_page=5
 local recipe_category="alchemy"
 local alchemy_mode="synthesis"
+local shop_category="materials"
 local selected_entry,salvage_target
 local work_tabs={
     {key="orders",id=212,zh="工坊",en="Workshop"},
     {key="expansion",id=218,zh="扩建",en="Build"},
     {key="upgrade",id=219,zh="升级",en="Upgrades"},
+    {key="shop",id=220,zh="商店",en="Shop"},
     {key="samples",id=213,zh="测试物资",en="Supplies"},
 }
 local recipe_tabs={
@@ -32,6 +34,10 @@ local recipe_tabs={
 local alchemy_tabs={
     {key="synthesis",id=254,zh="炼成",en="Synthesis"},
     {key="decomposition",id=255,zh="分解",en="Decomposition"},
+}
+local shop_tabs={
+    {key="materials",id=256,zh="物料",en="Materials"},
+    {key="supplies",id=257,zh="消耗品",en="Consumables"},
 }
 local white = { 0.96, 0.93, 0.84 }
 local gold = { 1.00, 0.83, 0.47 }
@@ -247,6 +253,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local nav,body=position_tabs(work_tabs,18)
     local crafting=tab=="orders"
     local alchemy=crafting and recipe_category=="alchemy"
+    local shopping=tab=="shop"
     local menu=model.progression[tab]
     if crafting then
         menu={}
@@ -255,6 +262,11 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
                 menu[#menu+1]=recipe
             end
         end
+    elseif shopping then
+        menu={}
+        for _,good in ipairs(model.shopGoods) do
+            if good.category==shop_category then menu[#menu+1]=good end
+        end
     end
     local selected
     for _,item in ipairs(menu or {}) do
@@ -262,6 +274,11 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     end
     local outputs=crafting and selected and selected.outputs
     local show_outputs=outputs and (#outputs>1 or (#outputs==1 and outputs[1].name~=selected.name))
+    local savings,wrap_savings
+    if shopping and selected then
+        savings=string.format("%.0f",model.bankGold)
+        wrap_savings=GuiGetTextDimensions(gui,tr("存款余额","Savings").."   "..savings,scale)>(width-12)*scale
+    end
     local salvage
     if salvage_target and model.salvage_enabled then
         local category=model.warehouse[NHStore.category(salvage_target.kind)]
@@ -272,9 +289,12 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     if crafting and not selected and not salvage then
         category_nav,body=position_tabs(recipe_tabs,body)
         if alchemy then alchemy_nav,body=position_tabs(alchemy_tabs,body) end
+    elseif shopping and not selected and not salvage then
+        category_nav,body=position_tabs(shop_tabs,body)
     end
     local function available(item)
         if crafting then return item.ready and item.unlocked~=false and not model.order_active end
+        if shopping then return item.ready end
         return item.canBuy
     end
     local body_height=62
@@ -283,6 +303,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         body_height=68+12*#selected.inputs
         if show_outputs then body_height=body_height+13+12*#outputs end
         if model.order_active and selected.unlocked==false then body_height=body_height+13 end
+    elseif shopping and selected then body_height=wrap_savings and 112 or 99
     elseif selected then body_height=80+12*#selected.costs
     elseif menu then
         body_height=5+13*math.max(1,math.min(#menu,entries_per_page))
@@ -319,8 +340,10 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         end
     end
     for _,t in ipairs(category_nav or {}) do
-        if button(t.id,t.x,t.y,t.name,t.key==recipe_category and gold or muted) then
-            recipe_category,selected_entry=t.key,nil
+        local current=shopping and shop_category or recipe_category
+        if button(t.id,t.x,t.y,t.name,t.key==current and gold or muted) then
+            if shopping then shop_category=t.key else recipe_category=t.key end
+            selected_entry=nil
             return hover
         end
     end
@@ -394,6 +417,24 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         elseif available(selected) then
             if button(214,6,y,confirm,green) then dispatch("craft",{id=selected.id}) end
         else label(y,selected.reason or tr("材料或空位不足","Need stock or space"),muted) end
+    elseif shopping and selected then
+        if button(240,6,body,tr("< 返回商品","< Goods")) then selected_entry=nil; return hover end
+        label(body+14,selected.name,white)
+        value_row(body+27,tr("数量","Quantity"),string.format("%.0f",selected.quantity),white)
+        local destination=selected.category=="materials" and tr("物料","Materials") or tr("消耗品","Supplies")
+        value_row(body+40,tr("入库","Warehouse"),destination,white)
+        value_row(body+53,tr("价格","Price"),string.format("%.0f",selected.price),gold)
+        local confirm_y=body+83
+        if wrap_savings then
+            label(body+66,tr("存款余额","Savings"),muted)
+            label(body+79,savings,white)
+            confirm_y=confirm_y+13
+        else value_row(body+66,tr("存款余额","Savings"),savings,white) end
+        if available(selected) then
+            if button(258,6,confirm_y,tr("确认购买","Confirm purchase"),green) then
+                dispatch("shop_buy",{id=selected.id})
+            end
+        else label(confirm_y,selected.reason,gold) end
     elseif selected then
         if button(240,6,body,tr("< 返回列表","< Projects")) then selected_entry=nil; return hover end
         label(body+14,selected.name,available(selected) and green or white)
@@ -418,7 +459,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         elseif selected.maxed then label(y,tr("已完成","Complete"),muted)
         else label(y,tr("所需物料不足","Insufficient stock"),gold) end
     elseif menu then
-        local list_key=alchemy and alchemy_mode or (crafting and recipe_category or tab)
+        local list_key=alchemy and alchemy_mode or (crafting and recipe_category) or (shopping and shop_category) or tab
         local pages=math.max(1,math.ceil(#menu/entries_per_page))
         local current=math.min(list_pages[list_key] or 1,pages)
         local y=body
@@ -427,6 +468,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             y=y+15
         end
         if crafting and #menu==0 then label(y,tr("暂无配方","No recipes yet"),muted) end
+        if shopping and #menu==0 then label(y,tr("暂无商品","No goods for sale"),muted) end
         if pages>1 then
             if button(242,6,y,"<",current>1 and gold or muted) then current=math.max(1,current-1) end
             if button(243,width-14,y,">",current<pages and gold or muted) then current=math.min(pages,current+1) end

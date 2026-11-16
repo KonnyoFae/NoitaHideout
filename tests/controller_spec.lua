@@ -911,6 +911,10 @@ local function testBank()
     boot()
     assert(tick().walletGold==nil)
     balances(0,103)
+    local pendingWater=has_project(tick().shopGoods,"water")
+    assert(not pendingWater.ready and pendingWater.reason=="Waiting for wallet settlement.")
+    tick(nil,"shop_buy",{id="water"})
+    assert(not state().materials.water and state().bankGold==103)
     transfer("withdraw",10)
     balances(0,103)
     wallet.money=20
@@ -919,6 +923,7 @@ local function testBank()
     wallet.money=9
     assert(tick().walletGold==3)
     balances(3,103)
+    assert(has_project(tick().shopGoods,"water").ready)
     transfer("withdraw",30)
     balances(33,73)
     boot()
@@ -954,3 +959,52 @@ local function testBank()
 end
 testBank()
 print("Controller: live wallet transfers, range, exact balances, recovery and cross-run bank savings passed.")
+
+local function testShop()
+    settings,flags={},{}
+    new_world()
+    local wallet=EntityAddComponent2(player,"WalletComponent",{money=400,money_spent=0,mHasReachedInf=false})
+    local function buy(id) return tick(nil,"shop_buy",{id=id}) end
+    inventory_open=true
+    local unfinanced=has_project(buy("water").shopGoods,"water")
+    assert(not unfinanced.ready and unfinanced.price==20 and unfinanced.quantity==250)
+    buy("water")
+    assert(wallet.money==400 and not state().materials.water)
+    tick(nil,"bank_transfer",{direction="deposit",amount=320})
+    local view=tick()
+    assert(view.bankGold==320 and view.walletGold==80 and #view.shopGoods==6)
+    assert(has_project(view.shopGoods,"medkit").category=="supplies")
+    entities[player].x=900
+    buy("water")
+    entities[player].x=227
+    inventory_open=false
+    buy("water")
+    inventory_open=true
+    buy("water") -- opening the inventory cannot also confirm a purchase
+    assert(state().bankGold==320 and not state().materials.water)
+    fail_commit=true
+    buy("water")
+    fail_commit=false
+    boot()
+    tick()
+    assert(state().bankGold==320 and not state().materials.water)
+    buy("water")
+    buy("medkit")
+    buy("injector")
+    local settled=tick()
+    assert(settled.bankGold==20 and wallet.money==80 and wallet.money_spent==0)
+    assert(state().materials.water==250 and settled.warehouse.supplies[1].kind=="medkit")
+    assert(settled.warehouse.supplies[2].kind=="dose" and settled.warehouse.supplies[2].remaining==3)
+    local recent=state()
+    assert(NHStore.spendGold(recent,1) and NHStore.commit(recent))
+    assert(has_project(settled.shopGoods,"water").ready)
+    buy("water") -- recheck the price against the latest profile
+    assert(state().bankGold==19 and state().materials.water==250)
+    assert(not has_project(tick().shopGoods,"water").ready)
+    boot()
+    local resumed=tick()
+    assert(resumed.bankGold==19 and not has_project(resumed.shopGoods,"water").ready)
+    assert(#state().warehouse==2 and wallet.money==80)
+end
+testShop()
+print("Controller: shop previews, range, deposits, commit failure, stale funds and reload passed.")

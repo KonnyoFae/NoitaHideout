@@ -58,6 +58,8 @@ local error_translations = {
     ["Invalid gold amount."] = "请输入有效的金币数额。",
     ["Not enough carried gold."] = "随身金币不足。",
     ["Not enough stored gold."] = "存钱罐余额不足。",
+    ["Unknown shop item."] = "商店没有这件商品。",
+    ["Supplies storage is full."] = "消耗品仓库没有空格。",
     ["Wallet is full."] = "钱包余额已达上限。",
     ["Piggy bank is full."] = "存钱罐余额已达上限。",
     ["Wallet unavailable."] = "当前钱包无法存取金币。",
@@ -202,7 +204,14 @@ local function commit_edit(edit, zh, en, arg)
     local draft=active_draft()
     if not draft then return false end
     local changed, reason = edit(draft, arg)
-    if not changed then report(reason); return false end
+    if not changed then
+        if draft.revision~=state.revision then
+            local latest=active_draft()
+            if latest then state,model_cache=latest,nil end
+        end
+        report(reason)
+        return false
+    end
     if not save(draft) then return false end
     if zh then feedback(tr(zh, en)) end
     return true
@@ -352,6 +361,14 @@ local function inventory_view()
         model.warehouse_capacity[category]=NHStore.warehouseCapacity(state,category)
     end
     model.salvage_enabled=NHStore.level(state,"salvage")>0
+    model.shopGoods={}
+    for _,good in ipairs(NHStore.shopGoods) do
+        local ready,reason=NHStore.canBuyGood(state,good)
+        if not bank_synced then ready,reason=false,"Waiting for wallet settlement." end
+        model.shopGoods[#model.shopGoods+1]={id=good.id,category=good.category,name=tr(good.zh,good.en),
+            quantity=good.quantity,price=good.price,ready=ready,
+            reason=not ready and ((lang=="zh" and error_translations[reason]) or reason) or nil}
+    end
     local facility_names={}
     for _,project in ipairs(model.progression.expansion) do facility_names[project.id]=project.name end
     model.recipes={}
@@ -514,6 +531,9 @@ local function workshop_action(player,action,index)
         local message=index.direction=="deposit" and tr("已存入 %.0f 金币。","Deposited %.0f gold.")
             or tr("已取出 %.0f 金币。","Withdrew %.0f gold.")
         feedback(string.format(message,amount))
+    elseif action=="shop_buy" and type(index)=="table" then
+        if not bank_synced then report("Waiting for wallet settlement."); return end
+        commit_edit(NHStore.buyGood,"购买成功，商品已入库。","Purchased and delivered to storage.",index)
     elseif action=="buy_upgrade" and type(index)=="table" then
         commit_edit(NHStore.buyUpgrade,"建设完成。","Construction complete.",index)
     elseif action=="salvage" and type(index)=="table" then
@@ -544,7 +564,8 @@ local function dispatch(player, action, index)
             if not case_open then close_panel() end
             return
         end
-        if type(index)~="table" or action=="buy_upgrade" or action=="craft" or action=="salvage" or action=="bank_transfer" then
+        if type(index)~="table" or action=="buy_upgrade" or action=="craft" or action=="salvage"
+            or action=="bank_transfer" or action=="shop_buy" then
             workshop_action(player,action,index)
             return
         end
@@ -761,7 +782,7 @@ function OnWorldPostUpdate()
     if player and not bank_synced then
         local reason
         bank_synced,reason=NHBank.reconcile(state,player)
-        if not bank_synced then report(reason) end
+        if bank_synced then model_cache=nil else report(reason) end
     end
     if not update_workshop(traveler,frame) then return end
     if not player then opened,case_open=false,nil; return end
