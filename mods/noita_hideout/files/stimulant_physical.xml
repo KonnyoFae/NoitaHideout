@@ -1,0 +1,7 @@
+<Entity name="noita_hideout_dose_physical" tags="noita_hideout_stimulant_physical">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="PROTECTION_MELEE" frames="3600" exclusivity_group="0" />
+    <UIIconComponent name="$nh_hideout_dose_physical" description="$nh_hideout_dose_physical_desc"
+        icon_sprite_file="mods/noita_hideout/files/items/dose_physical.png" is_perk="0"
+        display_in_hud="1" display_above_head="0" />
+</Entity>

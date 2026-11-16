@@ -103,4 +103,19 @@ assert(NHCardWallets.carried(state,player,77).item.cells[2].remaining==79)
 spend(cardRef)
 assert(NHCardWallets.carried(state,player,77).item.cells[2].remaining==78)
 assert(not use.spend(state,player,cardRef))
+
+-- With the first row full, one right click can put the newly worn unit
+-- into the final cell of a tier III container while the stack stays put.
+local boxId=NHPouches.create(state,"warehouse",1,2,3)
+for i=2,11 do assert(NHStore.putPouchDose(state.pouches[boxId],1,i,"fire")) end
+spend({container="pouch",pouchId=boxId,kind="dose",cell=1,count=2,remaining=3})
+assert(state.pouches[boxId].cells[12].remaining==2 and state.pouches[boxId].cells[1].count==1)
+local large=NHCardWallets.empty(3)
+large.cells[1]=card("dryad",80,2)
+for i=2,11 do large.cells[i]=card("dryad",79,1) end
+local entry=row("warehouse",2,large)
+local largeRef={id=entry.storedId,slot=2,container="warehouse"}
+spend({container="card_wallet",wallet=largeRef,cell=1,kind="summon_card",species="dryad",remaining=80,count=2})
+local saved=assert(NHCardWallets.get(state,player,largeRef)).item
+assert(saved.cells[12].remaining==79 and saved.cells[1].count==1)
 print("Right-click payment: exact stacks and charges, old items, pouch splits, stale rows and issued wallet rollback passed.")

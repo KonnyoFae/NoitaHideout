@@ -31,10 +31,10 @@ function GuiImageNinePiece(_,id,x,y,w,h)
     if id==200 then tipbox={x=x,y=y,w=w,h=h} end
 end
 local tiles={}
-function GuiImage(_,id,x,y,sprite)
+function GuiImage(_,id,x,y,sprite,alpha,scale)
     image_colors[id],next_color=next_color,{}
     drawn[sprite]=true
-    if sprite=="data/ui_gfx/inventory/quick_inventory_box.png" then tiles[id]={x=x,y=y} end
+    if sprite=="data/ui_gfx/inventory/quick_inventory_box.png" then tiles[id]={x=x,y=y,scale=scale} end
 end
 function GuiTooltip(_,title,body) tips[title]=body or "" end
 function GuiGetImageDimensions() return 20,20 end
@@ -1634,3 +1634,67 @@ local function testRightUse()
 end
 testRightUse()
 print("UI: exact right-click sources, moving cursor, stale stacks, occlusion, left drag and inventory surgery HUD passed.")
+
+local function testContainerGrid(capacity,isWallet,standalone)
+    local kind=isWallet and "card_wallet" or "pouch"
+    local sample=isWallet and {species="dryad",remaining=79,count=1} or {subtype="frost",remaining=2,count=1}
+    local m={open=true,lang="en",mode=standalone and "container" or "case",near=not standalone,
+        capacity=2,secure_loot={},native_slots={},revision=1,status="",maxUses=3,popup=true,
+        cells={[capacity]=sample},pouchName=kind,perkCapacity=2,perkCells={},packablePerk={entity=27,name="Perk"},
+        warehouse={},warehouse_capacity={wand=10,spell=10,containers=10,supplies=10,equipment=10,collection=10,materials=10},
+        progression={expansion={},upgrade={}},recipes={},shopGoods={}}
+    if isWallet then m.walletId,m.walletCapacity=95,capacity else m.pouchId,m.pouchCapacity=97,capacity end
+    pointer={x=0,y=0}
+    render({open=false})
+    tiles={}
+    render(m)
+    local popup=assert(panels[standalone and 10 or 37])
+    local firstIndex=standalone and 1001 or 1003
+    local first=assert(tiles[firstIndex])
+    local tileWidth,tileHeight=GuiGetImageDimensions(nil,"data/ui_gfx/inventory/quick_inventory_box.png")
+    local pitchX,pitchY=tileWidth*first.scale,tileHeight*first.scale
+    local tolerance=0.001
+    assert(popup.x>=0 and popup.y>=0 and popup.x+popup.w<=width+tolerance and popup.y+popup.h<=height+tolerance)
+    for cell=1,capacity do
+        local t=assert(tiles[firstIndex+cell-1])
+        assert(math.abs(t.x-first.x-((cell-1)%4)*pitchX)<tolerance and
+            math.abs(t.y-first.y-math.floor((cell-1)/4)*pitchY)<tolerance,"grid must use the native tile pitch in both axes")
+        assert(t.x>=popup.x and t.x+pitchX<=popup.x+popup.w+tolerance and
+            t.y>=popup.y and t.y+pitchY<=popup.y+popup.h+tolerance,"every cell must fit inside the popup")
+    end
+    if not standalone then
+        local perks,secure=assert(panels[4200]),assert(panels[10])
+        assert(perks.y>=0 and perks.y+perks.h<=popup.y and popup.y+popup.h<=secure.y+tolerance,
+            "perk slots, container and secure case must stay visible without overlapping")
+    end
+    local last=assert(tiles[firstIndex+capacity-1])
+    pointer={x=last.x+pitchX/2,y=last.y+pitchY/2}
+    m.rightUse=assert(NHUI.useTarget())
+    local action,req=render(m)
+    assert(action=="use_inventory" and req.container==kind and req.cell==capacity)
+    assert(isWallet and req.walletId==95 and req.species=="dryad" or
+        not isWallet and req.pouchId==97 and req.subtype=="frost")
+
+    pointer.down,pointer.pressed=true,true
+    assert(not render(m))
+    pointer={x=first.x+pitchX/2,y=first.y+pitchY/2,released=true}
+    action,req=render(m)
+    assert(action==(isWallet and "move_wallet_card" or "move_cell") and req.sourceCell==capacity and req.targetCell==1)
+    assert(isWallet and req.walletId==95 or not isWallet and req.pouchId==97)
+    m.cells={[1]=sample}
+    pointer={x=first.x+pitchX/2,y=first.y+pitchY/2,down=true,pressed=true}
+    assert(not render(m))
+    pointer={x=last.x+pitchX/2,y=last.y+pitchY/2,released=true}
+    action,req=render(m)
+    assert(action==(isWallet and "move_wallet_card" or "move_cell") and req.sourceCell==1 and req.targetCell==capacity)
+end
+for _,size in ipairs({{640,360},{320,180}}) do
+    width,height=size[1],size[2]
+    for _,capacity in ipairs({4,8,12}) do
+        for _,isWallet in ipairs({false,true}) do
+            testContainerGrid(capacity,isWallet,false)
+            testContainerGrid(capacity,isWallet,true)
+        end
+    end
+end
+print("UI: four-column containers fit both screen sizes, preserve perk clearance and dispatch the last cell of every tier.")

@@ -18,7 +18,7 @@ end
 
 local function location(state,player,ref)
     if not state or state.runSerial<=state.closedThrough or type(ref)~="table" or not M.supports(ref.kind) then return end
-    local item,cells,index,pouch
+    local item,cells,index,pouch,wallet
     if ref.container=="warehouse" or ref.container=="safe" then
         if not ref.slot or not ref.storedId then return end
         index=NHStore.slotIndex(state,ref.container,ref.slot,ref.kind)
@@ -34,7 +34,8 @@ local function location(state,player,ref)
     elseif ref.container=="card_wallet" and ref.cell and ref.kind=="summon_card" then
         local row=NHCardWallets.get(state,player,ref.wallet)
         if not row then return end
-        cells,index=row.item.cells,ref.cell
+        wallet=row.item
+        cells,index=wallet.cells,ref.cell
         item=cells[index]
     end
     if not item or item.kind~=ref.kind or (ref.count or 1)~=(item.count or 1) then return end
@@ -42,7 +43,7 @@ local function location(state,player,ref)
     if (ref.remaining or full)~=(item.remaining or full) then return end
     if item.kind=="dose" and (item.subtype or "fire")~=(ref.subtype or "fire") then return end
     if item.kind=="summon_card" and item.species~=ref.species then return end
-    return item,index,cells,pouch
+    return item,index,cells,pouch,wallet
 end
 
 function M.peek(state,player,ref)
@@ -80,7 +81,7 @@ local function mergeUntouched(state,ref,item,sourceIndex,cells,cellCapacity,quan
 end
 
 function M.spend(draft,player,ref)
-    local item,index,cells,pouch=location(draft,player,ref)
+    local item,index,cells,pouch,wallet=location(draft,player,ref)
     if not item then return nil,"Inventory slot changed." end
     local count=item.count or 1
     local remaining=item.remaining or maxUses(item.kind) or 1
@@ -90,7 +91,7 @@ function M.spend(draft,player,ref)
         -- units in place and put the worn one in the same container.
         local slot,capacity
         if cells then
-            capacity=pouch and NHStore.pouchCapacity or NHCardWallets.capacity
+            capacity=pouch and NHEquipment.get("pouch",pouch.tier).capacity or NHEquipment.get("card_wallet",wallet.tier).capacity
             slot=freeCell(cells,capacity)
         else
             slot=NHStore.freeSlot(draft,ref.container,nil,item.kind)

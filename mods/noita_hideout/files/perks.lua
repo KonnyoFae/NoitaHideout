@@ -265,12 +265,19 @@ function NHPerks.view(state,player,model)
     end
 end
 
-function NHPerks.draw(gui,model,ox,oy,scale,pw,qw,qh,tr,slot,slots,dispatch)
+function NHPerks.panelSpace(model,qh)
+    local capacity=model.perkCapacity or 0
+    if capacity==0 and not model.packablePerk then return 0 end
+    return 5+16+(capacity>0 and qh+5 or 0)+(model.packablePerk and 14 or 0)
+end
+
+function NHPerks.draw(gui,model,ox,oy,scale,pw,qw,qh,popupY,tr,slot,slots,dispatch)
     local capacity=model.perkCapacity or 0
     local nearby=model.packablePerk
-    if capacity==0 and not nearby then return end
-    local height=16+(capacity>0 and qh+5 or 0)+(nearby and 14 or 0)
-    local offset=(model.popup and -66 or 0)-height-5
+    local space=NHPerks.panelSpace(model,qh)
+    if space==0 then return end
+    local height=space-5
+    local offset=popupY-space
     local top=oy+offset*scale
     GuiZSetForNextWidget(gui,-79)
     GuiImageNinePiece(gui,4200,ox,top,pw*scale,height*scale,1)

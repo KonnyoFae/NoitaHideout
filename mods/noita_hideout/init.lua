@@ -116,6 +116,9 @@ local error_translations = {
     ["Hold your injector pouch first."] = "请先取回这只针剂包。",
     ["Secure valuables slot is full."] = "贵重物品格已满。",
     ["This syringe is no longer available."] = "这支针剂已经用掉或收回。",
+    ["Could not create the stimulant effect."] = "无法创建激活剂效果。",
+    ["Health is full."] = "生命值已满。",
+    ["Unknown hideout item."] = "未能识别这件藏身处物品。",
     ["Only a recognized ordinary flask can be stored"] = "未能识别这个瓶子的类型。",
     ["This flask has attachments that cannot be restored"] = "药瓶带有无法还原的附件，已保留原瓶。",
     ["This flask still has a shop price"] = "这只药瓶仍带有商店价格。",
@@ -299,43 +302,15 @@ local function update_workshop(player,frame,farm_time)
     return true
 end
 
-local function find_stimulant(player,tag,component)
-    for _, child in ipairs(EntityGetAllChildren(player) or {}) do
-        if EntityHasTag(child,tag) then
-            local effect = EntityGetFirstComponentIncludingDisabled(child,component)
-            if effect then return effect end
-        end
-    end
-end
-
 local function inject(player,subtype,pay)
     local frame = GameGetFrameNum()
     if last_dose_frame == frame then return end
     last_dose_frame = frame
-    local d=NHInjectors.get(subtype)
-    local healing=d.id=="healing"
-    local component=healing and "VariableStorageComponent" or "GameEffectComponent"
-    local effect = find_stimulant(player,d.tag,component)
-    local created
-    if not effect then
-        local x, y = EntityGetTransform(player)
-        created = EntityLoad(files .. d.effect..".xml", x, y)
-        if created and created ~= 0 then
-            effect = EntityGetFirstComponentIncludingDisabled(created,component)
-        end
-        if not effect or effect == 0 then
-            if created and created ~= 0 then EntityKill(created) end
-            report(tr("无法创建激活剂效果。", "Could not create the stimulant effect.")); return
-        end
-    end
-    local consumed, reason = pay()
+    local consumed, reason = NHInjectors.use(player,subtype,pay)
     if not consumed then
-        if created then EntityKill(created) end
         if reason then report(reason) end
         return
     end
-    ComponentSetValue2(effect,healing and "value_int" or "frames",healing and 60 or 3600)
-    if created then EntityAddChild(player, created) end
     mouse_release = true
     feedback(tr("已注射，剩余耐久 ","Injected. Durability ") .. reason .. "/" .. NHStore.doseDurability)
     return true
@@ -355,6 +330,10 @@ end
 local function item_label(entry)
     local item = entry.item
     if item.kind == "potion" then return NHPotion.label(item, lang) end
+    if item.kind=="card_wallet" then
+        local d=NHEquipment.get(item.kind,item.tier)
+        return tr(d.zh,d.en)
+    end
     if item.kind == "dose" then
         local d=NHInjectors.get(item.subtype)
         return tr(d.zh,d.en)
@@ -381,15 +360,12 @@ end
 local function stored_view(entry)
     local item=entry.item
     local potion=item.kind=="potion" and item or nil
-    return {id=entry.id,kind=item.kind,name=item_label(entry),potion=potion,
+    local wallet=item.kind=="card_wallet" and NHEquipment.get(item.kind,item.tier)
+    return {id=entry.id,kind=item.kind,name=item_label(entry),potion=potion,capacity=wallet and wallet.capacity,
         icon=potion and NHPotion.inventoryIcon(potion) or (item.kind=="dose" and NHInjectors.get(item.subtype).icon)
-            or item.icon or (item.sprite and item.sprite.image_file),
+            or (wallet and wallet.icon) or item.icon or (item.sprite and item.sprite.image_file),
         remaining=NHMedkits.remaining(item),count=item.count or ((item.kind=="bandage" or item.kind=="grenade") and 1 or nil),
         subtype=item.subtype,species=item.species,dockSlot=NHPotion.dockSlot(item)}
-end
-
-local function pouch_name(id)
-    return tr("针剂包","Injector pouch").." #"..id
 end
 
 local function inventory_view()
@@ -446,7 +422,8 @@ local function inventory_view()
         model.secure_loot[entry.slot or 1] = stored_view(entry)
     end
     for id,pouch in pairs(state.pouches) do
-        local view={id=id,kind="pouch",name=pouch_name(id),icon=NHNative.icons.pouch,doses=pouch.doses}
+        local d=NHEquipment.get("pouch",pouch.tier)
+        local view={id=id,kind="pouch",name=tr(d.zh,d.en).." #"..id,icon=d.icon,doses=pouch.doses,capacity=d.capacity}
         if pouch.location=="safe" then model.secure_loot[pouch.slot]=view
         elseif pouch.location=="warehouse" then warehouse_slot("pouch",pouch.slot,view) end
     end
@@ -478,6 +455,12 @@ local function inventory_view()
             facility_name=facility_names[recipe.facility] or recipe.facility}
         local kit=recipe.item and (NHMedkits.types[recipe.item.kind] or NHSurgeryKits.types[recipe.item.kind])
         if kit and kit.healPercent then view.medkit=kit end
+        if recipe.item and recipe.item.kind=="dose" then
+            view.icon=NHInjectors.get(recipe.item.subtype).icon
+        elseif recipe.category=="equipment" then
+            local d=NHEquipment.get(recipe.item.kind,recipe.item.tier)
+            if d then view.icon=d.icon end
+        end
         if recipe.category=="spell" then
             local card=recipe.item
             view.actionId=card.card.id
@@ -561,7 +544,7 @@ local function inventory_view()
         local product=state.order.output.item
         model.order_name=translated(product and product.name) or tr("工坊订单","Workshop order")
     end
-    model.pouchCapacity,model.maxUses=NHStore.pouchCapacity,NHStore.doseDurability
+    model.maxUses=NHStore.doseDurability
     model.order_active = state.order ~= false
     model_cache = model
     return model
@@ -1192,14 +1175,18 @@ function OnWorldPostUpdate()
     model.rightUse=used and used.container~="held" and used or nil
     model.popup = popup ~= nil
     model.walletId,model.pouchId,model.cells,model.pouchName=nil,nil,nil,nil
+    model.walletCapacity,model.pouchCapacity=nil,nil
     if popup and popup.kind=="card_wallet" then
         local wallet=NHCardWallets.get(state,player,popup)
-        model.walletId,model.pouchName=popup.id,tr("卡片夹","Card wallet").." #"..popup.id
+        local d=NHEquipment.get("card_wallet",wallet.item.tier)
+        model.walletId,model.pouchName=popup.id,tr(d.zh,d.en).." #"..popup.id
         model.cells=wallet.item.cells or {}
-        model.walletCapacity=NHCardWallets.capacity
+        model.walletCapacity=d.capacity
     elseif popup then
-        model.pouchId,model.pouchName=popup.id,pouch_name(popup.id)
-        model.cells=state.pouches[popup.id].cells
+        local pouch=state.pouches[popup.id]
+        local d=NHEquipment.get("pouch",pouch.tier)
+        model.pouchId,model.pouchName=popup.id,tr(d.zh,d.en).." #"..popup.id
+        model.cells,model.pouchCapacity=pouch.cells,d.capacity
     end
     model.mode = case_open and "case" or (popup and "container" or "closed")
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status

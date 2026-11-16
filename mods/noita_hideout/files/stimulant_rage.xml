@@ -1,0 +1,7 @@
+<Entity name="noita_hideout_dose_rage" tags="noita_hideout_stimulant_rage">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="BERSERK" frames="1800" exclusivity_group="0" />
+    <UIIconComponent name="$nh_hideout_dose_rage" description="$nh_hideout_dose_rage_desc"
+        icon_sprite_file="mods/noita_hideout/files/items/dose_rage.png" is_perk="0"
+        display_in_hud="1" display_above_head="0" />
+</Entity>

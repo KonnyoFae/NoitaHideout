@@ -1,6 +1,7 @@
 -- Two revisioned snapshots in Noita's normal mod settings. A complete
 -- readback checks the settings API; it does not force the engine to flush.
 NHStore = {}
+NHEquipment=dofile("mods/noita_hideout/files/equipment.lua")
 dofile("mods/noita_hideout/files/companions.lua")
 dofile("mods/noita_hideout/files/affinity.lua")
 dofile("mods/noita_hideout/files/card_wallets.lua")
@@ -21,7 +22,6 @@ local profile_counter = "noita_hideout.profile_count"
 local profile_flag = "noita_hideout_profile_"
 local cached_profile
 
-NHStore.pouchCapacity = 4
 NHStore.doseDurability = 3
 NHStore.checkpointFrames = 60 * 60
 NHStore.maxGold = max_safe_integer
@@ -269,6 +269,9 @@ local function validate(s)
         local output=s.order.output
         if output.item then
             validateConsumable(output.item)
+            if output.item.kind=="pouch" or output.item.kind=="card_wallet" then
+                assert(NHEquipment.get(output.item.kind,output.item.tier),"Invalid equipment output tier")
+            end
             if output.item.kind=="dose" then
                 assert(validDose(output.item.remaining or NHStore.doseDurability,output.item.count or 1,output.item.subtype),"Invalid injector output")
             end
@@ -542,15 +545,16 @@ end
 
 function NHStore.putPouchDose(pouch, remaining, slot, subtype)
     if pouch.location=="lost" then return false end
+    local capacity=NHEquipment.get("pouch",pouch.tier).capacity
     if slot==nil then
-        for i=1,NHStore.pouchCapacity do
+        for i=1,capacity do
             if pouch.cells[i] and NHStore.acceptsDose(pouch.cells[i],remaining,subtype) then slot=i; break end
         end
         if not slot then
-            for i=1,NHStore.pouchCapacity do if not pouch.cells[i] then slot=i; break end end
+            for i=1,capacity do if not pouch.cells[i] then slot=i; break end end
         end
     end
-    if not whole(slot) or slot<1 or slot>NHStore.pouchCapacity then return false end
+    if not whole(slot) or slot<1 or slot>capacity then return false end
     local cell=pouch.cells[slot]
     if not NHStore.acceptsDose(cell,remaining,subtype) then return false end
     pouch.cells[slot]={remaining=remaining,subtype=subtype,count=(cell and cell.count or 0)+1}
@@ -657,10 +661,6 @@ NHStore.recipes={
     NHSurgeryKits.recipe("field_surgery_kit"),
     NHSurgeryKits.recipe("tactical_surgery_kit"),
     NHSurgeryKits.recipe("advanced_surgery_kit"),
-    NHInjectors.recipe("fire"),
-    NHInjectors.recipe("lightning"),
-    NHInjectors.recipe("frost"),
-    NHInjectors.recipe("healing"),
     NHThrowables.recipe("grenade",{{name="sand",amount=64},{name="slime",amount=32}}),
     NHThrowables.recipe("grenade",nil,{essence_high_energy=4},"grenade_essence","魔法手雷（高能精华）","Magic grenade (high-energy essence)"),
     NHThrowables.recipe("fire_grenade",nil,{essence_fire=6}),
@@ -669,13 +669,22 @@ NHStore.recipes={
     NHThrowables.recipe("sand_knife",{{name="sand",amount=40}}),
     NHThrowables.recipe("metal_knife",{{name="metal_sand",amount=64,
         alternatives={"metal_sand","steel_sand","copper","brass","silver"},labelZh="金属粉",labelEn="Metal powders"}}),
-    {id="pouch",category="equipment",facility="injector",zh="空针剂包",en="Empty injector pouch",
-        durationFrames=10*60,inputs={{name="slime",amount=25}},emptyContainers=1,item={kind="pouch"}},
-    {id="card_wallet",category="equipment",facility="farmland",zh="空卡片夹",en="Empty card wallet",
-        durationFrames=8*60,inputs={},resources={fiber=4},emptyContainers=1,item=NHCardWallets.empty(),
-        noteZh="四格卡片夹，可在外出时打开并存取召唤卡。",
-        noteEn="Four card slots. Open the wallet to store or withdraw summon cards while exploring."},
 }
+for _,id in ipairs(NHInjectors.order) do
+    NHStore.recipes[#NHStore.recipes+1]=NHInjectors.recipe(id)
+end
+for _,kind in ipairs({"pouch","card_wallet"}) do
+    for _,d in ipairs(NHEquipment[kind]) do
+        local isPouch=kind=="pouch"
+        NHStore.recipes[#NHStore.recipes+1]={id=d.filename,category="equipment",facility=isPouch and "injector" or "farmland",
+            zh="空"..d.zh,en="Empty "..d.en:gsub("^%u",string.lower),durationFrames=d.workSeconds*60,
+            inputs=isPouch and {{name=d.ingredient,amount=d.amount}} or {},
+            resources=not isPouch and {[d.ingredient]=d.amount} or nil,emptyContainers=d.emptyContainers,
+            item=isPouch and {kind=kind,tier=d.tier,icon=d.icon,name=d.name} or NHCardWallets.empty(d.tier),
+            noteZh=d.capacity.." 格，制作完成后空容器存入装备库。",
+            noteEn=d.capacity.." slots. Delivered empty to equipment storage."}
+    end
+end
 for _,food in ipairs(dofile("mods/noita_hideout/files/cooking.lua")) do
     NHStore.recipes[#NHStore.recipes+1]={id=food.id,category="food",facility=food.facility,zh=food.zh,en=food.en,
         durationFrames=food.workSeconds*60,inputs={},resources=food.resources,item=farmItem(food.id),noteZh=food.noteZh,noteEn=food.noteEn}
@@ -1030,9 +1039,9 @@ function NHStore.advanceProduction(state,request)
     end
     local output=order.output
     if output.item and output.item.kind=="pouch" then
-        NHPouches.create(state,"warehouse",output.slot,0)
+        NHPouches.create(state,"warehouse",output.slot,0,output.item.tier)
     elseif output.item and output.item.kind=="card_wallet" then
-        stockItem(state,output.slot,NHCardWallets.empty())
+        stockItem(state,output.slot,NHCardWallets.empty(output.item.tier))
     elseif output.item then
         stockItem(state,output.slot,output.item)
     else

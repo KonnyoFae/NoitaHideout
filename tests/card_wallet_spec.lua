@@ -12,9 +12,9 @@ local player,quick=1,2
 local entities,serial={},10
 function EntityLoad(path)
     serial=serial+1
-    local species=path:match("items/card_(%w+)%.xml$")
+    local species=path:match("items/card_([%w_]+)%.xml$")
     local tags={}
-    if species=="wallet" then tags.noita_hideout_card_wallet=true
+    if species:match("^wallet") then tags.noita_hideout_card_wallet=true; tags["noita_hideout_card_"..species]=true
     else tags.noita_hideout_summon_card=true; tags["nh_companion_"..species]=true end
     entities[serial]={tags=tags,item={uses_remaining=80},parent=0}
     return serial
@@ -57,13 +57,13 @@ NHCompanions.registerItems()
 NHCardWallets.registerItem()
 local s=assert(NHStore.load())
 local run=NHStore.newRun(s)
-local function makeWallet(slot)
+local function makeWallet(slot,tier)
     local id=s.nextItemId
     s.nextItemId=id+1
-    s.warehouse[#s.warehouse+1]={id=id,slot=slot,item=NHCardWallets.empty()}
+    s.warehouse[#s.warehouse+1]={id=id,slot=slot,item=NHCardWallets.empty(tier)}
     return {id=id,container="warehouse",slot=slot}
 end
-local a,b=makeWallet(1),makeWallet(2)
+local a,b=makeWallet(1,3),makeWallet(2,1)
 local function card(species,uses,count)
     return NHCompanions.withCount({species=species,remaining=uses},count or 1)
 end
@@ -82,6 +82,7 @@ assert(cell(a,1).count==2 and not cell(b,1))
 assert(not move(a,worn,{cell=1}) and not move(a,fairy,{cell=1}))
 assert(move(a,worn,{cell=3}) and cell(a,3).remaining==79)
 assert(move(b,fairy,{cell=1}))
+assert(not move(b,{cell=1},{cell=5}) and not move(a,full,{cell=13}))
 assert(move(a,{cell=1,count=2},{cell=2}) and not move(a,{cell=1,count=2},{cell=2}))
 assert(move(a,{cell=2},{cell=1}) and cell(a,1).count==2)
 assert(not move(a,{cell=3},{cell=1}) and cell(a,3).remaining==79)
@@ -91,6 +92,7 @@ local ok,entity=NHTransfers.withdraw(s,player,NHStore.slotIndex(s,"warehouse",1,
 assert(ok and not NHCardWallets.get(s,player,a))
 local hand={entity=entity,id=a.id}
 assert(NHCardWallets.carried(s,player,entity).id==a.id and cell(hand,1).count==2)
+assert(EntityHasTag(entity,"noita_hideout_card_wallet_3") and NHCardWallets.get(s,player,hand).item.tier==3)
 assert(move(hand,{container="safe",slot=1,id=s.safe[1].id},{cell=3}))
 entities[entity].parent=0
 assert(not move(hand,{cell=3},{deliver=pick}))
@@ -103,11 +105,11 @@ failWrite=false
 local used,physical=move(hand,{cell=3},{deliver=pick})
 assert(used and entities[physical].item.uses_remaining==79 and not cell(hand,3))
 entities[physical].item.uses_remaining=78
-assert(move(hand,{entity=physical},{cell=4}) and cell(hand,4).remaining==78 and not EntityGetIsAlive(physical))
+assert(move(hand,{entity=physical},{cell=12}) and cell(hand,12).remaining==78 and not EntityGetIsAlive(physical))
 -- Re-depositing a carried wallet must capture the freshly edited journal row.
 assert(NHTransfers.deposit(s,player,"safe",entity,1))
 local protected={id=a.id,container="safe",slot=1}
-assert(not NHCardWallets.get(s,player,hand) and cell(protected,4).remaining==78)
+assert(not NHCardWallets.get(s,player,hand) and cell(protected,12).remaining==78)
 assert(cell(b,1).species=="flower_fairy" and not cell(b,4))
 -- Simultaneous world rollback of the issued wallet AND one card taken out of
 -- it must recover the latest contents regardless of traversal order.
@@ -119,7 +121,7 @@ globals={}
 EntityKill(physical)
 EntityKill(entity)
 assert(NHTransfers.reconcile(s,player))
-assert(cell(protected,1).count==2 and cell(protected,4).remaining==78)
+assert(cell(protected,1).count==2 and cell(protected,12).remaining==78)
 assert(NHTransfers.reconcile(s,player) and cell(protected,1).count==2)
 -- A carried wallet with an actual world receipt is lost with that run. The
 -- protected second wallet and its independently saved cells survive.

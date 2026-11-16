@@ -1,7 +1,7 @@
 <Entity name="$nh_hideout_dose" tags="noita_hideout_dose,item_pickup,item_physics,teleportable_NOT">
     <Base file="mods/noita_hideout/files/items/base.xml">
         <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/dose.png" />
-        <SpriteComponent image_file="mods/noita_hideout/files/items/dose.png" offset_x="5" offset_y="3" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/dose.png" offset_x="8" offset_y="8" />
         <ItemComponent item_name="$nh_hideout_dose" ui_description="$nh_hideout_dose_desc"
             ui_sprite="mods/noita_hideout/files/items/dose.png" />
         <UIInfoComponent name="$nh_hideout_dose" />

@@ -134,7 +134,7 @@ for _,example in ipairs({
     deliver()
     assert(s.warehouse[#s.warehouse].item.kind==example.kind)
 end
-assert(s.finished==9 and #s.warehouse==9)
+assert(s.finished==5+#NHInjectors.order and #s.warehouse==s.finished)
 
 -- Healing spells still fund the hideout's healing essence balance.
 s.levels.salvage=1
@@ -147,4 +147,4 @@ assert(NHStore.salvage(s,{kind="spell",slot=1,id=spellId,mode="essence"}))
 assert(s.resources.essence_healing==145+175 and NHStore.commit(s))
 s=assert(NHStore.load())
 assert(s.resources.essence_healing==320 and not NHStore.startOrder(s,"medkit_essence"))
-print("Workshop: material-funded medkits, prepaid kit delivery, healing essence savings, fire injectors and grenades passed.")
+print("Workshop: material-funded medkits, prepaid kit delivery, healing essence savings, all injector recipes and grenades passed.")

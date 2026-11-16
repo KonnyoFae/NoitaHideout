@@ -1,15 +1,15 @@
--- Protected and carried pouches each retain their own stable ID and four cells.
+-- Protected and carried pouches retain their stable ID, tier and cells.
 NHPouches = {}
 
 local function initial_cells(count)
     return count>0 and {{remaining=NHStore.doseDurability,count=count}} or {}
 end
 
-function NHPouches.create(s,container,slot,count)
+function NHPouches.create(s,container,slot,count,tier)
     local id=s.nextItemId
     s.nextItemId=id+1
     count=count or 0
-    s.pouches[id]={id=id,location=container,slot=slot,doses=count,cells=initial_cells(count)}
+    s.pouches[id]={id=id,location=container,slot=slot,tier=tier or 1,doses=count,cells=initial_cells(count)}
     return id
 end
 
@@ -42,9 +42,10 @@ function NHPouches.validate(s,whole,validDose)
     for id,p in pairs(s.pouches) do
         assert(whole(id) and id>0 and id<s.nextItemId and type(p)=="table" and p.id==id,"Invalid pouch identity")
         assert(type(p.cells)=="table" and whole(p.doses),"Invalid pouch contents")
+        local definition=assert(NHEquipment.get("pouch",p.tier),"Invalid pouch tier")
         local total=0
         for slot,cell in pairs(p.cells) do
-            assert(whole(slot) and slot>=1 and slot<=NHStore.pouchCapacity
+            assert(whole(slot) and slot>=1 and slot<=definition.capacity
                 and type(cell)=="table" and validDose(cell.remaining,cell.count,cell.subtype),"Invalid pouch cell")
             total=total+cell.count
         end

@@ -26,11 +26,12 @@ local pen=NHLivestock.view(s,"en",start)[1]
 local period=NHLivestock.species.gel_pool.period
 assert(period==4*60*60 and pen.species=="gel_pool" and pen.adults==1 and pen.nextAt==start+period)
 assert(pen.capacity==2 and NHLivestock.freePen(s,"gel_pool") and not NHStore.buyGood(s,{id="gel_pool"}))
-s.gelBonus={seed=100,pending={}}
+local fireSeed=3 -- First cycle awards the fire injector in the expanded catalog.
+s.gelBonus={seed=fireSeed,pending={}}
 s.summons={gel_pool=100,pending={}}
 assert(NHStore.commit(s))
 local _,produced=NHFarm.sync(s,pen.nextAt-1)
-assert(not produced and not s.resources.herb and s.gelBonus.seed==100 and s.summons.gel_pool==100)
+assert(not produced and not s.resources.herb and s.gelBonus.seed==fireSeed and s.summons.gel_pool==100)
 local checkpoint=load()
 local stale=load()
 local _,did,awards=NHFarm.sync(s,start+period)
@@ -47,7 +48,7 @@ assert(not NHFarm.sync(s,start+period) and not NHFarm.sync(s,start+period-1))
 
 -- The two 30% products share a roll; the 3% card uses a separate saved stream.
 local hits,types=0,{}
-for seed=1,100 do
+for seed=1,1000 do
     local trial=load()
     trial.gelBonus.seed=seed
     trial.warehouse,trial.resources={},{}
@@ -61,7 +62,7 @@ for seed=1,100 do
         types[medicine.subtype]=true
     end
 end
-assert(hits==30)
+assert(hits==300)
 for _,id in ipairs(NHInjectors.order) do assert(types[id]) end
 for _,rolls in ipairs({{100,1},{1,100},{1,1}}) do
     local replay=checkpoint
@@ -84,7 +85,7 @@ for slot=2,capacity do
     s.warehouse[#s.warehouse+1]={id=s.nextItemId,slot=slot,item={kind="medkit",remaining=1}}
     s.nextItemId=s.nextItemId+1
 end
-s.gelBonus.seed=100
+s.gelBonus.seed=fireSeed
 NHFarm.sync(s,start+2*period)
 assert(s.resources.herb==8 and s.resources.fiber==12 and s.gelBonus.spice==1
     and s.gelBonus.pending.fire==1 and original.item.remaining==2)
@@ -108,7 +109,7 @@ assert(warehouseItem(s,1,"dose").remaining==2 and not next(s.gelBonus.pending) a
 assert(s.resources.spice==NHStore.maxResourceAmount and s.gelBonus.seed==consumedSeed)
 local dest=NHFarm.view(s,"zh",s.farm.time)
 assert(dest.gelPending==0 and dest.gelSpicePending==0)
-s.gelBonus.seed=100
+s.gelBonus.seed=fireSeed
 NHFarm.sync(s,start+3*period)
 assert(warehouseItem(s,2,"dose").count==2 and not next(s.gelBonus.pending))
 
@@ -129,4 +130,4 @@ assert(sequential.gelBonus.seed==batched.gelBonus.seed and sequential.summons.ge
 for _,key in ipairs({"fiber","herb","spice"}) do assert(sequential.resources[key]==batched.resources[key]) end
 assert(sequential.gelBonus.spice==batched.gelBonus.spice)
 for _,id in ipairs(NHInjectors.order) do assert(sequential.gelBonus.pending[id]==batched.gelBonus.pending[id]) end
-print("Gel pool: construction clock, guaranteed crops, independent rolls, four full-charge injectors, delayed deposits and replay passed.")
+print("Gel pool: construction clock, guaranteed crops, independent rolls, all full-charge injectors, delayed deposits and replay passed.")

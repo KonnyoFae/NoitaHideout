@@ -1,0 +1,7 @@
+<Entity name="noita_hideout_dose_shield" tags="noita_hideout_stimulant_shield">
+    <Base file="data/entities/misc/perks/shield.xml" />
+    <GameEffectComponent effect="CUSTOM" custom_effect_id="noita_hideout_injector_shield" frames="1800" />
+    <UIIconComponent name="$nh_hideout_dose_shield" description="$nh_hideout_dose_shield_desc"
+        icon_sprite_file="mods/noita_hideout/files/items/dose_shield.png" is_perk="0"
+        display_in_hud="1" display_above_head="0" />
+</Entity>

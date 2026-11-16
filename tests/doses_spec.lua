@@ -50,10 +50,10 @@ end
 NHNative = {}
 function NHNative.kind(id) return entities[id].kind end
 function NHNative.held(owner) return selected end
-function NHNative.spawn(kind,x,y)
+function NHNative.spawn(kind,x,y,subtype)
     if reject_spawn then return nil, "spawn failed" end
     next_id = next_id + 1
-    entities[next_id] = {kind = kind, x = x, y = y, root = next_id, alive = true}
+    entities[next_id] = {kind = kind, subtype=subtype, x = x, y = y, root = next_id, alive = true}
     return next_id
 end
 local function pick(id) entities[id].root = player; selected = id end
@@ -216,7 +216,7 @@ settings,flags,globals={},{},{}
 local bags=assert(NHStore.load())
 NHStore.newRun(bags)
 local a=NHPouches.create(bags,"warehouse",1)
-local b=NHPouches.create(bags,"warehouse",2)
+local b=NHPouches.create(bags,"warehouse",2,0,3)
 assert(a~=b and NHStore.commit(bags))
 assert(bags.pouches[a].doses==0 and bags.pouches[b].doses==0)
 assert(NHDoses.moveCell(bags,1,1,bags.starterPouchId,a))
@@ -236,6 +236,9 @@ local function collect(id) pick(id); return true end
 local okA,itemA=NHDoses.takePouch(bags,player,collect,a)
 local okB,itemB=NHDoses.takePouch(bags,player,collect,b)
 assert(okA and okB and NHDoses.isPouch(bags,itemA)==a and NHDoses.isPouch(bags,itemB)==b)
+assert(entities[itemB].subtype==3 and bags.pouches[b].tier==3)
+assert(NHDoses.moveCell(bags,1,12,b) and not NHDoses.moveCell(bags,12,5,b,a))
+assert(NHDoses.moveCell(bags,12,1,b))
 assert(not NHDoses.withdraw(bags,player,nil,itemA,nil,1,nil,b))
 local shadow=NHNative.spawn("pouch",25,40)
 entities[shadow].marker=entities[itemB].marker
@@ -270,6 +273,7 @@ globals={}
 assert(NHDoses.reconcile(bags,player))
 bags=assert(NHStore.load())
 assert(bags.pouches[b].location=="warehouse" and bags.pouches[c].location=="warehouse")
+assert(bags.pouches[b].tier==3 and bags.pouches[c].tier==1)
 assert(bags.pouches[b].slot~=bags.pouches[c].slot and bags.pouches[b].cells[1].remaining==2)
 assert(bags.pouches[c].doses==0)
 

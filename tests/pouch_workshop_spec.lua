@@ -91,3 +91,33 @@ assert(not next(crafted.item.cells) and not next(granted.item.cells))
 assert(NHStore.warehouseCapacity(s,"collection")==48 and NHStore.buyUpgrade(s,{id="warehouse_collection",level=0}))
 assert(NHStore.warehouseCapacity(s,"collection")==72 and NHStore.warehouseCapacity(s,"equipment")==48)
 print("Card wallets: craft and test grant have separate equipment slots and independent empty contents.")
+
+-- Each tier is crafted independently and consumes only completely empty flasks.
+for _,entry in ipairs({{"pouch_2","pouch",2,8,50,30},{"pouch_3","pouch",3,12,100,60},
+    {"card_wallet_2","card_wallet",2,8,8,30},{"card_wallet_3","card_wallet",3,12,12,60}}) do
+    local id,kind,tier,capacity,cost,seconds=unpack(entry)
+    if kind=="pouch" then s.materials.slime=cost else s.resources.fiber=cost end
+    for i=1,tier-1 do add_flask(i+1,{}) end
+    assert(not NHStore.startOrder(s,id))
+    add_flask(tier+1,{})
+    assert(NHStore.startOrder(s,id))
+    local slot=s.order.output.slot
+    assert(s.order.output.item.tier==tier and s.order.required==seconds*60)
+    assert(not s.materials.slime and not s.resources.fiber and NHStore.emptyContainerCount(s)==0)
+    persist()
+    assert(NHStore.advanceProduction(s,{run=run,orderId=s.order.id,progress=seconds*60}))
+    persist()
+    local item=kind=="pouch" and NHPouches.at(s,"warehouse",slot) or s.warehouse[NHStore.slotIndex(s,"warehouse",slot,kind)].item
+    assert(item.tier==tier and not next(item.cells) and NHEquipment.get(kind,item.tier).capacity==capacity)
+    if kind=="pouch" then
+        assert(NHStore.putPouchDose(item,1,capacity) and not NHStore.putPouchDose(item,1,capacity+1))
+    else
+        item.cells[capacity]=NHCompanions.withCount({species="dryad",remaining=40},1)
+        assert(NHCardWallets.valid(item))
+        item.cells[capacity+1]=item.cells[capacity]
+        assert(not NHCardWallets.valid(item))
+        item.cells[capacity+1]=nil
+    end
+    persist()
+end
+print("Equipment tiers: paid order, quantities, slot bounds and persistence passed.")

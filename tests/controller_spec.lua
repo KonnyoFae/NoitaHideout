@@ -111,12 +111,18 @@ function EntityLoad(path,x,y)
     if file:match("^stimulant") and fail_effect then return 0 end
     next_id=next_id+1
     entities[next_id]={x=x,y=y,parent=0,tags={["noita_hideout_"..file]=true},comps={}}
-    if file=="stimulant_healing" then EntityAddComponent2(next_id,"VariableStorageComponent",{value_int=60,value_float=2})
+    if file=="stimulant_healing" or file=="stimulant_healing_2" or file=="stimulant_regen_mana" then
+        EntityAddComponent2(next_id,"VariableStorageComponent",{value_int=60,value_float=file=="stimulant_healing_2" and 1 or 2})
+        if file=="stimulant_regen_mana" then EntityAddComponent2(next_id,"GameEffectComponent",{effect="MANA_REGENERATION",frames=-1}) end
     elseif file:match("^stimulant") then EntityAddComponent2(next_id,"GameEffectComponent",{frames=3600})
     elseif file:match("^dose_") then
         EntityAddTag(next_id,"noita_hideout_dose")
         EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png"})
-    elseif file:match("^card_") and file~="card_wallet" then
+    elseif file:match("^card_wallet") or file:match("^pouch") then
+        local kind=file:match("^card_wallet") and "card_wallet" or "pouch"
+        EntityAddTag(next_id,"noita_hideout_"..kind)
+        EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite="mods/noita_hideout/files/items/"..file..".png"})
+    elseif file:match("^card_") then
         EntityAddTag(next_id,"noita_hideout_summon_card")
         EntityAddTag(next_id,"nh_companion_"..file:sub(6))
         EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png",uses_remaining=80})
@@ -707,11 +713,12 @@ local first_id=pair.starterPouchId
 local first_pouch=assert(pair.pouches[first_id])
 first_pouch.cells={[1]={remaining=2,count=1},[2]={remaining=3,count=1}}
 first_pouch.doses=2
-local second_id=NHPouches.create(pair,"warehouse",1,0)
+local second_id=NHPouches.create(pair,"warehouse",1,0,3)
 assert(NHStore.commit(pair))
 boot()
 local both=tick()
 assert(both.secure_loot[first_pouch.slot].id==first_id and both.warehouse.equipment[1].id==second_id)
+assert(both.warehouse.equipment[1].icon==NHEquipment.get("pouch",3).icon and both.warehouse.equipment[1].capacity==12)
 local open_first={safeSlot=first_pouch.slot,pouchId=first_id}
 local open_second={safeSlot=1,container="warehouse",pouchId=second_id}
 tick(nil,"open_container",open_first)
@@ -723,26 +730,26 @@ local injector=assert(EntityGetWithTag("noita_hideout_dose")[1])
 assert(NHDoses.remaining(state(),injector)==2)
 tick(nil,"open_container",open_second)
 local second_view=tick()
-assert(second_view.pouchId==second_id and not next(second_view.cells))
+assert(second_view.pouchId==second_id and second_view.pouchCapacity==12 and not next(second_view.cells))
 tick(nil,"place",tool(injector)) -- stale target, retained in quick inventory
 assert(EntityGetIsAlive(injector) and state().pouches[second_id].doses==0)
 local insert=tool(injector)
-insert.pouchId,insert.targetCell=second_id,4
+insert.pouchId,insert.targetCell=second_id,12
 tick(nil,"place",insert)
-assert(not EntityGetIsAlive(injector) and tick().cells[4].remaining==2)
+assert(not EntityGetIsAlive(injector) and tick().cells[12].remaining==2)
 tick(nil,"open_container",open_first)
 local first_view=tick()
-assert(first_view.pouchId==first_id and first_view.cells[2].remaining==3 and not first_view.cells[4])
+assert(first_view.pouchId==first_id and first_view.pouchCapacity==4 and first_view.cells[2].remaining==3 and not first_view.cells[12])
 tick(nil,"open_container",{pouchId=second_id,safeSlot=first_pouch.slot})
 assert(tick().pouchId==first_id) -- stale record cannot open a new occupant of that slot
 boot()
 tick()
 tick(nil,"open_container",open_second)
-assert(tick().cells[4].remaining==2 and state().pouches[first_id].doses==1)
+assert(tick().cells[12].remaining==2 and state().pouches[first_id].doses==1)
 local to_case={pouchId=second_id,container="warehouse",source="warehouse",destination="safe",from=1,safeSlot=1}
 tick(nil,"move_pouch",to_case)
 local after_move=tick()
-assert(after_move.secure_loot[1].id==second_id and after_move.pouchId==second_id and after_move.cells[4].remaining==2)
+assert(after_move.secure_loot[1].id==second_id and after_move.pouchId==second_id and after_move.cells[12].remaining==2)
 local return_to_stash={pouchId=second_id,container="safe",source="safe",destination="warehouse",from=1,safeSlot=2}
 entities[player].x=900
 tick(nil,"move_pouch",return_to_stash)
@@ -754,7 +761,7 @@ assert(state().pouches[second_id].location=="safe")
 return_to_stash.pouchId=second_id
 tick(nil,"move_pouch",return_to_stash)
 local returned=tick()
-assert(returned.warehouse.equipment[2].id==second_id and returned.pouchId==second_id and returned.cells[4].remaining==2)
+assert(returned.warehouse.equipment[2].id==second_id and returned.pouchId==second_id and returned.cells[12].remaining==2)
 print("Controller: independent selected pouches, durability, stale drag cancellation and reload passed.")
 
 -- Reach actual workshop hitboxes. A boundary in another biome, a nearby
@@ -1315,7 +1322,7 @@ do
     assert(NHStore.commit(s))
     boot()
     local effects={}
-    for i,kind in ipairs(NHInjectors.order) do
+    for i,kind in ipairs({"fire","lightning","frost","healing"}) do
         local d=NHInjectors.get(kind)
         inventory_open=true
         tick()

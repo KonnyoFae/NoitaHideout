@@ -78,7 +78,7 @@ function NHDoses.takePouch(s, player, deliver, pouchId)
     local pouch=s.pouches[pouchId]
     if not is_open_run(s) or not pouch or (pouch.location~="safe" and pouch.location~="warehouse") then return nil, "Pouch unavailable." end
     local x, y = EntityGetTransform(player)
-    local id, err = NHNative.spawn("pouch", x, y - 4)
+    local id, err = NHNative.spawn("pouch", x, y - 4, pouch.tier)
     if not id then return nil, err end
     local changed = draft(s)
     local token = table.concat({s.profile,s.runSerial,s.nextItemId,GameGetFrameNum(),id}, "/")
@@ -88,7 +88,7 @@ function NHDoses.takePouch(s, player, deliver, pouchId)
         return nil, "Could not mark the pouch."
     end
     changed.pouches[pouchId]={id=pouchId,location="bag",token=token,originContainer=pouch.location,
-        slot=pouch.slot,x=x,y=y,doses=pouch.doses,cells=pouch.cells}
+        slot=pouch.slot,x=x,y=y,tier=pouch.tier,doses=pouch.doses,cells=pouch.cells}
     changed.nextItemId = changed.nextItemId + 1
     if deliver and not deliver(id) then
         dispose(player, id)
@@ -110,7 +110,7 @@ function NHDoses.storePouch(s, player, id, preferred, container)
     local slot = NHStore.freeSlot(s,container,preferred,"pouch")
     if not slot then return nil, "Secure valuables slot is full." end
     local pouch=s.pouches[pouchId]
-    changed.pouches[pouchId]={id=pouchId,location=container,slot=slot,cells=pouch.cells,doses=pouch.doses}
+    changed.pouches[pouchId]={id=pouchId,location=container,slot=slot,tier=pouch.tier,cells=pouch.cells,doses=pouch.doses}
     local ok, reason = commit(s, changed)
     if not ok then return nil, reason end
     dispose(player, id)
@@ -333,7 +333,7 @@ function NHDoses.reconcile(s, player)
             local slot=NHStore.freeSlot(current,container,pouch.slot,"pouch") or NHStore.freeSlot(current,container,nil,"pouch")
             if slot then
                 changed=changed or draft(s)
-                changed.pouches[pouch.id]={id=pouch.id,location=container,slot=slot,cells=pouch.cells,doses=pouch.doses}
+                changed.pouches[pouch.id]={id=pouch.id,location=container,slot=slot,tier=pouch.tier,cells=pouch.cells,doses=pouch.doses}
             end
         end
     end

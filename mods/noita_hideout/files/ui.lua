@@ -198,6 +198,9 @@ local function item_details(slot,model,tr)
     end
     if slot.kind=="pouch" or slot.kind=="card_wallet" then
         local details={slot.name,tr("点击或右键打开，拖动移动","Click or right-click to open. Drag to move.")}
+        if slot.view and slot.view.capacity then
+            table.insert(details,2,tr("容量 ","Slots ")..slot.view.capacity)
+        end
         if slot.view and slot.view.doses then
             table.insert(details,2,tr("针剂数量 ","Injectors: ")..slot.view.doses)
         end
@@ -1065,7 +1068,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
                 if item.planned or item.maxed or item.unlocked==false then color=muted end
                 if spells and not spell_family then color=NHEssences.types[item.id].color end
                 local x=6
-                if spells and item.icon then
+                if crafting and item.icon then
                     local iw,ih=GuiGetImageDimensions(gui,item.icon)
                     if iw>0 and ih>0 then
                         GuiImage(gui,600+i,left+x*scale,top+row_y*scale,item.icon,1,10*scale/math.max(iw,ih))
@@ -1111,7 +1114,7 @@ local function draw_surgery(cast,tr,x,y,width,scale)
     end
 end
 
-local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layout,pw)
+local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layout,pw,ph,popupHeight)
     local frame = GameGetFrameNum()
     local fresh = last_case_frame ~= frame - 1
     if fresh then drag,page,loading = nil,1,nil end
@@ -1148,11 +1151,11 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             slots[#slots].remaining,slots[#slots].count,slots[#slots].subtype,slots[#slots].species=v.remaining,v.count,v.subtype,v.species
         end
     end
-    local popupY = standalone and 0 or -66
+    local popupY = model.popup and not standalone and -(popupHeight+5) or 0
     if model.popup then
         if not standalone then
             GuiZSetForNextWidget(gui,-79)
-            GuiImageNinePiece(gui,37,ox,oy+popupY*scale,pw*scale,61*scale,1)
+            GuiImageNinePiece(gui,37,ox,oy+popupY*scale,pw*scale,popupHeight*scale,1)
         end
         label(8,popupY+5,model.pouchName,pw-43,white)
         if GuiButton(gui,38,ox+(pw-34)*scale,oy+(popupY+5)*scale,tr("关闭","Close"),scale) then
@@ -1161,13 +1164,15 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             return
         end
         for i=1,(model.walletId and model.walletCapacity or model.pouchCapacity) do
+            local col=(i-1)%4
+            local rowY=popupY+23+math.floor((i-1)/4)*qh
             local cell=model.cells[i]
             if model.walletId then
                 local species=cell and NHCompanions.species[cell.species]
-                slot(i-1,popupY+23,"card_cell",cell and "summon_card",species and tr(species.zh,species.en) or tr("空格","Empty slot"),cell and cell.icon)
+                slot(col,rowY,"card_cell",cell and "summon_card",species and tr(species.zh,species.en) or tr("空格","Empty slot"),cell and cell.icon)
             else
                 local d=cell and NHInjectors.get(cell.subtype)
-                slot(i-1,popupY+23,"dose",cell and "dose",d and tr(d.zh,d.en) or tr("空格","Empty slot"),d and d.icon)
+                slot(col,rowY,"dose",cell and "dose",d and tr(d.zh,d.en) or tr("空格","Empty slot"),d and d.icon)
             end
             local v=slots[#slots]
             v.cell,v.pouchId,v.walletId=i,model.pouchId,model.walletId
@@ -1177,7 +1182,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
 
     local perk_top
     if not standalone then
-        perk_top=NHPerks.draw(gui,model,ox,oy,scale,pw,qw,qh,tr,slot,slots,function(action,args)
+        perk_top=NHPerks.draw(gui,model,ox,oy,scale,pw,qw,qh,popupY,tr,slot,slots,function(action,args)
             if not fresh and not drag then dispatch(action,args) end
         end)
     end
@@ -1336,8 +1341,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         local y = native_y + v.yslot*h
         if not standalone or not full then boxes[#boxes+1]={x=x,y=y,w=w,h=h,slot=v} end
     end
-    local panel_top=perk_top or (oy+(model.popup and popupY or 0)*scale)
-    panels[#panels+1]={x=ox,y=panel_top,w=pw*scale,h=oy+72*scale-panel_top,slot={key="panel"}}
+    local panel_top=perk_top or (oy+popupY*scale)
+    panels[#panels+1]={x=ox,y=panel_top,w=pw*scale,h=oy+ph*scale-panel_top,slot={key="panel"}}
     for _,box in ipairs(panels) do boxes[#boxes+1]=box end
     for _,v in ipairs(slots) do
         boxes[#boxes+1]={x=v.x,y=v.y,w=qw*scale,h=qh*scale,slot=v}
@@ -1563,11 +1568,24 @@ function NHUI.draw(model, dispatch)
 
     local at_home=model.near and model.mode=="case"
     local pw,ph=187,72
-    local s=math.min(1,(sw-10)/(at_home and 310 or pw),(sh-10)/(at_home and 173 or ph))
+    local qw,qh=GuiGetImageDimensions(gui,tile)
+    local popupHeight=0
+    if model.popup then
+        local capacity=model.walletId and model.walletCapacity or model.pouchCapacity
+        popupHeight=61+math.floor((capacity-1)/4)*qh
+    end
+    local rightHeight=ph
+    if model.mode=="container" then
+        ph=math.max(ph,popupHeight)
+        rightHeight=ph
+    else
+        if model.popup then rightHeight=rightHeight+popupHeight+5 end
+        rightHeight=rightHeight+NHPerks.panelSpace(model,qh)
+    end
+    local s=math.min(1,(sw-10)/(at_home and 310 or pw),(sh-10)/math.max(at_home and 173 or 0,rightHeight))
     if s<=0 then return end
     local layout
     if at_home then
-        local qw,qh=GuiGetImageDimensions(gui,tile)
         local content_height=qh+30+material_rows*11
         local function measure_home(scale)
             local panels=home_layout(sw,scale,qw)
@@ -1601,5 +1619,5 @@ function NHUI.draw(model, dispatch)
             draw_surgery(model.surgery,tr,ox+8*s,oy+4*s,width*s,s)
         else label(9,5,tr("安全箱","Secure case"),pw-16,white) end
     end
-    draw_case(model,ox,oy,s,sw,sh,tr,label,dispatch,layout,pw)
+    draw_case(model,ox,oy,s,sw,sh,tr,label,dispatch,layout,pw,ph,popupHeight)
 end

@@ -1,6 +1,7 @@
 NHNative = {}
 
 local item_path = "mods/noita_hideout/files/items/"
+local equipment=NHEquipment or dofile("mods/noita_hideout/files/equipment.lua")
 local injectors=NHInjectors or dofile("mods/noita_hideout/files/injectors.lua")
 local medkits=NHMedkits or dofile("mods/noita_hideout/files/medkits.lua")
 local surgery_kits=NHSurgeryKits or dofile("mods/noita_hideout/files/surgery_kits.lua")
@@ -14,8 +15,6 @@ function NHNative.registerTranslations()
     local original = ModTextFileGetContent(path)
     if not original then return end
     local labels = {
-        {"nh_hideout_card_wallet","Card wallet","卡片夹"},
-        {"nh_hideout_card_wallet_desc","Right-click to open the four-slot card wallet. Matching full-charge cards stack.","右键打开四格卡片夹。同种满耐久召唤卡可以叠放。"},
         {"nh_card_dryad","Dryad summon card","树精召唤卡"},
         {"nh_card_flower_fairy","Flower fairy summon card","花妖召唤卡"},
         {"nh_card_minotaur","Minotaur maiden summon card","米诺陶少女召唤卡"},
@@ -35,9 +34,16 @@ function NHNative.registerTranslations()
         {"nh_hideout_bandage_desc","Each roll restores up to 5 HP. The counter shows rolls left.","每卷最多恢复 5 点生命，数字为剩余卷数。"},
         {"nh_hideout_food_regen","Food regeneration","食物再生"},
         {"nh_hideout_food_regen_desc","Restores 1 HP every 4 seconds.","每 4 秒恢复 1 点生命。"},
-        {"nh_hideout_pouch", "Injector pouch", "针剂包"},
-        {"nh_hideout_pouch_desc", "Right-click to open the injector pouch. Drag injectors into or out of it.", "右键打开针剂包。拖动针剂即可存入或取出。"},
     }
+    for _,kind in ipairs({"pouch","card_wallet"}) do
+        for _,d in ipairs(equipment[kind]) do
+            local key=d.name:sub(2)
+            labels[#labels+1]={key,d.en,d.zh}
+            local zh=kind=="pouch" and " 个针剂格。同种满耐久针剂可以叠放。" or " 个卡片格。同种满耐久召唤卡可以叠放。"
+            local en=kind=="pouch" and " injector slots. Matching full syringes stack." or " card slots. Matching full-charge cards stack."
+            labels[#labels+1]={key.."_desc","Right-click to open. "..d.capacity..en,"右键打开，内有 "..d.capacity..zh}
+        end
+    end
     for _,catalog in ipairs({medkits,surgery_kits,throwables}) do
         for _,id in ipairs(catalog.order) do
             local definition=catalog.types[id]
@@ -90,6 +96,10 @@ function NHNative.spawn(kind, x, y, subtype)
         local dose=injectors.get(subtype)
         if not dose then return nil,"Unknown hideout item." end
         filename=dose.filename
+    elseif kind=="pouch" then
+        local pouch=equipment.get(kind,subtype)
+        if not pouch then return nil,"Unknown hideout item." end
+        filename=pouch.filename
     end
     local item = EntityLoad(item_path .. filename .. ".xml", x, y)
     if not item or item == 0 then return nil, "Could not create " .. kind .. "." end
