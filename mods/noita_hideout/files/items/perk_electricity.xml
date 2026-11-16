@@ -1,0 +1,10 @@
+<Entity name="$perk_protection_electricity" tags="noita_hideout_perk_card,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="data/items_gfx/perks/protection_electricity.png" />
+        <SpriteComponent image_file="data/items_gfx/perks/protection_electricity.png" offset_x="8" offset_y="8" />
+        <ItemComponent item_name="$perk_protection_electricity" ui_description="$perkdesc_protection_electricity" ui_sprite="data/ui_gfx/perk_icons/protection_electricity.png" />
+        <UIInfoComponent name="$perk_protection_electricity" />
+        <AbilityComponent ui_name="$perk_protection_electricity" />
+    </Base>
+    <VariableStorageComponent _tags="noita_hideout_perk_type" name="noita_hideout_perk_type" value_string="PROTECTION_ELECTRICITY" value_int="0" />
+</Entity>

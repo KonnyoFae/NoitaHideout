@@ -9,6 +9,15 @@ local warehouse_tabs = {
     {"supplies","消耗品","Supplies"}, {"materials","物料","Materials"},
 }
 local workshop_folded=false
+local project_pages={expansion=1,upgrade=1}
+local selected_project,selected_recipe,salvage_target
+local projects_per_page=5
+local work_tabs={
+    {key="orders",id=212,zh="工坊",en="Workshop"},
+    {key="expansion",id=218,zh="扩建",en="Build"},
+    {key="upgrade",id=219,zh="升级",en="Upgrades"},
+    {key="samples",id=213,zh="测试物资",en="Supplies"},
+}
 local white = { 0.96, 0.93, 0.84 }
 local gold = { 1.00, 0.83, 0.47 }
 local muted = { 0.76, 0.80, 0.78 }
@@ -151,8 +160,40 @@ end
 
 local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local left,width=layout.middle,layout.bench
-    if not model.debug then tab="orders" end
-    local height=workshop_folded and 18 or (tab=="orders" and (model.debug and 118 or 102) or 91)
+    if not model.debug and tab=="samples" then tab="orders" end
+    local tx,ty=6,18
+    local nav={}
+    for _,t in ipairs(work_tabs) do
+        if t.key~="samples" or model.debug then
+            local name=tr(t.zh,t.en)
+            local w=GuiGetTextDimensions(gui,name,scale)/scale
+            if tx>6 and tx+w>width-5 then tx,ty=6,ty+13 end
+            nav[#nav+1]={id=t.id,key=t.key,name=name,x=tx,y=ty}
+            tx=tx+w+7
+        end
+    end
+    local body=ty+16
+    local menu=model.progression[tab]
+    local selected
+    for _,item in ipairs(menu or {}) do
+        if item.id==selected_project then selected=item; break end
+    end
+    local recipes=model.recipes
+    local rindex=1
+    for i,recipe in ipairs(recipes) do if recipe.id==selected_recipe then rindex=i; break end end
+    local recipe=recipes[rindex]
+    local salvage
+    if salvage_target and model.salvage_enabled then
+        local category=model.warehouse[salvage_target.kind]
+        salvage=category and category[salvage_target.slot]
+        if not salvage or salvage.id~=salvage_target.id then salvage_target,salvage=nil,nil end
+    end
+    local body_height=62
+    if salvage then body_height=77
+    elseif selected then body_height=80+12*#selected.costs
+    elseif menu then body_height=16+projects_per_page*13
+    elseif tab=="orders" then body_height=69+12*#recipe.inputs+(model.debug and 14 or 0) end
+    local height=workshop_folded and 18 or body+body_height
     local top=sh-5-height*scale
     local function label(y,value,color)
         local txt,short=fit(value,(width-12)*scale,scale)
@@ -175,32 +216,100 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         return hover
     end
     if workshop_folded then return hover end
-    local workshop=tr("工坊","Workshop")
-    if button(212,6,18,workshop,tab=="orders" and gold or muted) then tab="orders"; return hover end
-    local second=12+GuiGetTextDimensions(gui,workshop,scale)/scale
-    if model.debug and button(213,second,18,tr("测试物资","Supplies"),tab=="samples" and gold or muted) then
-        tab="samples"
-        return hover
-    end
-    if tab=="orders" then
-        label(33,tr("稳定传送液 ×500","Teleportatium ×500"))
-        local inputs=NHStore.recipe.inputs
-        for i,input in ipairs(inputs) do
-            local name=i==1 and tr("不稳定传送液","Unstable teleportatium") or tr("黏液","Slime")
-            label(47+(i-1)*12,name.."  "..compact(model.ingredients[input.name] or 0).." / "..input.amount,muted)
+    for _,t in ipairs(nav) do
+        if button(t.id,t.x,t.y,t.name,t.key==tab and gold or muted) then
+            tab,selected_project,salvage_target=t.key,nil,nil
+            return hover
         end
-        if model.order_active then label(74,tr("已投料 · 等待通关","Queued · awaiting clear"),green)
-        elseif model.batch_available then
-            if button(214,6,74,tr("从物料库存投料","Start batch from stock")) then dispatch("order") end
-        else label(74,tr("原料不足，请先卸料","Unload missing ingredients"),muted) end
-        label(88,model.reward_spent and tr("下次通关后入库","Delivered on next run's clear")
+    end
+    -- Keep the amounts visible even if a long localized ingredient name needs a tooltip.
+    local function cost(y,name,have,need)
+        local amount=compact(have).." / "..compact(need)
+        local right=width-6-GuiGetTextDimensions(gui,amount,scale)/scale
+        local txt,short=fit(name,(right-9)*scale,scale)
+        tint(muted)
+        GuiText(gui,left+6*scale,top+y*scale,txt,scale)
+        if short then GuiTooltip(gui,name,"") end
+        tint(have>=need and green or gold)
+        GuiText(gui,left+right*scale,top+y*scale,amount,scale)
+        GuiTooltip(gui,name.."  "..have.." / "..need,"")
+    end
+    if salvage then
+        label(body,tr("拆解","Dismantle"),gold)
+        label(body+13,salvage.name)
+        label(body+27,tr("奥术碎片 +","Arcane scrap +")..salvage.salvage_yield,green)
+        label(body+39,tr("现有碎片 ","Current scrap ")..compact(model.scrap),muted)
+        if button(260,6,body+53,tr("确认拆解","Dismantle item")) then
+            dispatch("salvage",salvage_target)
+            salvage_target=nil
+        elseif button(261,6,body+65,tr("取消","Cancel")) then salvage_target=nil end
+    elseif menu and selected then
+        if button(240,6,body,tr("< 返回列表","< Projects")) then selected_project=nil; return hover end
+        label(body+14,selected.name,gold)
+        label(body+27,tr("当前：","Now: ")..selected.current)
+        if selected.next then label(body+39,tr("升级后：","Next: ")..selected.next,green) end
+        local y=body+51
+        if #selected.costs>0 then
+            label(y,tr("物料  库存 / 所需","Materials  stock / cost"),muted)
+            for _,input in ipairs(selected.costs) do
+                y=y+12
+                cost(y,input.name,input.available,input.amount)
+            end
+            y=y+13
+        end
+        if selected.canBuy then
+            local confirm=tab=="expansion" and tr("确认扩建","Confirm build") or tr("确认升级","Confirm upgrade")
+            if button(241,6,y,confirm) then
+                dispatch("buy_upgrade",{id=selected.id,level=selected.level})
+                selected_project=nil
+            end
+        elseif selected.planned then label(y,tr("尚未开放","In development"),muted)
+        elseif selected.maxed then label(y,tr("已完成","Complete"),green)
+        else label(y,tr("所需物料不足","Insufficient stock"),gold) end
+    elseif menu then
+        local pages=math.max(1,math.ceil(#menu/projects_per_page))
+        local current=math.min(project_pages[tab],pages)
+        if pages>1 then
+            if button(242,6,body,"<",current>1 and gold or muted) then current=math.max(1,current-1) end
+            if button(243,width-14,body,">",current<pages and gold or muted) then current=math.min(pages,current+1) end
+            tint(muted)
+            GuiText(gui,left+(width/2-8)*scale,top+body*scale,current.."/"..pages,scale)
+        end
+        project_pages[tab]=current
+        for i=1,projects_per_page do
+            local item=menu[(current-1)*projects_per_page+i]
+            if item and button(243+i,6,body+(pages>1 and 13 or 0)+(i-1)*13,item.name,item.planned and muted or white) then
+                selected_project=item.id
+                return hover
+            end
+        end
+    elseif tab=="orders" then
+        local y=body
+        if #recipes>1 then
+            if button(250,6,y,"<") then selected_recipe=recipes[(rindex-2)%#recipes+1].id; return hover end
+            if button(251,width-14,y,">") then selected_recipe=recipes[rindex%#recipes+1].id; return hover end
+            tint(muted)
+            GuiText(gui,left+(width/2-8)*scale,top+y*scale,rindex.."/"..#recipes,scale)
+            y=y+13
+        end
+        label(y,recipe.name.." ×"..recipe.output)
+        for _,input in ipairs(recipe.inputs) do
+            y=y+12
+            cost(y,input.name,input.available,input.amount)
+        end
+        y=y+15
+        if model.order_active then label(y,tr("生产中：","Queued: ")..model.order_name,green)
+        elseif recipe.ready then
+            if button(214,6,y,tr("从物料库存投料","Start batch from stock")) then dispatch("craft",{id=recipe.id}) end
+        else label(y,recipe.reason or tr("材料或空位不足","Need stock or space"),muted) end
+        label(y+13,model.reward_spent and tr("下次通关后入库","Delivered on next run's clear")
             or tr("本局通关后入库","Delivered on this run's clear"),muted)
-        if model.debug and button(215,6,103,tr("模拟通关","Simulate clear"),gold,
+        if model.debug and button(215,6,y+28,tr("模拟通关","Simulate clear"),gold,
             tr("每局仅结算一次通关奖励。","Uses this run's one clear reward.")) then dispatch("simulate") end
     else
-        if button(216,6,37,tr("生成测试魔杖和混合瓶","Spawn wand and flask")) then dispatch("preview_items") end
-        label(50,tr("在脚边拾取样品","Pick up the samples at your feet"),muted)
-        if button(217,6,65,tr("重发测试针剂包","Reissue test pouch"),gold,
+        if button(216,6,body+3,tr("生成测试魔杖和混合瓶","Spawn wand and flask")) then dispatch("preview_items") end
+        label(body+17,tr("在脚边拾取样品","Pick up the samples at your feet"),muted)
+        if button(217,6,body+33,tr("重发测试针剂包","Reissue test pouch"),gold,
             tr("替换现有针剂包，内含两支激活剂。","Replace the current pouch with two doses.")) then dispatch("restock") end
     end
     return hover
@@ -262,6 +371,12 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         end
     end
 
+    local perk_top
+    if not standalone then
+        perk_top=NHPerks.draw(gui,model,ox,oy,scale,pw,qw,qh,tr,slot,slots,function(action,args)
+            if not fresh and not drag then dispatch(action,args) end
+        end)
+    end
     local stock_tip
     local panel_hover=false
     if layout then
@@ -312,13 +427,10 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             end
             local bulk=warehouse_tab=="materials"
             local per_page=bulk and material_rows*2 or cols*math.floor(content_height/qh)
+            local capacity=model.warehouse_capacity[warehouse_tab]
             local pages
             if bulk then pages=math.max(1,math.ceil(#model.materials/per_page))
-            else
-                -- Keep a spare writable page even when the last occupied grid is only partly filled.
-                local last=model.warehouse_last[warehouse_tab] or 0
-                pages=math.max(1,math.ceil(last/per_page))+1
-            end
+            else pages=math.max(1,math.ceil(capacity/per_page)) end
             local current=warehouse_pages[warehouse_tab] or 1
             local page_no=warehouse_pager(left+4*scale,top+(height-17)*scale,width-8,scale,current,pages)
             if current~=page_no then loading=nil end
@@ -346,7 +458,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                     end
                 end
                 local y=grid_y+qh+15
-                GuiText(gui,left+8*scale,top+y*scale,tr("库存","Stock"),scale)
+                GuiText(gui,left+8*scale,top+y*scale,tr("库存 ","Stock ")..#materials.."/"..capacity,scale)
                 if #materials==0 then
                     tint(muted)
                     GuiText(gui,left+8*scale,top+(y+13)*scale,tr("库存为空","Empty"),scale)
@@ -395,7 +507,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                 if not held_target then loading=nil end
             else
                 local rows=model.warehouse[warehouse_tab] or {}
-                for i=0,per_page-1 do
+                for i=0,math.min(per_page,capacity-(page_no-1)*per_page)-1 do
                     local n=(page_no-1)*per_page+i+1
                     local v=rows[n] or {}
                     slot(i%cols,grid_y+math.floor(i/cols)*qh,"warehouse",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id,left,top)
@@ -424,7 +536,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         local y = native_y + v.yslot*h
         if (not standalone or not full) and mx>=x and my>=y and mx<x+w and my<y+h then hovered=v; break end
     end
-    if panel_hover then hovered={key="panel"} end
+    if panel_hover or (perk_top and mx>=ox and mx<ox+pw*scale and my>=perk_top and my<oy) then hovered={key="panel"} end
     for _,v in ipairs(slots) do
         if mx>=v.x and my>=v.y and mx<v.x+qw*scale and my<v.y+qh*scale then hovered=v end
     end
@@ -432,7 +544,12 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         hovered = {key="panel"}
     end
     if drag and model.revision~=drag.revision then drag=nil end
-    if not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind then
+    if model.salvage_enabled and hovered and hovered.key=="warehouse" and hovered.view and hovered.view.salvage_yield
+        and not fresh and not drag and InputIsMouseButtonJustDown(2) then
+        salvage_target={id=hovered.entity,kind=hovered.kind,slot=hovered.safeSlot}
+        workshop_folded=false
+    end
+    if not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind and hovered.kind~="reserved" then
         drag={source=hovered,revision=model.revision,x=mx,y=my}
     end
     if drag and ((mx-drag.x)^2+(my-drag.y)^2)>9*scale^2 then drag.moved=true end
@@ -445,6 +562,12 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         end
         local from_store=source.key=="valuable" or source.key=="warehouse"
         local to_store=target.key=="valuable" or target.key=="warehouse"
+        if model.mode=="case" and source.kind=="perk" and not target.kind then
+            if from_store and target.key=="perk" then return "equip_stored_perk",source end
+            if source.key=="perk" and to_store and (target.key=="valuable" or warehouse_tab=="supplies") then
+                return "store_equipped_perk",source
+            end
+        end
         if source.kind=="pouch" and from_store and source.key==target.key and not target.kind then
             return "move_pouch",source,target.safeSlot
         end
@@ -474,6 +597,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             return "pack_dose",source,source.safeSlot
         end
         if source.key=="native" then
+            if target.key=="perk" and not target.kind and source.kind=="perk" then return "equip_perk",source,target.perkSlot end
             if target.key=="dose" and model.popup and source.kind=="dose" and (not target.kind or canStack) then return "place",source end
             if to_store and (not target.kind or canStack) and source.kind~="other"
                 and (target.key~="warehouse" or NHStore.category(source.kind)==warehouse_tab) then
@@ -483,6 +607,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         elseif target.key=="native" and not target.entity then
             local lane=source.kind=="spell" and "spell" or (source.kind=="wand" and "wand" or "tool")
             if target.lane~=lane then return end
+            if source.key=="perk" then return "unequip_perk",target,source.perkSlot,source.entity end
             if source.kind=="pouch" then return "take_pouch",target,source.safeSlot end
             if from_store or source.key=="docks" then return "secure_withdraw",target,source.safeSlot,source.entity end
             if source.key=="dose" then return "take_dose",target end
@@ -510,9 +635,11 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         GuiImage(gui,id,x-w*zoom/2,y-h*zoom/2,image,alpha,zoom)
     end
     for i,v in ipairs(slots) do
-        if drop(v)=="place" then tint(green) end
+        local placement=drop(v)
+        if placement=="place" or placement=="equip_stored_perk" or placement=="store_equipped_perk" then tint(green) end
         GuiImage(gui,1000+i,v.x,v.y,tile,1,scale)
-        if v.kind then sprite(v,2000+i,v.x+qw*scale/2,v.y+qh*scale/2,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and 0.35 or 1)
+        if v.kind=="reserved" then GuiText(gui,v.x+5*scale,v.y+3*scale,"...",scale)
+        elseif v.kind then sprite(v,2000+i,v.x+qw*scale/2,v.y+qh*scale/2,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and source.perkSlot==v.perkSlot and 0.35 or 1)
         end
         if v.kind=="dose" then
             local remaining=v.remaining or model.maxUses
@@ -528,6 +655,9 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         tip={action and action~="cancel_native" and tr("松开放置","Release to place") or tr("拖至对应空格","Drag to a matching slot")}
     elseif hovered and hovered.kind and hovered.key~="native" then
         tip=item_details(hovered,model,tr)
+        if model.salvage_enabled and hovered.key=="warehouse" and hovered.view.salvage_yield then
+            tip[#tip+1]=tr("右键预览拆解","Right-click to preview dismantling")
+        end
     end
     if tip then cursor_tip(tip,mx,my,sw,sh,scale) end
     if standalone or pw>=145 or model.capacity<=3 then
@@ -536,6 +666,11 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     if drag and InputIsMouseButtonJustUp(1) then
         local action, arg, safeSlot, storedId = drop(hovered)
         drag=nil
+        if action=="equip_stored_perk" or action=="store_equipped_perk" then
+            dispatch(action,{entity=source.entity,container=storage_key(source.key) or storage_key(hovered.key),
+                storageSlot=source.safeSlot or hovered.safeSlot,perkSlot=source.perkSlot or hovered.perkSlot})
+            return
+        end
         if action then
             local request = {parent=arg.parent,lane=arg.lane,xslot=arg.xslot,yslot=arg.yslot,
                 entity=arg.entity,safeSlot=safeSlot,storedId=storedId,from=arg.safeSlot,kind=source.kind,
@@ -549,7 +684,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
 end
 
 function NHUI.draw(model, dispatch)
-    if not model.open then drag,last_case_frame=nil,nil end
+    if not model.open then drag,last_case_frame,salvage_target=nil,nil,nil end
     if not gui then gui = GuiCreate() end
     GuiStartFrame(gui)
     GuiZSet(gui, -80)

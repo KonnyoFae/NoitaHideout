@@ -109,8 +109,14 @@ end
 local function dispose(entity, player)
     local owner
     if player and player ~= 0 and EntityGetRootEntity(entity) == player then owner = player end
-    if NHTransfers.item_kind(entity) == "potion" then
+    local kind=NHTransfers.item_kind(entity)
+    if kind == "potion" then
         NHPotion.discard(entity, owner)
+    elseif kind=="perk" and owner and EntityGetParent(entity)==owner then
+        -- Equipped cards sit outside the engine's inventories. Detach the
+        -- effect immediately on commit or when rolling back a delivery.
+        EntityRemoveFromParent(entity)
+        EntityKill(entity)
     elseif owner then
         GameKillInventoryItem(owner, entity)
     else
@@ -168,18 +174,7 @@ local function quick_item(player, item)
     return false
 end
 
-function NHTransfers.deposit(s, player, container, selected, preferred)
-    local dest = container_name(container)
-    if not dest then return nil, "Unknown container." end
-    local inv = EntityGetFirstComponentIncludingDisabled(player, "Inventory2Component")
-    local item = selected or (inv and ComponentGetValue2(inv, "mActiveItem"))
-    local parent = item and item ~= 0 and EntityGetIsAlive(item) and EntityGetParent(item)
-    local loose = parent and parent ~= 0 and EntityGetName(parent) == "inventory_full"
-        and EntityGetParent(parent) == player and NHTransfers.item_kind(item) == "spell"
-    if not loose and not quick_item(player, item) then
-        if selected then return nil, "The selected item is no longer in your quick inventory." end
-        return nil, "Hold a wand or flask first."
-    end
+local function deposit_item(s,player,dest,item,preferred,equipped_record)
     local source = marker(item)
     if source then
         local ids, origins = storage_ids(s)
@@ -194,7 +189,8 @@ function NHTransfers.deposit(s, player, container, selected, preferred)
 
     local adapter = codec(kind)
     if not adapter then return nil, "This item has no storage adapter." end
-    local record, err = adapter.capture(item)
+    local record, err = equipped_record
+    if not record then record,err=adapter.capture(item) end
     if not record then return nil, err end
     if record.kind~=kind then return nil,"Invalid item record." end
     if dest=="docks" and NHPotion.dockSlot(record)~=slot then return nil,"Wrong loading slot." end
@@ -215,6 +211,30 @@ function NHTransfers.deposit(s, player, container, selected, preferred)
     if not ok then return nil, reason end
     dispose(item, player)
     return true
+end
+
+function NHTransfers.deposit(s, player, container, selected, preferred)
+    local dest = container_name(container)
+    if not dest then return nil, "Unknown container." end
+    local inv = EntityGetFirstComponentIncludingDisabled(player, "Inventory2Component")
+    local item = selected or (inv and ComponentGetValue2(inv, "mActiveItem"))
+    local parent = item and item ~= 0 and EntityGetIsAlive(item) and EntityGetParent(item)
+    local loose = parent and parent ~= 0 and EntityGetName(parent) == "inventory_full"
+        and EntityGetParent(parent) == player and NHTransfers.item_kind(item) == "spell"
+    if not loose and not quick_item(player, item) then
+        if selected then return nil, "The selected item is no longer in your quick inventory." end
+        return nil, "Hold a wand or flask first."
+    end
+    return deposit_item(s,player,dest,item,preferred)
+end
+
+function NHTransfers.depositEquippedPerk(s,player,request)
+    if request.container~="safe" and request.container~="warehouse" then return nil,"Unknown container." end
+    local perk=customItems.perk
+    if not perk then return nil,"Stored item type is unsupported." end
+    local record,reason=perk.adapter.captureEquipped(s,player,request.perkSlot,request.entity)
+    if not record then return nil,reason end
+    return deposit_item(s,player,request.container,request.entity,request.storageSlot,record)
 end
 
 function NHTransfers.withdraw(s, player, index, container, deliver)
@@ -297,23 +317,27 @@ function NHTransfers.reconcile(s, player)
             and math.abs(x - release.x) < 64 and math.abs(y - release.y) < 64
             and DoesWorldExistAt(math.floor(release.x) - 16, math.floor(release.y) - 16,
                 math.ceil(release.x) + 16, math.ceil(release.y) + 16) then
-            changed = changed or draft(s)
+            local current=changed or s
             local dest = release.container
             local row = copy(release.row)
             if dest == "safe" then
-                row.slot = NHStore.freeSafeSlot(changed,row.slot or 1) or NHStore.freeSafeSlot(changed)
+                row.slot = NHStore.freeSafeSlot(current,row.slot or 1) or NHStore.freeSafeSlot(current)
                 if not row.slot then dest = "warehouse" end
             end
-            if dest=="docks" and not NHStore.freeSlot(changed,dest,row.slot,row.item.kind) then
+            if dest=="docks" and not NHStore.freeSlot(current,dest,row.slot,row.item.kind) then
                 dest,row.slot="warehouse",nil
             end
-            if dest=="warehouse" then row.slot=NHStore.freeSlot(changed,dest,row.slot,row.item.kind) or NHStore.freeSlot(changed,dest,nil,row.item.kind) end
-            if not ids[release.row.id] then
-                table.insert(changed[dest], row)
-                ids[release.row.id] = true
+            if dest=="warehouse" then row.slot=NHStore.freeSlot(current,dest,row.slot,row.item.kind) or NHStore.freeSlot(current,dest,nil,row.item.kind) end
+            -- A full warehouse keeps the release in the journal for a later retry.
+            if row.slot or ids[release.row.id] then
+                changed=changed or draft(s)
+                if not ids[release.row.id] then
+                    table.insert(changed[dest],row)
+                    ids[release.row.id]=true
+                end
+                changed.transit.retired[token] = true
+                changed.transit.issued[token] = nil
             end
-            changed.transit.retired[token] = true
-            changed.transit.issued[token] = nil
         end
     end
     if changed then return commit(s, changed) end

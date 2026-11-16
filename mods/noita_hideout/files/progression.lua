@@ -1,0 +1,155 @@
+-- All purchases operate on the detached profile passed to NHStore.commit.
+local catalog = {}
+local definitions = {}
+local function define(id,group,zh,en,max,cost,options)
+    local entry=options or {}
+    entry.id,entry.group,entry.zh,entry.en,entry.max,entry.cost=id,group,zh,en,max,cost
+    catalog[#catalog+1]=entry
+    definitions[id]=entry
+end
+
+local stock_cost={{"sand",200},{"water",100}}
+define("warehouse_wand","expansion","魔杖库","Wand storage",4,stock_cost,{category="wand"})
+define("warehouse_spell","expansion","法术库","Spell storage",4,stock_cost,{category="spell"})
+define("warehouse_containers","expansion","容器库","Container storage",4,stock_cost,{category="containers"})
+define("warehouse_supplies","expansion","消耗品库","Supply storage",4,stock_cost,{category="supplies"})
+define("warehouse_materials","expansion","物料库","Material storage",4,{{"sand",250},{"slime",100}},{category="materials"})
+define("medical","expansion","医疗工位","Medical station",1,{{"water",250},{"slime",100}},
+    {effect={"制造医疗物品","Craft medical supplies"}})
+define("injector","expansion","针剂工位","Injector station",1,{{"water",250},{"oil",100}},
+    {effect={"制造针剂","Craft injectors"}})
+define("grenade","expansion","手雷工位","Grenade station",1,{{"gunpowder",150},{"oil",100}},
+    {effect={"制造手雷","Craft grenades"}})
+define("salvage","expansion","拆解台","Salvage bench",1,{{"sand",250},{"oil",100}},
+    {effect={"拆解魔杖与法术","Salvage wands and spells"}})
+define("support","expansion","支援站","Support station",0,{},
+    {planned=true,effect={"呼叫支援","Call for support"}})
+define("perk_pack","expansion","特质打包台","Perk packing",1,{{"slime",200},{"arcane_scrap",1}},
+    {effect={"封装附近未拾取的免疫特质","Pack nearby immunity perks"}})
+define("safe","upgrade","随身安全箱","Secure case",4,{{"sand",250},{"slime",150}})
+define("perk_slots","upgrade","特质栏","Perk slots",3,{{"water",250},{"slime",100}})
+
+local material_names={
+    water={"水","Water"},sand={"沙","Sand"},slime={"黏液","Slime"},oil={"油","Oil"},
+    gunpowder={"火药","Gunpowder"},arcane_scrap={"奥术碎片","Arcane scrap"},
+}
+local function inventory(s,key)
+    if key=="arcane_scrap" then return s.resources end
+    return s.materials
+end
+
+function NHStore.level(s,id)
+    return (s.levels and s.levels[id]) or 0
+end
+
+local function base_capacity(category) return category=="materials" and 16 or 48 end
+function NHStore.warehouseCapacity(s,category)
+    local base=(s.storageBase and s.storageBase[category]) or base_capacity(category)
+    local step=category=="materials" and 8 or 24
+    return base+step*NHStore.level(s,"warehouse_"..category)
+end
+
+-- Count material types after payment and delivery, including an already
+-- funded order's output so unloading another container cannot displace it.
+local function material_slots(s,incoming,outgoing)
+    local present={}
+    for name,count in pairs(s.materials) do
+        if count>((outgoing and outgoing[name]) or 0) then present[name]=true end
+    end
+    for name,count in pairs(incoming or {}) do if count>0 then present[name]=true end end
+    local reserved=s.order and s.order.output and s.order.output.materials
+    for name,count in pairs(reserved or {}) do if count>0 then present[name]=true end end
+    local n=0
+    for _ in pairs(present) do n=n+1 end
+    return n
+end
+
+function NHStore.canStockMaterials(s,incoming,outgoing)
+    return material_slots(s,incoming,outgoing)<=NHStore.warehouseCapacity(s,"materials")
+end
+
+local function description(s,entry,offset,lang)
+    local zh=lang=="zh"
+    if entry.category then
+        local is_bulk=entry.category=="materials"
+        local amount=NHStore.warehouseCapacity(s,entry.category)+offset*(is_bulk and 8 or 24)
+        if is_bulk then return amount..(zh and " 种物料" or " material types") end
+        return amount..(zh and " 格" or " slots")
+    end
+    if entry.id=="safe" then return (NHStore.safeCapacity(s)+offset)..(zh and " 格" or " slots") end
+    local level=NHStore.level(s,entry.id)+offset
+    if entry.id=="perk_slots" then return level..(zh and " 个特质栏位" or " perk slots") end
+    if level==0 then return zh and "未解锁" or "Locked" end
+    return entry.effect[zh and 1 or 2]
+end
+
+function NHStore.progressMenu(s,lang)
+    local result={expansion={},upgrade={}}
+    local zh=lang=="zh"
+    for _,entry in ipairs(catalog) do
+        local level=NHStore.level(s,entry.id)
+        local maxed=not entry.planned and level>=entry.max
+        local row={id=entry.id,name=zh and entry.zh or entry.en,level=level,planned=entry.planned or false,
+            maxed=maxed,canBuy=not maxed and not entry.planned,costs={},current=description(s,entry,0,lang)}
+        if entry.planned then row.next=(zh and "后续开放 · " or "Planned: ")..entry.effect[zh and 1 or 2]
+        elseif maxed then row.next=zh and "已满级" or "Max level"
+        else
+            row.next=description(s,entry,1,lang)
+            for _,part in ipairs(entry.cost) do
+                local key,amount=part[1],part[2]*(level+1)
+                local available=inventory(s,key)[key] or 0
+                row.costs[#row.costs+1]={key=key,name=material_names[key][zh and 1 or 2],amount=amount,available=available}
+                if available<amount then row.canBuy=false end
+            end
+        end
+        table.insert(result[entry.group],row)
+    end
+    return result
+end
+
+function NHStore.buyUpgrade(s,request)
+    local entry=type(request)=="table" and definitions[request.id]
+    if not entry or entry.planned then return false,"Construction unavailable." end
+    local level=NHStore.level(s,entry.id)
+    if level~=request.level or level>=entry.max then return false,"Upgrade level changed." end
+    for _,part in ipairs(entry.cost) do
+        if (inventory(s,part[1])[part[1]] or 0)<part[2]*(level+1) then return false,"Not enough construction resources." end
+    end
+    if entry.id=="safe" then
+        local ok,reason=NHStore.expandSafe(s,NHStore.safeCapacity(s)+1)
+        if not ok then return false,reason end
+    end
+    for _,part in ipairs(entry.cost) do
+        local stock=inventory(s,part[1])
+        local remaining=stock[part[1]]-part[2]*(level+1)
+        stock[part[1]]=remaining>0 and remaining or nil
+    end
+    s.levels[entry.id]=level+1
+    return true
+end
+
+local function adopt(s)
+    if s.levels then return end
+    s.levels,s.storageBase,s.resources={},{},{}
+    -- Existing profiles had unlimited storage. Retain every occupied cell.
+    local function preserve(category,used)
+        if used>(s.storageBase[category] or base_capacity(category)) then s.storageBase[category]=used end
+    end
+    for i,row in ipairs(s.warehouse) do preserve(NHStore.category(row.item.kind),row.slot or i) end
+    if s.pouch.location=="warehouse" then preserve("supplies",s.pouch.slot) end
+    preserve("materials",material_slots(s))
+end
+
+local function validate(s,whole)
+    assert(type(s.levels)=="table" and type(s.resources)=="table" and type(s.storageBase)=="table","Invalid hideout development")
+    for id,level in pairs(s.levels) do
+        assert(definitions[id] and whole(level) and level<=definitions[id].max,"Invalid facility level")
+    end
+    for category,base in pairs(s.storageBase) do
+        assert(definitions["warehouse_"..category] and whole(base) and base>=base_capacity(category),"Invalid warehouse capacity")
+    end
+    for resource,count in pairs(s.resources) do assert(type(resource)=="string" and whole(count),"Invalid hideout resource") end
+    assert(NHStore.canStockMaterials(s),"Material storage capacity exceeded")
+end
+
+return {adopt=adopt,validate=validate}

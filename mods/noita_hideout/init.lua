@@ -3,6 +3,8 @@ dofile_once(files .. "store.lua")
 dofile_once(files .. "wand.lua")
 dofile_once(files .. "potion.lua")
 dofile_once(files .. "transfers.lua")
+dofile_once(files .. "products.lua")
+dofile_once(files .. "perks.lua")
 dofile_once(files .. "native_items.lua")
 dofile_once(files .. "doses.lua")
 dofile_once(files .. "ui.lua")
@@ -36,6 +38,16 @@ local error_translations = {
     ["Inventory slot changed."] = "目标栏位已变动。",
     ["Slot unavailable."] = "目标格无法接收这件物品。",
     ["Item is no longer in this container."] = "物品已移出该容器。",
+    ["Material storage is full."] = "物料库的种类格已满。",
+    ["Construction unavailable."] = "这项建设尚未开放。",
+    ["Upgrade level changed."] = "项目等级已变动，请重新查看。",
+    ["Not enough construction resources."] = "建设所需的库存不足。",
+    ["Facility is locked."] = "请先扩建对应的工位。",
+    ["Consumables storage is full."] = "消耗品库没有可预留的空格。",
+    ["Perk already equipped."] = "已装备同一种特质。",
+    ["No packable perk nearby."] = "附近没有可封装的特质。",
+    ["Could not activate perk."] = "未能激活这项特质。",
+    ["Could not create packed perk."] = "未能生成特质物品。",
     ["Another order is active."] = "工坊已有一张在制订单。",
     ["Not enough bulk ingredients."] = "物料库存中的原料不足。",
     ["The selected item is no longer in your quick inventory."] = "这件物品已经离开快捷栏。",
@@ -170,8 +182,8 @@ local function complete()
     if not active_run() or state.rewardedThrough >= run_id then return end
     local had_order = state.order ~= false
     commit_edit(NHStore.reward,
-        had_order and "订单完成，稳定传送液已入库。" or "已记录本局通关，没有在制订单。",
-        had_order and "Order complete. Refined teleportatium is in the stash." or "Run completion recorded. No active order.",
+        had_order and "订单完成，成品已入库。" or "已记录本局通关，没有在制订单。",
+        had_order and "Order complete. Output delivered to storage." or "Run completion recorded. No active order.",
         run_id)
 end
 
@@ -222,6 +234,7 @@ local function item_label(entry)
     end
     local name = item.name or ""
     if name ~= "" then name = GameTextGetTranslatedOrNot(name) end
+    if item.kind=="medkit" then return name.." ("..(item.remaining or 3).."/3)" end
     if item.kind~="wand" then return name~="" and name or item.kind end
     if not name or name == "" then name = tr("魔杖", "Wand") end
     return name .. " (" .. #(item.cards or {}) .. tr(" 个法术)", " spells)")
@@ -237,7 +250,7 @@ end
 
 local function inventory_view()
     if model_cache and model_cache.revision == state.revision then return model_cache end
-    local model = {revision = state.revision, secure_loot = {}, warehouse = {}, warehouse_last = {}}
+    local model = {revision = state.revision, secure_loot = {}, warehouse = {}}
     model.docks,model.materials={},{}
     for _,row in ipairs(state.docks) do
         local view=stored_view(row)
@@ -252,11 +265,15 @@ local function inventory_view()
         local category=NHStore.category(kind)
         model.warehouse[category]=model.warehouse[category] or {}
         model.warehouse[category][slot]=view
-        model.warehouse_last[category]=math.max(model.warehouse_last[category] or 0,slot)
     end
     for i, entry in ipairs(state.warehouse) do
         local view=stored_view(entry)
+        view.salvage_yield=NHStore.salvageYield(entry.item)
         warehouse_slot(entry.item.kind,entry.slot or i,view)
+    end
+    if state.order and state.order.output.item then
+        warehouse_slot(state.order.output.item.kind,state.order.output.slot,{
+            kind="reserved",name=tr("工坊成品预留格","Reserved for workshop output")})
     end
     model.capacity = NHStore.safeCapacity(state)
     for _, entry in ipairs(state.safe) do
@@ -265,8 +282,27 @@ local function inventory_view()
     local pouch={kind="pouch",name=tr("针剂包","Injector pouch"),icon=NHNative.icons.pouch}
     if state.pouch.location=="safe" then model.secure_loot[state.pouch.slot]=pouch
     elseif state.pouch.location=="warehouse" then warehouse_slot("pouch",state.pouch.slot,pouch) end
-    model.batch_available=NHStore.canStartBatch(state)
-    model.ingredients=state.materials
+    model.progression=NHStore.progressMenu(state,lang)
+    model.warehouse_capacity={}
+    for _,category in ipairs({"wand","spell","containers","supplies","materials"}) do
+        model.warehouse_capacity[category]=NHStore.warehouseCapacity(state,category)
+    end
+    model.salvage_enabled=NHStore.level(state,"salvage")>0
+    model.scrap=state.resources.arcane_scrap or 0
+    model.recipes={}
+    for _,recipe in ipairs(NHStore.recipes) do
+        if recipe.id=="stable" or NHStore.level(state,recipe.id)>0 then
+            local ready,reason=NHStore.canStartBatch(state,recipe)
+            local view={id=recipe.id,name=tr(recipe.zh,recipe.en),output=recipe.count or 1,inputs={},ready=ready}
+            if not ready then view.reason=(lang=="zh" and error_translations[reason]) or reason end
+            for _,input in ipairs(recipe.inputs) do
+                table.insert(view.inputs,{name=NHPotion.materialName(input.name),amount=input.amount,
+                    available=state.materials[input.name] or 0})
+            end
+            table.insert(model.recipes,view)
+            if state.order and recipe.id==(state.order.recipe or "stable") then model.order_name=view.name end
+        end
+    end
     model.cells,model.pouchCapacity,model.maxUses=state.pouch.cells,NHStore.pouchCapacity,NHStore.doseDurability
     model.order_active = state.order ~= false
     model.reward_spent = state.rewardedThrough >= run_id
@@ -377,10 +413,14 @@ local function transfer_error(err, item)
     report(read_error or err)
 end
 
-local function workshop_action(player,action)
+local function workshop_action(player,action,index)
     if not case_open or not GameIsInventoryOpen() or not near_home(player) then return end
-    if action == "order" then
-        commit_edit(NHStore.startOrder, "已扣除两种原料，订单已排入。", "Both ingredients consumed. Order queued.")
+    if action=="buy_upgrade" and type(index)=="table" then
+        commit_edit(NHStore.buyUpgrade,"建设完成。","Construction complete.",index)
+    elseif action=="salvage" and type(index)=="table" then
+        commit_edit(NHStore.salvage,"拆解完成，奥术碎片已入库。","Item dismantled. Arcane scrap stored.",index)
+    elseif action=="order" or (action=="craft" and index and index.id) then
+        commit_edit(NHStore.startOrder,"已从物料库扣料，订单已排入。","Ingredients consumed. Order queued.",index and index.id)
     elseif ModSettingGet("noita_hideout.test_tools") ~= false then
         if action == "simulate" then
             if state.rewardedThrough >= run_id then
@@ -407,13 +447,29 @@ local function dispatch(player, action, index)
             if not case_open then close_panel() end
             return
         end
-        if type(index)~="table" then
-            workshop_action(player,action)
+        if type(index)~="table" or action=="buy_upgrade" or action=="craft" or action=="salvage" then
+            workshop_action(player,action,index)
             return
+        end
+        if action=="equip_perk" or action=="unequip_perk" or action=="pack_perk" then
+            if not case_open or not GameIsInventoryOpen() then return end
+            if action=="pack_perk" then
+                local ok,reason=NHPerks.pack(state,player,index.entity)
+                if ok then feedback(tr("特质已封装，可在脚边拾取。","Packed perk dropped at your feet."))
+                else report(reason) end
+                return
+            end
         end
         local container=index.container or "safe"
         if container~="safe" and container~="warehouse" and container~="docks" then return end
         if container~="safe" and not (case_open and GameIsInventoryOpen() and near_home(player)) then return end
+        if action=="equip_stored_perk" or action=="store_equipped_perk" then
+            if not case_open or not GameIsInventoryOpen() or (container~="safe" and container~="warehouse") then return end
+            local move=action=="equip_stored_perk" and NHPerks.equipStored or NHPerks.storeEquipped
+            local ok,reason=move(state,player,index)
+            if not ok then transfer_error(reason) else status="" end
+            return
+        end
         if container=="docks" then
             if action=="material_transfer" then
                 commit_edit(NHPotion.transferMaterial,nil,nil,index)
@@ -481,7 +537,7 @@ local function dispatch(player, action, index)
         local slot = matching_slot(player,index)
         if not slot then return end
         local ok,result
-        if action=="place" or action=="cancel_native" then
+        if action=="place" or action=="cancel_native" or action=="equip_perk" then
             local id = index.entity
             if not id or not EntityGetIsAlive(id) then return end
             -- Vanilla can complete its outside-inventory throw before the post
@@ -492,6 +548,11 @@ local function dispatch(player, action, index)
             local inv = EntityGetFirstComponentIncludingDisabled(player,"Inventory2Component")
             if ComponentGetValue2(inv,"mThrowItem")==id then ComponentSetValue2(inv,"mThrowItem",0) end
             if action=="cancel_native" then return end
+            if action=="equip_perk" then
+                ok,result=NHPerks.equip(state,player,id,index.safeSlot,slot)
+                if not ok then report(result) else status="" end
+                return
+            end
             local kind = NHNative.kind(id)
             if container=="docks" then ok,result=NHTransfers.deposit(state,player,container,id,index.safeSlot)
             elseif kind=="pouch" and index.safeSlot then ok,result=NHDoses.storePouch(state,player,id,index.safeSlot,container)
@@ -502,7 +563,11 @@ local function dispatch(player, action, index)
         else
             if slot.entity then return end
             local function deliver(id) return place_in_slot(player,id,slot) end
-            if action=="take_pouch" then
+            if action=="unequip_perk" then
+                ok,result=NHPerks.unequip(state,player,index.safeSlot,index.storedId,slot)
+                if not ok then report(result) else status="" end
+                return
+            elseif action=="take_pouch" then
                 if state.pouch.location~=container or state.pouch.slot~=index.safeSlot then return end
                 ok,result=NHDoses.takePouch(state,player,deliver)
             elseif action=="take_dose" then
@@ -544,7 +609,7 @@ end
 function OnPlayerSpawned(player)
     player_id = player
     set_home(player, true)
-    attach()
+    if attach() and active_run() then NHPerks.update(state,player) end
 end
 
 local function current_player()
@@ -581,6 +646,7 @@ function OnWorldPostUpdate()
     if frame % 60 == 0 then
         local ok, err = NHTransfers.reconcile(state, player)
         if ok then ok, err = NHDoses.reconcile(state, player) end
+        if ok then NHPerks.update(state,player) end
         if not ok then invalidate(); report(err); return end
     end
     local nearby = near_home(player)
@@ -600,7 +666,8 @@ function OnWorldPostUpdate()
         local kind = NHNative.kind(item)
         if kind == "pouch" and NHDoses.isPouch(state, item) then
             opened,popup = true,{entity=item}
-        elseif kind == "dose" then use_dose(player, item) end
+        elseif kind == "dose" then use_dose(player, item)
+        elseif item and NHProducts.use(player,item) then mouse_release=true end
     end
     if not active_run() then return end
     local model = opened and inventory_view() or {}
@@ -609,6 +676,7 @@ function OnWorldPostUpdate()
     model.mode = case_open and "case" or (popup and "container" or "closed")
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
 
+    if case_open then NHPerks.view(state,player,model) end
     model.debug = opened and ModSettingGet("noita_hideout.test_tools") ~= false
     model.active = opened and find_stimulant(player) ~= nil
     NHUI.draw(model, function(action, index)

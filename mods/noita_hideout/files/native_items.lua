@@ -8,8 +8,12 @@ NHNative.icons = {pouch = item_path .. "pouch.png", dose = item_path .. "dose.pn
 function NHNative.registerTranslations()
     local path = "data/translations/common.csv"
     local original = ModTextFileGetContent(path)
-    if not original or original:find("\nnh_hideout_pouch,", 1, true) then return end
+    if not original then return end
     local labels = {
+        {"nh_hideout_medkit","Medkit","医疗包"},
+        {"nh_hideout_medkit_desc","Three uses. Each use restores up to 10 HP.","可使用三次，每次最多恢复 10 点生命。"},
+        {"nh_hideout_grenade","Magic grenade","魔法手雷"},
+        {"nh_hideout_grenade_desc","Use once to throw a magic grenade.","向瞄准方向投出一枚魔法手雷，使用一次后消耗。"},
         {"nh_hideout_pouch", "Injector pouch", "针剂包"},
         {"nh_hideout_pouch_desc", "Use to open the pouch. Drag injectors into or out of it.", "手持使用可打开针剂包。拖动针剂即可存入或取出。"},
         {"nh_hideout_dose", "Fire immunity injector", "耐火激活剂"},
@@ -19,9 +23,13 @@ function NHNative.registerTranslations()
     for _, label in ipairs(labels) do
         -- common.csv columns: key, en, ru, pt-br, es-es, de, fr-fr, it, pl, zh-cn, jp, ko
         local en = label[2]
-        rows[#rows+1] = table.concat({label[1], en, en, en, en, en, en, en, en, label[3], en, en}, ",")
+        if not original:find("\n"..label[1]..",",1,true) then
+            rows[#rows+1] = table.concat({label[1], en, en, en, en, en, en, en, en, label[3], en, en}, ",")
+        end
     end
-    ModTextFileSetContent(path, original:gsub("[\r\n]+$", "") .. "\n" .. table.concat(rows, "\n") .. "\n")
+    if #rows>0 then
+        ModTextFileSetContent(path, original:gsub("[\r\n]+$", "") .. "\n" .. table.concat(rows, "\n") .. "\n")
+    end
 end
 
 function NHNative.kind(entity)

@@ -1,0 +1,10 @@
+<Entity name="$perk_protection_explosion" tags="noita_hideout_perk_card,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="data/items_gfx/perks/protection_explosion.png" />
+        <SpriteComponent image_file="data/items_gfx/perks/protection_explosion.png" offset_x="8" offset_y="8" />
+        <ItemComponent item_name="$perk_protection_explosion" ui_description="$perkdesc_protection_explosion" ui_sprite="data/ui_gfx/perk_icons/protection_explosion.png" />
+        <UIInfoComponent name="$perk_protection_explosion" />
+        <AbilityComponent ui_name="$perk_protection_explosion" />
+    </Base>
+    <VariableStorageComponent _tags="noita_hideout_perk_type" name="noita_hideout_perk_type" value_string="PROTECTION_EXPLOSION" value_int="0" />
+</Entity>

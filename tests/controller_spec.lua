@@ -25,6 +25,7 @@ function GlobalsSetValue(k,v) world[k] = v end
 function GameGetFrameNum() return frame end
 function GameTextGet() return "English" end
 function GameTextGetTranslatedOrNot(k) return k end
+function CellFactory_GetType() return -1 end
 function ModTextFileGetContent() return nil end
 function GamePrint() end
 function MagicNumbersGetValue(k) return k:sub(-1) == "X" and "227" or "-85" end
@@ -356,3 +357,162 @@ tick(nil,"move_dock",dock_move)
 local final=state()
 local stored=final.warehouse[assert(NHStore.slotIndex(final,"warehouse",product.slot,"potion"))]
 assert(#final.docks==0 and stored.id==product.id and stored.item.materials[req.material]==1 and final.materials[req.material]==499)
+
+-- Start a separate profile to exercise the same confirmation requests emitted by
+-- the middle panel, with enough loose stock to fund even a duplicate payment.
+settings,flags={},{}
+new_world()
+local funded=state()
+funded.materials={sand=3000,slime=1800,water=2000,blood=100,lava=100,oil=500,gunpowder=300}
+assert(NHStore.commit(funded))
+boot()
+local request={id="safe",level=0}
+local function has_project(list,id)
+    for _,entry in ipairs(list) do if entry.id==id then return entry end end
+end
+inventory_open=true
+local preview=tick(nil,"buy_upgrade",request)
+local upgrade=assert(has_project(preview.progression.upgrade,"safe"))
+assert(upgrade.canBuy and upgrade.current=="2 slots" and upgrade.next=="3 slots")
+assert(state().safeCapacity==2 and state().materials.sand==3000)
+entities[player].x=900
+tick(nil,"buy_upgrade",request)
+entities[player].x=227
+inventory_open=false
+tick(nil,"buy_upgrade",request)
+assert(state().safeCapacity==2 and state().materials.slime==1800)
+inventory_open=true
+tick()
+settings["noita_hideout.test_tools"]=false
+tick(nil,"buy_upgrade",request)
+tick(nil,"buy_upgrade",request)
+local bought=state()
+assert(bought.safeCapacity==3 and bought.levels.safe==1 and bought.materials.sand==2750 and bought.materials.slime==1650)
+assert(tick().capacity==3)
+tick(nil,"buy_upgrade",{id="warehouse_spell",level=0})
+local expanded_view=tick()
+assert(expanded_view.warehouse_capacity.spell==72 and expanded_view.warehouse_capacity.wand==48)
+
+-- Locked facilities do not expose recipes or accept forged workshop requests.
+assert(#tick().recipes==1 and tick().recipes[1].id=="stable")
+for _,id in ipairs({"medical","injector","grenade"}) do
+    tick(nil,"craft",{id=id})
+    assert(not state().order)
+end
+local first_product
+local products={
+    {recipe="medical",kind="medkit",name="Medkit",ingredients={water=100,blood=50}},
+    {recipe="injector",kind="dose",name="Fire injector",ingredients={water=100,lava=25}},
+    {recipe="grenade",kind="grenade",name="Magic grenade",ingredients={sand=100,slime=50}},
+}
+for n,expected in ipairs(products) do
+    tick(nil,"buy_upgrade",{id=expected.recipe,level=0})
+    local recipe=assert(has_project(tick().recipes,expected.recipe))
+    assert(recipe.ready and recipe.name==expected.name and #recipe.inputs==2)
+    local before=state()
+    entities[player].x=900
+    tick(nil,"craft",{id=expected.recipe})
+    assert(not state().order)
+    entities[player].x=227
+    tick(nil,"craft",{id=expected.recipe})
+    tick(nil,"craft",{id=expected.recipe})
+    local queued=state()
+    local reserved=queued.order.output.slot
+    assert(queued.order.recipe==expected.recipe and #queued.warehouse==n-1)
+    for input,amount in pairs(expected.ingredients) do
+        assert((queued.materials[input] or 0)==before.materials[input]-amount)
+    end
+    local working=tick()
+    assert(working.order_name==expected.name and working.warehouse.supplies[reserved].kind=="reserved")
+    if first_product then
+        tick(nil,"move_warehouse",{container="warehouse",kind="medkit",from=first_product.slot,entity=first_product.id,safeSlot=reserved})
+        local still_reserved=tick().warehouse.supplies
+        assert(still_reserved[first_product.slot].id==first_product.id and still_reserved[reserved].kind=="reserved")
+    end
+    -- The reservation outlives a reload and can only be credited once.
+    boot()
+    assert(tick().warehouse.supplies[reserved].kind=="reserved")
+    ending=true
+    tick()
+    tick()
+    local delivered=state()
+    assert(not delivered.order and delivered.finished==n and #delivered.warehouse==n)
+    local crafted=assert(tick().warehouse.supplies[reserved])
+    assert(crafted.kind==expected.kind)
+    if n<3 then assert(crafted.remaining==3) end
+    if n==1 then first_product={slot=reserved,id=crafted.id} end
+    OnPlayerDied()
+    OnPlayerDied()
+    assert(state().finished==n and #state().warehouse==n)
+    new_world()
+    inventory_open=true
+    tick()
+end
+
+local function stash_spell(action)
+    local id=CreateItemActionEntity(action,200,-80)
+    EntityAddChild(3,id)
+    tick(nil,"place",{parent=3,lane="spell",xslot=0,yslot=0,entity=id,safeSlot=1,container="warehouse",kind="spell"})
+    return assert(tick().warehouse.spell[1])
+end
+local to_salvage=stash_spell("BOMB")
+local salvage={id=to_salvage.id,kind="spell",slot=1}
+tick(nil,"salvage",salvage)
+assert(tick().warehouse.spell[1].id==salvage.id and not state().resources.arcane_scrap)
+tick(nil,"buy_upgrade",{id="salvage",level=0})
+local unlocked=tick()
+assert(unlocked.salvage_enabled and unlocked.warehouse.spell[1].salvage_yield==1)
+entities[player].x=900
+tick(nil,"salvage",salvage)
+entities[player].x=227
+assert(tick().warehouse.spell[1].id==salvage.id)
+tick(nil,"salvage",salvage)
+assert(state().resources.arcane_scrap==1 and not tick().warehouse.spell)
+local replacement=stash_spell("LIGHT")
+tick(nil,"salvage",salvage)
+assert(replacement.id~=salvage.id and tick().warehouse.spell[1].id==replacement.id and state().resources.arcane_scrap==1)
+tick(nil,"buy_upgrade",{id="perk_pack",level=0})
+assert(state().levels.perk_pack==1 and not state().resources.arcane_scrap)
+print("Controller: gated purchases, independent capacity, crafted item reservations, delivery and salvage confirmed.")
+
+-- Check the controller's range gate separately from the perk transfer journal.
+local load_template=EntityLoad
+function EntityLoad(path,x,y)
+    local id=load_template(path,x,y)
+    if path:match("/perk_fire%.xml$") then
+        EntityAddTag(id,"noita_hideout_perk_card")
+        EntityAddComponent2(id,"VariableStorageComponent",{_tags="noita_hideout_perk_type",value_string="PROTECTION_FIRE",value_int=0})
+    end
+    return id
+end
+function EntityRemoveFromParent(id) entities[id].parent=0 end
+function EntityRemoveComponent(id,component)
+    for key,value in pairs(entities[id].comps) do
+        if value==component then entities[id].comps[key]=nil; return end
+    end
+end
+tick(nil,"buy_upgrade",{id="perk_slots",level=0})
+assert(tick().perkCapacity==1)
+local perk=EntityLoad("mods/noita_hideout/files/items/perk_fire.xml",227,-85)
+EntityAddChild(quick,perk)
+local deposit={parent=quick,lane="tool",xslot=0,yslot=0,entity=perk,safeSlot=1,container="safe"}
+tick(nil,"place",deposit)
+local stored=assert(tick().secure_loot[1])
+assert(stored.kind=="perk")
+local equip={storageSlot=1,perkSlot=1,entity=stored.id,container="safe"}
+entities[player].x=900
+tick(nil,"equip_stored_perk",equip)
+local equipped=assert(tick().perkCells[1])
+assert(not tick().secure_loot[1] and equipped.entity~=perk)
+local put_back={storageSlot=4,perkSlot=1,entity=equipped.entity,container="warehouse"}
+tick(nil,"store_equipped_perk",put_back)
+assert(tick().perkCells[1].entity==equipped.entity)
+entities[player].x=227
+tick(nil,"store_equipped_perk",put_back)
+local protected=assert(tick().warehouse.supplies[4])
+assert(protected.kind=="perk" and not tick().perkCells[1])
+OnPlayerDied()
+new_world()
+inventory_open=true
+assert(tick().warehouse.supplies[4].id==protected.id)
+print("Controller: field equip from safe, home-only return to stash and perk persistence passed.")

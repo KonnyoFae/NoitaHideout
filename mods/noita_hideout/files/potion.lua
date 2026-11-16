@@ -290,6 +290,7 @@ function NHPotion.transferMaterial(state,request)
     local item,stock=row.item,state.materials
     if request.unload then
         if not next(item.materials) then return false,"Container is empty." end
+        if not NHStore.canStockMaterials(state,item.materials) then return false,"Material storage is full." end
         for name,amount in pairs(item.materials) do
             stock[name]=(stock[name] or 0)+amount
         end
