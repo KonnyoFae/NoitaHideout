@@ -7,6 +7,7 @@ local broom_script = "data/scripts/gun/procedural/wand_varpuluuta.lua"
 local source_marker = "noita_hideout_wand_template"
 local transfer_marker = "noita_hideout_transfer_id"
 local templates = { [broom] = true }
+local bases = {}
 for _, suffix in ipairs({"", "_rng", "_rng_daily"}) do
     templates[items .. "starting_wand" .. suffix .. ".xml"] = true
     templates[items .. "starting_bomb_wand" .. suffix .. ".xml"] = true
@@ -18,6 +19,29 @@ for _, level in ipairs({"01", "02", "03", "04", "05", "06", "10"}) do
         templates[items .. "wand_level_" .. level .. "_p.xml"] = true
         templates[items .. "wand_level_" .. level .. "_better.xml"] = true
         templates[items .. "wand_unshuffle_" .. level .. "_p.xml"] = true
+    end
+end
+
+local function supported(path)
+    -- Fixed first-biome wands use numbered XMLs, separate from procedural templates.
+    return path and (templates[path] or path:match("^data/entities/items/wands/level_%d%d/wand_%d+%.xml$"))
+end
+
+function NHWand.registerTemplates()
+    -- Noita can serialize an inline wand under its parent's filename. A marker
+    -- on the template follows that exact entity through pickup and save/reload.
+    for path in pairs(templates) do
+        if ModDoesFileExist(path) then
+            local xml = ModTextFileGetContent(path) or ""
+            local plain = xml:gsub("<!%-%-.-%-%->", "")
+            bases[path] = plain:match([[<Base%s+[^>]-file%s*=%s*"([^"]+)"]])
+            if not xml:find(source_marker, 1, true) then
+                local marker = '<VariableStorageComponent _tags="' .. source_marker .. '" name="' ..
+                    source_marker .. '" value_string="' .. path .. '"/>'
+                local patched, n = xml:gsub("</Entity>(%s*)$", marker .. "</Entity>%1", 1)
+                if n == 1 then ModTextFileSetContent(path, patched) end
+            end
+        end
     end
 end
 
@@ -88,17 +112,54 @@ local function wand_tags(entity)
     return tags
 end
 
+local function marked_source(entity)
+    local markers = {}
+    for _, c in ipairs(EntityGetComponentIncludingDisabled(entity, "VariableStorageComponent", source_marker) or {}) do
+        local path = get(c, "value_string")
+        assert(supported(path), "Unknown stored wand template: " .. tostring(path))
+        markers[path] = true
+    end
+    local leaf
+    for path in pairs(markers) do
+        local inherited = false
+        for other in pairs(markers) do
+            local parent = bases[other]
+            local seen = {}
+            while parent and not seen[parent] do
+                if parent == path then inherited = true; break end
+                seen[parent] = true
+                parent = bases[parent]
+            end
+        end
+        if not inherited then
+            assert(not leaf, "Conflicting wand template markers")
+            leaf = path
+        end
+    end
+    return leaf
+end
+
 local function source(entity, ability, item)
-    local marker = first(entity, "VariableStorageComponent", source_marker)
-    local path = marker and get(marker, "value_string") or EntityGetFilename(entity)
-    if templates[path] then return path end
-    -- Spawn inventory entries are inline <Entity><Base .../></Entity>.
-    -- An inline/streamed entity doesn't always expose its own XML filename.
-    if path and path:match("^mods/") then error("Unsupported mod wand template") end
+    local path = (EntityGetFilename(entity) or ""):gsub("\\", "/"):lower():gsub("^%./", "")
+    if path:match("^%a:/") or path:match("^/") then
+        path = path:match("/(mods/.+)$") or path:match("/(data/.+)$") or path
+    end
+    if supported(path) then return path end
+    local inline = path == "" or path == "data/entities/base_wand_pickup.xml" or path == "data/entities/player.xml"
+        or path == "data/entities/player_base.xml" or path:match("^data/entities/animals/[%w_/-]+%.xml$")
+    if not inline then
+        error("Unsupported wand template: " .. path)
+    end
+    local marked = marked_source(entity)
+    if marked then return marked end
     local label = get(item, "item_name")
     if label == "$item_wand_varpuluuta" then
         for _, comp in ipairs(EntityGetComponentIncludingDisabled(entity, "LuaComponent") or {}) do
             if get(comp, "script_source_file") == broom_script then return broom end
+        end
+        for _, child in ipairs(EntityGetAllChildren(entity) or {}) do
+            local eater = first(child, "CellEaterComponent")
+            if eater and get(eater, "only_stain") and first(child, "InheritTransformComponent") then return broom end
         end
     end
     if get(item, "collect_nondefault_actions") and get(item, "remove_on_death") then
@@ -110,37 +171,139 @@ local function source(entity, ability, item)
             return items .. "starting_bomb_wand_rng.xml"
         end
     end
-    error("Unsupported or unknown wand template")
+    -- Pre-update saves may contain an ordinary generated wand without any
+    -- source identity. Only use a generic tier shell for the numbered vanilla
+    -- wand sprites and ordinary components. The snapshot supplies the full
+    -- firing configuration, actual sprite, muzzle, tags and ordered deck.
+    local sprite = get(ability, "sprite_file") or ""
+    if (path == "" or path == "data/entities/base_wand_pickup.xml" or path == "data/entities/player.xml")
+        and (label == "$item_wand" or label == "wand" or label == "")
+        and sprite:match("^data/items_gfx/wands/wand_%d+%.png$") then
+        for _, kind in ipairs({"SpriteComponent", "HotspotComponent"}) do
+            assert(#(EntityGetComponentIncludingDisabled(entity, kind) or {}) == 1, "Unidentified wand has extra " .. kind)
+        end
+        for _, c in ipairs(EntityGetAllComponents(entity)) do
+            local t = ComponentGetTypeName(c)
+            assert(not t:match("^Physics") and t ~= "ItemAlchemyComponent"
+                and t ~= "LightComponent" and t ~= "AudioLoopComponent" and t ~= "SpriteParticleEmitterComponent",
+                "Unidentified wand has special component: " .. t)
+        end
+        return items .. "wand_level_01.xml"
+    end
+    error("Unknown wand template: " .. (path ~= "" and path or "<inline>") .. " (" .. tostring(label) .. ", " .. sprite .. ")")
+end
+
+local function generator(c)
+    local src = get(c, "script_source_file") or ""
+    return src:match("^data/scripts/gun/procedural/[%w_]+%.lua$")
+        and get(c, "execute_on_added") and get(c, "remove_after_executed")
+end
+
+local wand_callbacks = {
+    script_item_picked_up = "data/scripts/particles/wand_pickup.lua",
+    script_material_area_checker_success = "data/scripts/animals/wand_charm.lua",
+}
+
+local function check_script(c, path)
+    local found = false
+    for key in pairs(ComponentGetMembers(c) or {}) do
+        if key:match("^script_") then
+            local file = get(c, key)
+            if type(file) == "string" and file ~= "" then
+                found = true
+                if key == "script_source_file" and generator(c) then
+                    assert(not ComponentGetIsEnabled(c) or (get(c, "mTimesExecuted") or 0) > 0,
+                        "Wand is still generating: " .. file)
+                else
+                    local valid = wand_callbacks[key] == file or (key == "script_source_file" and path == broom and file == broom_script)
+                    assert(valid, "Unsupported wand script: " .. file .. " (" .. key .. ")")
+                end
+            end
+        end
+    end
+    assert(found or not ComponentGetIsEnabled(c), "Unsupported empty wand script")
 end
 
 local function check_root(entity, path)
     for _, c in ipairs(EntityGetAllComponents(entity)) do
         local t = ComponentGetTypeName(c)
         if t == "LuaComponent" then
-            local src = get(c, "script_source_file")
-            local valid = (path == broom and src == broom_script)
-                or get(c, "script_item_picked_up") == "data/scripts/particles/wand_pickup.lua"
-                or get(c, "script_material_area_checker_success") == "data/scripts/animals/wand_charm.lua"
-                or ((src or "") == "" and not ComponentGetIsEnabled(c))
-            assert(valid, "Unsupported wand script or wand still initializing")
+            check_script(c, path)
+        elseif t == "ItemCostComponent" then
+            assert(get(c, "cost") == 0, "Cannot store a wand with an outstanding shop price")
         elseif t == "VariableStorageComponent" then
             local name = get(c, "name")
-            assert(name == source_marker or name == transfer_marker, "Unsupported wand variable")
+            assert(name == source_marker or name == transfer_marker, "Unsupported wand variable: " .. tostring(name))
         else
             assert(root_types[t], "Unsupported wand component: " .. t)
         end
     end
 end
 
+local stock_pickups = {}
+
+local function card_pickup(c, id)
+    local file = get(c, "script_item_picked_up") or ""
+    assert(file:match("^data/scripts/[%w_/]+%.lua$"), "Unsupported spell script: " .. id .. " " .. file)
+    local settings = {}
+    for key in pairs(ComponentGetMembers(c) or {}) do
+        if key:match("^script_") then
+            local callback = get(c, key)
+            assert(key == "script_item_picked_up" or not callback or callback == "",
+                "Unsupported spell callback: " .. id .. " " .. tostring(callback))
+        elseif not key:match("^[m_]") then
+            local value = get(c, key)
+            if type(value) == "number" or type(value) == "boolean" or type(value) == "string" then settings[key] = value end
+        end
+    end
+    return file, settings
+end
+
+local function default_pickups(id, x, y)
+    if stock_pickups[id] then return stock_pickups[id] end
+    local probe = CreateItemActionEntity(id, x, y)
+    assert(probe and probe ~= 0, "Unavailable spell: " .. id)
+    local ok, profile = pcall(function()
+        local result = {}
+        for _, c in ipairs(EntityGetComponentIncludingDisabled(probe, "LuaComponent") or {}) do
+            local file, settings = card_pickup(c, id)
+            assert(not result[file], "Duplicate spell pickup callback: " .. id)
+            result[file] = settings
+        end
+        return result
+    end)
+    EntityKill(probe)
+    if not ok then error(profile) end
+    stock_pickups[id] = profile
+    return profile
+end
+
+local function pickup_states(entity, id)
+    local states
+    for _, c in ipairs(EntityGetComponentIncludingDisabled(entity, "LuaComponent") or {}) do
+        local file, settings = card_pickup(c, id)
+        local expected = default_pickups(id, EntityGetTransform(entity))[file]
+        assert(expected, "Nonstandard spell pickup callback: " .. id .. " " .. file)
+        assert((get(c, "mTimesExecuted") or 0) == 0 or file:match("^data/scripts/particles/"),
+            "Stateful spell pickup callback: " .. id .. " " .. file)
+        for key, value in pairs(settings) do
+            assert(expected[key] == value, "Modified spell pickup callback: " .. id .. " " .. key)
+        end
+        states = states or {}
+        assert(states[file] == nil, "Duplicate spell pickup callback: " .. id)
+        states[file] = ComponentGetIsEnabled(c)
+    end
+    return states
+end
+
 local function capture_card(entity, action)
-    assert(not (EntityGetAllChildren(entity) or {})[1], "Unsupported spell attachment")
-    assert(not first(entity, "VariableStorageComponent") and not first(entity, "LuaComponent"),
-        "Stateful spell is not supported")
-    local item = required(entity, "ItemComponent")
-    local x, y = get(item, "inventory_slot")
     local id = get(action, "action_id")
     assert(type(id) == "string" and id ~= "", "Spell has no action ID")
-    return {id = id, x = x, y = y, item = fields(item, card_fields)}
+    assert(not (EntityGetAllChildren(entity) or {})[1], "Unsupported spell attachment: " .. id)
+    assert(not first(entity, "VariableStorageComponent"), "Unsupported spell variable: " .. id)
+    local item = required(entity, "ItemComponent")
+    local x, y = get(item, "inventory_slot")
+    return {id = id, x = x, y = y, item = fields(item, card_fields), pickups = pickup_states(entity, id)}
 end
 
 local function capture(entity)
@@ -160,7 +323,8 @@ local function capture(entity)
             local eater = first(child, "CellEaterComponent")
             assert(path == broom and not cleaner and eater and get(eater, "only_stain")
                 and first(child, "InheritTransformComponent") and #(EntityGetAllComponents(child)) == 2
-                and not (EntityGetAllChildren(child) or {})[1], "Unsupported wand attachment")
+                and not (EntityGetAllChildren(child) or {})[1], "Unsupported wand attachment: " ..
+                    tostring(EntityGetName(child)) .. " (" .. tostring(EntityGetFilename(child)) .. ")")
             cleaner = fields(eater, {"radius", "eat_probability", "only_stain"})
         end
     end
@@ -188,8 +352,7 @@ local function prepare(entity)
     -- Depending on load timing, procedural setup may already have made cards
     -- or its execute_on_added script may still be waiting for the next tick.
     for _, c in ipairs(EntityGetComponentIncludingDisabled(entity, "LuaComponent") or {}) do
-        if get(c, "execute_on_added") and get(c, "remove_after_executed")
-            and (get(c, "script_source_file") or ""):match("^data/scripts/gun/procedural/") then
+        if generator(c) then
             EntityRemoveComponent(entity, c)
         end
     end
@@ -204,7 +367,7 @@ local function prepare(entity)
     return ability
 end
 
-local function add_card(entity, card, x, y)
+local function add_card(entity, card, x, y, restoring)
     local child = CreateItemActionEntity(card.id, x, y)
     assert(child and child ~= 0, "Unavailable spell: " .. card.id)
     EntityAddChild(entity, child) -- also owns cleanup if a later check fails
@@ -214,12 +377,23 @@ local function add_card(entity, card, x, y)
     set(item, "inventory_slot", card.x, card.y)
     EntitySetComponentsWithTagEnabled(child, "enabled_in_hand", false)
     EntitySetComponentsWithTagEnabled(child, "enabled_in_world", false)
+    if restoring then
+        for _, c in ipairs(EntityGetComponentIncludingDisabled(child, "LuaComponent") or {}) do
+            local file = card_pickup(c, card.id)
+            local enabled = card.pickups and card.pickups[file]
+            if enabled ~= nil then EntitySetComponentIsEnabled(child, c, enabled)
+            else
+                -- The original card no longer had this stock pickup helper.
+                EntityRemoveComponent(child, c)
+            end
+        end
+    end
 end
 
 local function build(path, x, y, configure)
     local entity
     local ok, err = pcall(function()
-        assert(templates[path], "Unsupported wand template")
+        assert(supported(path), "Unsupported wand template: " .. tostring(path))
         entity = EntityLoad(path, x, y)
         assert(entity and entity ~= 0, "Wand template unavailable")
         configure(entity, prepare(entity))
@@ -271,9 +445,11 @@ function NHWand.restore(data, x, y)
             end
             apply(assert(eater, "Cleaner missing from wand template"), data.cleaner)
         end
-        for _, card in ipairs(data.cards) do add_card(entity, card, x, y) end
-        assert(EntityAddComponent2(entity, "VariableStorageComponent",
-            {_tags = source_marker, name = source_marker, value_string = data.template}), "Could not mark wand template")
+        for _, card in ipairs(data.cards) do add_card(entity, card, x, y, true) end
+        if marked_source(entity) ~= data.template then
+            assert(EntityAddComponent2(entity, "VariableStorageComponent",
+                {_tags = source_marker, name = source_marker, value_string = data.template}), "Could not mark wand template")
+        end
         -- Some setters report engine errors without raising a Lua error.
         -- Re-read the actual clone before the transfer retires its stash entry.
         verify_values(data, capture(entity), "wand")

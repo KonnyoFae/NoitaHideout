@@ -82,10 +82,17 @@ local function stored_release(s, token, ids)
     return tonumber(profile) == s.profile and ids[tonumber(item_id)]
 end
 
+function NHTransfers.item_kind(entity)
+    if EntityHasTag(entity, "wand") then return "wand" end
+    if NHPotion.isFlask(entity) then return "potion" end
+    local ability = EntityGetFirstComponentIncludingDisabled(entity, "AbilityComponent")
+    if ability and ComponentGetValue2(ability, "use_gun_script") then return "wand" end
+end
+
 local function dispose(entity, player)
     local owner
     if player and player ~= 0 and EntityGetRootEntity(entity) == player then owner = player end
-    if EntityHasTag(entity, "potion") then
+    if NHTransfers.item_kind(entity) == "potion" then
         NHPotion.discard(entity, owner)
     elseif owner then
         GameKillInventoryItem(owner, entity)
@@ -99,20 +106,47 @@ local function codec(kind)
     if kind == "potion" then return NHPotion end
 end
 
-function NHTransfers.carried(player)
-    for _, child in ipairs(EntityGetAllChildren(player) or {}) do
-        if EntityGetName(child) == "inventory_quick" then
-            return EntityGetAllChildren(child) or {}
-        end
+-- An engine-listed item may be attached directly to the player or under
+-- a renamed inventory node. Check the live hierarchy as the engine list and
+-- active slot can still contain the previous item during a drop.
+local function top_level_equipment(player, entity)
+    if not EntityGetFirstComponentIncludingDisabled(entity, "ItemComponent") then return false end
+    local parent = EntityGetParent(entity)
+    while parent and parent ~= 0 and parent ~= player do
+        if EntityGetName(parent) == "inventory_full"
+            or EntityGetFirstComponentIncludingDisabled(parent, "ItemComponent") then return false end
+        parent = EntityGetParent(parent)
     end
-    return {}
+    return parent == player
 end
 
-local function quick_item(player, entity)
-    if not entity or entity == 0 or not EntityGetIsAlive(entity) then return false end
-    local parent = EntityGetParent(entity)
-    return parent and parent ~= 0 and EntityGetParent(parent) == player
-        and EntityGetName(parent) == "inventory_quick"
+function NHTransfers.carried(player)
+    local items, seen = {}, {}
+    local function add(id, quick)
+        if not id or id == 0 or seen[id] or not EntityGetIsAlive(id) then return end
+        if quick then
+            if EntityGetParent(id) ~= quick then return end
+        elseif not top_level_equipment(player, id) then return end
+        seen[id] = true
+        items[#items + 1] = id
+    end
+    for _, child in ipairs(EntityGetAllChildren(player) or {}) do
+        if EntityGetName(child) == "inventory_quick" then
+            for _, item in ipairs(EntityGetAllChildren(child) or {}) do add(item, child) end
+        end
+    end
+    for _, item in ipairs(GameGetAllInventoryItems(player) or {}) do add(item) end
+    local inv = EntityGetFirstComponentIncludingDisabled(player, "Inventory2Component")
+    if inv then add(ComponentGetValue2(inv, "mActiveItem")) end
+    return items
+end
+
+local function quick_item(player, item)
+    if not item or item == 0 or not EntityGetIsAlive(item) then return false end
+    for _, id in ipairs(NHTransfers.carried(player)) do
+        if id == item then return true end
+    end
+    return false
 end
 
 function NHTransfers.deposit(s, player, container, selected)
@@ -134,7 +168,7 @@ function NHTransfers.deposit(s, player, container, selected)
     end
     if dest == "safe" and #s.safe >= 1 then return nil, "Secure valuables slot is full." end
 
-    local kind = EntityHasTag(item, "wand") and "wand" or EntityHasTag(item, "potion") and "potion"
+    local kind = NHTransfers.item_kind(item)
     local adapter = codec(kind)
     if not adapter then return nil, "Only supported wands and flasks can be deposited." end
     local record, err = adapter.capture(item)

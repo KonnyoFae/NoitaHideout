@@ -9,6 +9,11 @@ dofile_once(files .. "doses.lua")
 dofile_once(files .. "ui.lua")
 NHNative.registerTranslations()
 
+function OnModInit()
+    NHWand.registerTemplates()
+    NHPotion.readTemplates()
+end
+
 local run_key = "noita_hideout_run_v1"
 local home_x_key, home_y_key = "noita_hideout_origin_x", "noita_hideout_origin_y"
 local state, run_id, home_x, home_y, player_id
@@ -21,23 +26,46 @@ local function tr(zh, en)
     return lang == "zh" and zh or en
 end
 
+local error_translations = {
+    ["Hold a wand or flask first."] = "请先拾取并切换到手中的魔杖或药瓶。",
+    ["Only supported wands and flasks can be deposited."] = "此格接受已适配的魔杖和普通药瓶。",
+    ["Item is no longer in this container."] = "物品已移出该容器。",
+    ["Another order is active."] = "工坊已有一张在制订单。",
+    ["Not enough ingredients across warehouse flasks."] = "仓库药瓶里的原料不足。",
+    ["The selected item is no longer in your quick inventory."] = "这件物品已经离开快捷栏。",
+    ["The case is already in your inventory."] = "安全箱就在你的道具栏里。",
+    ["The case is already within reach."] = "安全箱就在附近，可按 G 开箱。",
+    ["No dose available."] = "针剂包已空。",
+    ["Pouch lost."] = "针剂包已遗失，可到出生点重发测试包。",
+    ["Secure valuables slot is full."] = "贵重物品格已满。",
+    ["This syringe is no longer available."] = "这支针剂已经用掉或收回。",
+    ["Only a recognized ordinary flask can be stored"] = "未能识别这个瓶子的类型。",
+    ["This flask has attachments that cannot be restored"] = "药瓶带有无法还原的附件，已保留原瓶。",
+    ["This flask still has a shop price"] = "这只药瓶仍带有商店价格。",
+    ["Flask contains a quantity that cannot be restored exactly"] = "这瓶药水的余量无法精确还原，已保留原瓶。",
+    ["Unsupported wand template"] = "未适配的魔杖模板",
+    ["Unknown wand template"] = "未能识别魔杖模板",
+    ["Unsupported wand script"] = "魔杖带有无法还原的脚本",
+    ["Unsupported wand component"] = "魔杖带有无法还原的组件",
+    ["Unsupported wand variable"] = "魔杖带有无法还原的状态",
+    ["Wand is still generating"] = "魔杖仍在生成，请稍后重试",
+    ["Cannot store a wand with an outstanding shop price"] = "这根魔杖仍带有商店价格。",
+    ["Missing flask component"] = "瓶子缺少必要组件",
+    ["Unsupported wand attachment"] = "魔杖带有无法还原的附件",
+    ["Unsupported spell script"] = "法术带有无法还原的脚本",
+    ["Unsupported spell attachment"] = "法术带有无法还原的附件",
+    ["Unsupported spell variable"] = "法术带有无法还原的状态",
+}
+
 local function report(problem)
     local raw = tostring(problem)
-    local translations = {
-        ["Hold a wand or flask first."] = "请先拾取并切换到手中的魔杖或药瓶。",
-        ["Only supported wands and flasks can be deposited."] = "此格接受已适配的魔杖和普通药瓶。",
-        ["Item is no longer in this container."] = "物品已移出该容器。",
-        ["Another order is active."] = "工坊已有一张在制订单。",
-        ["Not enough ingredients across warehouse flasks."] = "仓库药瓶里的原料不足。",
-        ["The selected item is no longer in your quick inventory."] = "这件物品已经离开快捷栏。",
-        ["The case is already in your inventory."] = "安全箱就在你的道具栏里。",
-        ["The case is already within reach."] = "安全箱就在附近，可按 G 开箱。",
-        ["No dose available."] = "针剂包已空。",
-        ["Pouch lost."] = "针剂包已遗失，可到出生点重发测试包。",
-        ["Secure valuables slot is full."] = "贵重物品格已满。",
-        ["This syringe is no longer available."] = "这支针剂已经用掉或收回。",
-    }
-    status = (lang == "zh" and translations[raw]) or raw
+    local reason = raw:gsub('^.-%.lua"?%]?:%d+:%s*', "")
+    status = reason
+    if lang == "zh" then
+        local key, detail = reason:match("^(.-): (.+)$")
+        if error_translations[reason] then status = error_translations[reason]
+        elseif key and error_translations[key] then status = error_translations[key] .. "（" .. detail .. "）" end
+    end
     if raw ~= last_error then
         last_error = raw
         GamePrint("[Hideout] " .. status)
@@ -223,11 +251,7 @@ local function carried_view(player, model)
     if model.carried_key == key then return end
     model.carried_key, model.carried = key, {}
     for _, id in ipairs(ids) do
-        local kind = NHNative.kind(id)
-        if not kind then
-            if EntityHasTag(id, "wand") then kind = "wand"
-            elseif EntityHasTag(id, "potion") then kind = "potion" end
-        end
+        local kind = NHNative.kind(id) or NHTransfers.item_kind(id)
         if kind == "wand" or kind == "potion" or kind == "dose" then
             local c = EntityGetFirstComponentIncludingDisabled(id, "ItemComponent")
             local name, icon
@@ -261,10 +285,10 @@ end
 local function collect_item(player, id)
     -- Vanilla has separate sets of four wand and item slots. A full row leaves
     -- the delivery at the player's feet rather than displacing another item.
-    local is_wand = EntityHasTag(id, "wand")
+    local is_wand = NHTransfers.item_kind(id) == "wand"
     local occupied = 0
     for _, item in ipairs(NHTransfers.carried(player)) do
-        if EntityHasTag(item, "wand") == is_wand then occupied = occupied + 1 end
+        if (NHTransfers.item_kind(item) == "wand") == is_wand then occupied = occupied + 1 end
     end
     if occupied < 4 then GamePickUpInventoryItem(player, id, false) end
     return EntityGetRootEntity(id) == player
@@ -274,7 +298,11 @@ local function close_panel()
     opened, case_entity, mouse_release = false, nil, true
 end
 
-local function transfer_error(err)
+local function transfer_error(err, item)
+    if item and item ~= 0 and EntityGetIsAlive(item) then
+        print(("[noita_hideout] deposit declined: name=%s file=%s tags=%s reason=%s"):format(
+            EntityGetName(item) or "", EntityGetFilename(item) or "", EntityGetTags(item) or "", tostring(err)))
+    end
     local latest, read_error = NHStore.load()
     if latest and latest.profile == state.profile and latest.runSerial == run_id then
         state, model_cache = latest, nil
@@ -317,7 +345,7 @@ local function dispatch(player, action, index)
                     or tr("已取出，请在脚边拾取。", "Withdrawn. Pick it up at your feet."))
             end
         else return end
-        if not ok then transfer_error(result) end
+        if not ok then transfer_error(result, action == "place" and index) end
         return
     end
     if not near_home(player) then close_panel(); return end
@@ -329,7 +357,7 @@ local function dispatch(player, action, index)
         local ok, err
         if deposit then ok, err = NHTransfers.deposit(state, player, "warehouse")
         else ok, err = NHTransfers.withdraw(state, player, index, "warehouse") end
-        if not ok then transfer_error(err); return end
+        if not ok then transfer_error(err, deposit and NHNative.held(player)); return end
         feedback(deposit and tr("已存入。", "Item stored.") or tr("已取出，请在脚边拾取。", "Withdrawn. Pick it up at your feet."))
     elseif action == "order" then
         commit_edit(NHStore.startOrder, "已扣除两种原料，订单已排入。", "Both ingredients consumed. Order queued.", index)

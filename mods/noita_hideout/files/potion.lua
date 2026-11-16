@@ -19,10 +19,101 @@ for _, suffix in ipairs({
 }) do
     normal_templates["data/entities/items/pickup/potion" .. suffix .. ".xml"] = true
 end
+normal_templates["data/entities/items/shop_potion.xml"] = true
 
 local function component(entity, kind)
     local id = EntityGetFirstComponentIncludingDisabled(entity, kind)
     return id and id ~= 0 and id or nil
+end
+
+function NHPotion.isFlask(entity)
+    return entity ~= nil and entity ~= 0 and (EntityHasTag(entity, "potion")
+        or (component(entity, "PotionComponent") ~= nil
+            and component(entity, "MaterialInventoryComponent") ~= nil))
+end
+
+local function normal_path(filename)
+    local path = (filename or ""):lower():gsub("\\", "/"):gsub("^%./", "")
+    -- EntityGetFilename may include the game directory.
+    if path:match("^mods/") then return path end
+    return path:match(".*/(mods/.*)") or path:match(".*/(data/entities/.*)") or path
+end
+
+local ordinary_art = {
+    ["data/ui_gfx/items/potion.png"] = true,
+    ["data/items_gfx/potion.png"] = true,
+}
+local ordinary_scripts = {
+    ["data/scripts/items/potion.lua"] = true,
+    ["data/scripts/items/potion_starting.lua"] = true,
+}
+local ordinary_variables = {noita_hideout_transfer_id = true}
+
+-- Read the installed templates, including inherited callback and sprite
+-- definitions. No base-game assets are modified.
+function NHPotion.readTemplates()
+    local seen = {}
+    local function read(path)
+        if seen[path] or not path:match("^data/") or not ModDoesFileExist(path) then return end
+        seen[path] = true
+        local xml = (ModTextFileGetContent(path) or ""):gsub("<!%-%-.-%-%->", "")
+        for key, value in xml:gmatch([=[([%w_]+)%s*=%s*["']([^"']+)["']]=]) do
+            if key:match("^script_") and value:match("^data/") then
+                ordinary_scripts[value] = true
+            elseif (key == "image_file" or key == "ui_sprite") and value:match("^data/[^/]*gfx/.*potion") then
+                ordinary_art[value] = true
+            end
+        end
+        for variable in xml:gmatch("<VariableStorageComponent%s+([^>]+)>") do
+            local name = (" " .. variable):match([=[%sname%s*=%s*["']([^"']+)["']]=])
+            if name then ordinary_variables[name] = true end
+        end
+        for base in xml:gmatch([=[<Base%s+[^>]-file%s*=%s*["']([^"']+)["']]=]) do read(base) end
+    end
+    for path in pairs(normal_templates) do read(path) end
+end
+
+local function stock_state(entity)
+    for _, variable in ipairs(EntityGetComponentIncludingDisabled(entity, "VariableStorageComponent") or {}) do
+        if not ordinary_variables[ComponentGetValue2(variable, "name")] then return false end
+    end
+    for _, lua in ipairs(EntityGetComponentIncludingDisabled(entity, "LuaComponent") or {}) do
+        local members = ComponentGetMembers(lua)
+        if not members then return false end
+        for field in pairs(members) do
+            if field:match("^script_") then
+                local script = ComponentGetValue2(lua, field)
+                if script and script ~= "" and not ordinary_scripts[script] then return false end
+            end
+        end
+    end
+    return true
+end
+
+local function ordinary_flask(entity, item)
+    if EntityHasTag(entity, "enemy") or component(entity, "AnimalAIComponent") then return false end
+    local path = normal_path(EntityGetFilename(entity))
+    if normal_templates[path] then return true end
+    -- An explicit special or modded template takes precedence over shared art
+    -- or tags that it may have inherited from the original bottle.
+    if path:match("^mods/") or path:match("^data/entities/items/") or path:match("^data/entities/animals/") then
+        return false
+    end
+    if not stock_state(entity) then return false end
+    if EntityHasTag(entity, normal_flask_tag) then return true end
+    -- Inline player inventory and streamed entities can report the enclosing
+    -- file or an empty filename. Recognize the original bottle on the entity.
+    if ordinary_art[ComponentGetValue2(item, "ui_sprite")] then return true end
+    for _, sprite in ipairs(EntityGetComponentIncludingDisabled(entity, "SpriteComponent") or {}) do
+        if ordinary_art[ComponentGetValue2(sprite, "image_file")] then return true end
+    end
+    for _, lua in ipairs(EntityGetComponentIncludingDisabled(entity, "LuaComponent") or {}) do
+        local script = ComponentGetValue2(lua, "script_source_file")
+        if script == "data/scripts/items/potion.lua" or script == "data/scripts/items/potion_starting.lua" then
+            return true
+        end
+    end
+    return EntityGetName(entity) == "$item_potion" or ComponentGetValue2(item, "item_name") == "$item_potion"
 end
 
 local function flask_components(entity)
@@ -65,6 +156,7 @@ local function read_materials(inventory)
 end
 
 local short_names = {
+    water = {"水", "Water"},
     [unstable] = {"不稳定传送液", "Unstable teleportatium"},
     [stable] = {"稳定传送液", "Teleportatium"},
     slime = {"黏液", "Slime"},
@@ -90,11 +182,14 @@ local function refresh_name(record)
 end
 
 local function capture(entity)
-    assert(entity and entity ~= 0 and (normal_templates[EntityGetFilename(entity)]
-        or EntityHasTag(entity, normal_flask_tag)), "Only a recognized ordinary flask can be stored")
-    assert(#(EntityGetAllChildren(entity) or {}) == 0 and not component(entity, "ItemCostComponent"),
-        "This flask has attachments or a shop price and cannot be stored")
+    assert(entity and entity ~= 0, "Missing flask")
     local c = flask_components(entity)
+    assert(ordinary_flask(entity, c.ItemComponent), "Only a recognized ordinary flask can be stored")
+    assert(#(EntityGetAllChildren(entity) or {}) == 0, "This flask has attachments that cannot be restored")
+    for _, price in ipairs(EntityGetComponentIncludingDisabled(entity, "ItemCostComponent") or {}) do
+        local cost = ComponentGetValue2(price, "cost")
+        assert(type(cost) == "number" and cost <= 0, "This flask still has a shop price")
+    end
     local inv = c.MaterialInventoryComponent
     return refresh_name({
         kind = "potion", materials = read_materials(inv),
@@ -148,9 +243,9 @@ function NHPotion.restore(record, x, y)
         local inv = c.MaterialInventoryComponent
         if record.capacity then ComponentSetValue2(c.MaterialSuckerComponent, "barrel_size", record.capacity) end
         if record.max_capacity then ComponentSetValue2(inv, "max_capacity", record.max_capacity) end
-        if record.reactions then ComponentSetValue2(inv, "do_reactions", record.reactions) end
+        if record.reactions ~= nil then ComponentSetValue2(inv, "do_reactions", record.reactions) end
         if record.hp then ComponentSetValue2(c.DamageModelComponent, "hp", record.hp) end
-        if record.picked then ComponentSetValue2(c.ItemComponent, "has_been_picked_by_player", true) end
+        if record.picked ~= nil then ComponentSetValue2(c.ItemComponent, "has_been_picked_by_player", record.picked) end
         if record.extra_capacity then EntityAddTag(entity, "extra_potion_capacity") end
         EntityAddTag(entity, normal_flask_tag)
         -- Prevent a modified base template from contributing any extra liquid.

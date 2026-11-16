@@ -198,7 +198,8 @@ function NHUI.draw(model, dispatch)
             label(10, 67, tr("可在出生点重领针剂包。", "Reissue at spawn."), left_w, muted)
         end
         local valuable = (model.secure_loot or {})[1]
-        label(10, 93, tr("贵重物品格", "Valuable slot"), left_w, white)
+        label(10, 93, valuable and tr("贵重物品格 · 已满", "Valuable slot · full")
+            or tr("贵重物品格", "Valuable slot"), left_w, white)
         item_slot(110, 10, 109, left_w, model.secure_icon, model.secure_kind,
             valuable or tr("空", "Empty"), valuable and "secure_withdraw" or nil, 1,
             valuable and tr("取至快捷栏，满格时放在脚边。", "Take into the quickbar, or at your feet if full.")
