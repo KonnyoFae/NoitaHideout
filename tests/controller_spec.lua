@@ -135,9 +135,16 @@ assert(#EntityGetWithTag("noita_hideout_case")==0)
 OnPlayerSpawned(player)
 assert(#EntityGetWithTag("noita_hideout_case")==0 and state().runSerial==1)
 tick()
-local function tool(id) return {parent=quick,lane="tool",xslot=2,yslot=0,entity=id} end
+local function tool(id,slot) return {parent=quick,lane="tool",xslot=2,yslot=0,entity=id,safeSlot=slot,intoContainer=not slot} end
 inventory_open=true
 assert(tick(nil,"take_dose",tool()).mode=="case" and state().pouch.doses==2) -- opening click cannot withdraw
+tick(nil,"take_dose",tool())
+assert(state().pouch.doses==2)
+tick(nil,"open_container",{safeSlot=2})
+tick(nil,"unpack_dose",{safeSlot=1})
+assert(state().pouch.doses==1 and state().safe[1].item.kind=="dose")
+tick(nil,"pack_dose",{safeSlot=1})
+assert(state().pouch.doses==2 and #state().safe==0)
 tick(nil,"take_dose",tool())
 local dose=assert(EntityGetWithTag("noita_hideout_dose")[1])
 assert(state().pouch.doses==1 and EntityGetRootEntity(dose)==player)
@@ -177,13 +184,13 @@ tick()
 assert(not tick(10).open)
 inventory_open=true
 assert(tick().mode=="case")
-tick(nil,"take_pouch",tool())
+tick(nil,"take_pouch",tool(nil,2))
 local pouch=assert(EntityGetWithTag("noita_hideout_pouch")[1])
 assert(EntityGetRootEntity(pouch)==player and state().pouch.location=="bag")
 held=pouch
-tick(nil,"place",tool(pouch))
-assert(not EntityGetIsAlive(pouch) and state().pouch.location=="safe")
-tick(nil,"take_pouch",tool())
+tick(nil,"place",tool(pouch,1))
+assert(not EntityGetIsAlive(pouch) and state().pouch.slot==1)
+tick(nil,"take_pouch",tool(nil,1))
 assert(state().pouch.location=="bag")
 pouch=assert(EntityGetWithTag("noita_hideout_pouch")[1])
 inventory_open=false
@@ -194,6 +201,11 @@ tick()
 GamePickUpInventoryItem(player,pouch)
 held=pouch
 tick(nil,nil,nil,true)
+assert(state().pouch.doses==1 and #EntityGetWithTag("noita_hideout_dose")==0)
+assert(tick().mode=="container")
+local emptyTool=tool()
+emptyTool.xslot=3
+tick(nil,"take_dose",emptyTool)
 assert(state().pouch.doses==0 and #EntityGetWithTag("noita_hideout_dose")==1)
 OnPlayerDied()
 assert(state().closedThrough==1 and state().pouch.location=="lost")

@@ -55,26 +55,37 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
             name=name, icon=icon, entity=entity}
     end
 
-    local protected = model.pouch_location == "safe"
-    local pages = math.ceil(model.capacity/3)
-    page = math.min(page,pages)
-    if pages>1 then
-        if GuiButton(gui,35,ox+110*scale,oy+5*scale,"<",scale) and not drag then page=math.max(1,page-1) end
-        label(130,5,page.."/"..pages,31,muted)
-        if GuiButton(gui,36,ox+167*scale,oy+5*scale,">",scale) and not drag then page=math.min(pages,page+1) end
+    local standalone = model.mode=="container"
+    if not standalone then
+        local pages = math.ceil(model.capacity/3)
+        page = math.min(page,pages)
+        if pages>1 then
+            if GuiButton(gui,35,ox+110*scale,oy+5*scale,"<",scale) and not drag then page=math.max(1,page-1) end
+            label(130,5,page.."/"..pages,31,muted)
+            if GuiButton(gui,36,ox+167*scale,oy+5*scale,">",scale) and not drag then page=math.min(pages,page+1) end
+        end
+        for i=1,math.min(3,model.capacity-(page-1)*3) do
+            local n = (page-1)*3+i
+            local v = model.secure_loot[n] or {}
+            slot(8+23*(i-1),25,"valuable",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id)
+            slots[#slots].safeSlot=n
+        end
     end
-    label(8,19,tr("针剂包", "Pouch"),46,muted)
-    label(61,19,tr("针剂", "Injector"),46,muted)
-    label(119,19,tr("贵重物品", "Valuable"),60,muted)
-    slot(8,32,"pouch",protected and "pouch",tr("针剂包", "Injector pouch"))
-    slot(61,32,"dose",protected and model.case_count > 0 and "dose",tr("取一支针剂", "Take one injector"))
-    for i=1,math.min(3,model.capacity-(page-1)*3) do
-        local n = (page-1)*3+i
-        local v = model.secure_loot[n] or {}
-        slot(119+21*(i-1),32,"valuable",v.kind,v.name or tr("贵重物品格","Valuable slot"),v.icon,v.id)
-        slots[#slots].safeSlot=n
+    local popupY = standalone and 0 or -66
+    if model.popup then
+        if not standalone then
+            GuiZSetForNextWidget(gui,-79)
+            GuiImageNinePiece(gui,37,ox,oy+popupY*scale,187*scale,61*scale,1)
+        end
+        label(8,popupY+5,tr("针剂包","Injector pouch"),120,white)
+        if GuiButton(gui,38,ox+148*scale,oy+(popupY+5)*scale,tr("关闭","Close"),scale) then
+            drag=nil
+            dispatch("close_container")
+            return
+        end
+        slot(8,popupY+23,"dose",model.case_count>0 and "dose" or nil,tr("针剂","Injector"))
+        label(34,popupY+26,tr("耐火激活剂 ×","Fire injector ×")..model.case_count,146,white)
     end
-    if protected then label(85,36,"×"..model.case_count,29,muted) end
 
     local native_x = tonumber(MagicNumbersGetValue("UI_BARS_POS_X"))
     local native_y = tonumber(MagicNumbersGetValue("UI_BARS_POS_Y"))
@@ -89,34 +100,48 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         local w,h = full and fw or qw,full and fh or qh
         local x = native_x + (full and full_offset or 0) + v.col*w
         local y = native_y + v.yslot*h
-        if mx>=x and my>=y and mx<x+w and my<y+h then hovered=v; break end
+        if (not standalone or not full) and mx>=x and my>=y and mx<x+w and my<y+h then hovered=v; break end
     end
     for _,v in ipairs(slots) do
         if mx>=v.x and my>=v.y and mx<v.x+20*scale and my<v.y+20*scale then hovered=v end
     end
-    if not hovered and mx>=ox and my>=oy and mx<ox+187*scale and my<oy+72*scale then
+    if not hovered and mx>=ox and my>=oy+(model.popup and popupY or 0)*scale and mx<ox+187*scale and my<oy+72*scale then
         hovered = {key="panel"}
     end
     if drag and model.revision~=drag.revision then drag=nil end
     if not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind then
-        drag={source=hovered,revision=model.revision}
+        drag={source=hovered,revision=model.revision,x=mx,y=my}
     end
+    if drag and ((mx-drag.x)^2+(my-drag.y)^2)>9*scale^2 then drag.moved=true end
     local source=drag and drag.source
     local function drop(target)
         if not source or not target then return end
+        if source.kind=="pouch" and source.key==target.key and source.entity==target.entity
+            and source.safeSlot==target.safeSlot and not drag.moved then
+            return "open_container",source,source.safeSlot
+        end
+        if source.kind=="pouch" and source.key=="valuable" and target.key=="valuable" and not target.kind then
+            return "move_pouch",source,target.safeSlot
+        end
+        if source.key=="dose" and target.key=="valuable" and not target.kind then
+            return "unpack_dose",source,target.safeSlot
+        end
+        if source.key=="valuable" and source.kind=="dose" and target.key=="dose" then
+            return "pack_dose",source,source.safeSlot
+        end
         if source.key=="native" then
-            if (target.key=="pouch" and ((source.kind=="pouch" and not protected) or (source.kind=="dose" and protected)))
-                or (target.key=="dose" and source.kind=="dose" and protected)
-                or (target.key=="valuable" and not target.entity and (source.kind=="wand" or source.kind=="potion" or source.kind=="spell")) then
+            if target.key=="dose" and model.popup and source.kind=="dose" then return "place",source end
+            if target.key=="valuable" and not target.kind and
+                (source.kind=="wand" or source.kind=="potion" or source.kind=="spell" or source.kind=="dose" or source.kind=="pouch") then
                 return "place",source,target.safeSlot
             end
             if target.key~="native" then return "cancel_native",source end
         elseif target.key=="native" and not target.entity then
             local lane=source.kind=="spell" and "spell" or (source.kind=="wand" and "wand" or "tool")
             if target.lane~=lane then return end
+            if source.kind=="pouch" then return "take_pouch",target,source.safeSlot end
             if source.key=="valuable" then return "secure_withdraw",target,source.safeSlot,source.entity end
             if source.key=="dose" then return "take_dose",target end
-            if source.key=="pouch" then return "take_pouch",target end
         end
     end
     local function sprite(v,id,x,y,alpha)
@@ -139,6 +164,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         end
     end
     local hint = hovered and hovered.name
+    if hovered and hovered.kind=="pouch" then hint=tr("点击打开，拖动移动","Click to open or drag to move") end
     if source then
         if source.key~="native" then sprite(source,160,mx,my,0.95) end
         if hovered and drop(hovered) and drop(hovered)~="cancel_native" then hint=tr("松开放置", "Release to place")
@@ -150,14 +176,15 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         drag=nil
         if action then
             local request = {parent=arg.parent,lane=arg.lane,xslot=arg.xslot,yslot=arg.yslot,
-                entity=arg.entity,safeSlot=safeSlot,storedId=storedId}
+                entity=arg.entity,safeSlot=safeSlot,storedId=storedId,from=arg.safeSlot,
+                intoContainer=hovered and hovered.key=="dose"}
             dispatch(action,request)
         end
     elseif not InputIsMouseButtonDown(1) then drag=nil end
 end
 
 function NHUI.draw(model, dispatch)
-    if not model.open or model.mode ~= "case" then drag,last_case_frame=nil,nil end
+    if not model.open or model.mode == "home" then drag,last_case_frame=nil,nil end
     if not gui then gui = GuiCreate() end
     GuiStartFrame(gui)
     GuiZSet(gui, -80)
@@ -177,7 +204,7 @@ function NHUI.draw(model, dispatch)
         return
     end
 
-    local case = model.mode == "case"
+    local case = model.mode == "case" or model.mode == "container"
     local pw, ph = case and 187 or panel_width, case and 72 or panel_height
     local s = math.min(1, (sw - 10) / pw, (sh - 10) / ph)
     if s <= 0 then return end
@@ -202,7 +229,9 @@ function NHUI.draw(model, dispatch)
         if button(id, x, y, txt) then next_action, param = action, arg end
     end
 
-    label(9, 5, case and tr("安全箱", "Secure case") or tr("藏身处", "Hideout"), case and 98 or 198, white)
+    if model.mode~="container" then
+        label(9, 5, case and tr("安全箱", "Secure case") or tr("藏身处", "Hideout"), case and 98 or 198, white)
+    end
     if case then
         draw_case(model,ox,oy,s,sw,sh,tr,label,dispatch)
         return

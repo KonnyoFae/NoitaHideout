@@ -11,7 +11,7 @@ function NHNative.registerTranslations()
     if not original or original:find("\nnh_hideout_pouch,", 1, true) then return end
     local labels = {
         {"nh_hideout_pouch", "Injector pouch", "针剂包"},
-        {"nh_hideout_pouch_desc", "Use to take one injector. Store the pouch in the secure case.", "手持使用可取一支针剂。可将整包放回安全箱。"},
+        {"nh_hideout_pouch_desc", "Use to open the pouch. Drag injectors into or out of it.", "手持使用可打开针剂包。拖动针剂即可存入或取出。"},
         {"nh_hideout_dose", "Fire immunity injector", "耐火激活剂"},
         {"nh_hideout_dose_desc", "Hold and use to inject. Grants fire immunity for one minute.", "手持时点击注射。获得约一分钟的火焰免疫。"},
     }

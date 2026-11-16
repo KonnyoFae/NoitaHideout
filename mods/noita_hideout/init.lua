@@ -16,6 +16,7 @@ end
 local run_key = "noita_hideout_run_v1"
 local home_x_key, home_y_key = "noita_hideout_origin_x", "noita_hideout_origin_y"
 local state, run_id, home_x, home_y, player_id
+local popup
 local opened, mouse_release, case_open = false, false, nil
 local lang, status, last_error = "en", "", nil
 local model_cache, next_attempt = nil, 0
@@ -209,6 +210,7 @@ end
 local function item_label(entry)
     local item = entry.item
     if item.kind == "potion" then return NHPotion.label(item, lang) end
+    if item.kind == "dose" then return tr("耐火激活剂","Fire injector") end
     if item.kind == "spell" then
         return GameTextGetTranslatedOrNot("$action_" .. item.card.id:lower()) .. (item.card.stack and (" ×" .. item.card.stack) or "")
     end
@@ -231,6 +233,9 @@ local function inventory_view()
     for _, entry in ipairs(state.safe) do
         model.secure_loot[entry.slot or 1] = {id=entry.id, kind=entry.item.kind,name=item_label(entry),
             icon=entry.item.icon or (entry.item.sprite and entry.item.sprite.image_file)}
+    end
+    if state.pouch.location=="safe" then
+        model.secure_loot[state.pouch.slot]={kind="pouch",name=tr("针剂包","Injector pouch"),icon=NHNative.icons.pouch}
     end
     local plan = NHStore.planBatch(state)
     model.batch_available = plan ~= nil
@@ -322,20 +327,15 @@ local function place_in_slot(player, id, slot)
     return EntityGetParent(id)==slot.parent and x==slot.xslot and y==slot.yslot
 end
 
-local function has_belt_space(player, kind)
-    local occupied = 0
-    for _, item in ipairs(NHTransfers.carried(player)) do
-        if (NHTransfers.item_kind(item) == "wand") == (kind == "wand") then occupied = occupied + 1 end
-    end
-    return occupied < 4
-end
-
-local function collect_item(player, id)
-    if has_belt_space(player, NHTransfers.item_kind(id)) then GamePickUpInventoryItem(player, id, false) end
-    return EntityGetRootEntity(id) == player
+local function popup_accessible(player)
+    if not popup then return false end
+    if popup.slot then return state.pouch.location=="safe" and state.pouch.slot==popup.slot and GameIsInventoryOpen() end
+    return EntityGetIsAlive(popup.entity) and NHDoses.isPouch(state,popup.entity)
+        and EntityGetRootEntity(popup.entity)==player
 end
 
 local function close_panel()
+    popup=nil
     opened, case_open, mouse_release = false, nil, true
 end
 
@@ -354,8 +354,37 @@ end
 local function dispatch(player, action, index)
     if action == "close" then close_panel(); return end
     if not opened or not active_run() then return end
-    if case_open then
-        if not GameIsInventoryOpen() or type(index) ~= "table" then return end
+    if case_open or popup then
+        if action=="close_container" then
+            popup=nil
+            if not case_open then close_panel() end
+            return
+        end
+        if type(index)~="table" then return end
+        if action=="open_container" then
+            local owner
+            if index.safeSlot and state.pouch.location=="safe" and state.pouch.slot==index.safeSlot then owner={slot=index.safeSlot}
+            elseif index.entity and NHDoses.isPouch(state,index.entity) and EntityGetRootEntity(index.entity)==player then owner={entity=index.entity} end
+            if owner then popup=owner end
+            return
+        end
+        if action=="unpack_dose" or action=="pack_dose" then
+            if not popup_accessible(player) then return end
+            local ok,reason=NHDoses.moveDose(state,index.safeSlot,action=="unpack_dose")
+            if not ok then report(reason) else status="" end
+            return
+        end
+        if action=="move_pouch" then
+            if state.pouch.location=="safe" and state.pouch.slot==index.from then
+                commit_edit(function(draft)
+                    if not NHStore.freeSafeSlot(draft,index.safeSlot) then return false,"Secure valuables slot is full." end
+                    draft.pouch.slot=index.safeSlot
+                    return true
+                end)
+            end
+            return
+        end
+        if not GameIsInventoryOpen() and not popup_accessible(player) then return end
         local slot = matching_slot(player,index)
         if not slot then return end
         local ok,result
@@ -371,18 +400,26 @@ local function dispatch(player, action, index)
             if ComponentGetValue2(inv,"mThrowItem")==id then ComponentSetValue2(inv,"mThrowItem",0) end
             if action=="cancel_native" then return end
             local kind = NHNative.kind(id)
-            if kind=="pouch" then ok,result=NHDoses.storePouch(state,player,id)
-            elseif kind=="dose" then ok,result=NHDoses.deposit(state,player,id)
+            if kind=="pouch" and index.safeSlot then ok,result=NHDoses.storePouch(state,player,id,index.safeSlot)
+            elseif kind=="dose" then
+                if not index.safeSlot and not (index.intoContainer and popup_accessible(player)) then return end
+                ok,result=NHDoses.deposit(state,player,id,index.safeSlot)
             else ok,result=NHTransfers.deposit(state,player,"safe",id,index.safeSlot) end
         else
             if slot.entity then return end
             local function deliver(id) return place_in_slot(player,id,slot) end
-            if action=="take_pouch" then ok,result=NHDoses.takePouch(state,player,deliver)
-            elseif action=="take_dose" then ok,result=NHDoses.withdraw(state,player,deliver)
+            if action=="take_pouch" then
+                if state.pouch.slot~=index.safeSlot then return end
+                ok,result=NHDoses.takePouch(state,player,deliver)
+            elseif action=="take_dose" then
+                if not popup_accessible(player) then return end
+                ok,result=NHDoses.withdraw(state,player,deliver,popup.entity)
             elseif action=="secure_withdraw" then
                 local row = NHStore.safeIndex(state,index.safeSlot)
                 if not row or state.safe[row].id~=index.storedId then return end
-                ok,result=NHTransfers.withdraw(state,player,row,"safe",deliver)
+                if state.safe[row].item.kind=="dose" then
+                    ok,result=NHDoses.withdraw(state,player,deliver,nil,index.safeSlot)
+                else ok,result=NHTransfers.withdraw(state,player,row,"safe",deliver) end
             else return end
         end
         if not ok then transfer_error(result,action=="place" and index.entity)
@@ -431,7 +468,7 @@ end
 function OnWorldInitialized()
     state, run_id, home_x, home_y, player_id = nil, nil, nil, nil, nil
     opened, mouse_release, next_attempt, last_dose_frame = false, false, 0, -1
-    case_open = nil
+    case_open,popup = nil,nil
     NHNative.resetInput()
     model_cache, status, last_error = nil, "", nil
     lang = GameTextGet("$current_language") == "简体中文" and "zh" or "en"
@@ -481,10 +518,16 @@ function OnWorldPostUpdate()
     end
     local nearby = near_home(player)
     local was_open = opened
+    if popup and not popup_accessible(player) then
+        popup=nil
+        if not case_open then close_panel() end
+    end
     if inventory_open then
         opened,case_open=true,true
     elseif case_open then
         close_panel()
+    elseif popup then
+        if InputIsKeyJustDown(41) then close_panel() end
     elseif opened then
         local out_of_reach = not case_open and not nearby
         if out_of_reach or InputIsKeyJustDown(11) then close_panel() end
@@ -494,14 +537,14 @@ function OnWorldPostUpdate()
         local item = NHNative.held(player)
         local kind = NHNative.kind(item)
         if kind == "pouch" and NHDoses.isPouch(state, item) then
-            local ok, result = NHDoses.withdraw(state, player)
-            if ok then collect_item(player, result) else transfer_error(result) end
+            opened,popup = true,{entity=item}
         elseif kind == "dose" then use_dose(player, item) end
     end
     if not active_run() then return end
     local model = opened and inventory_view() or {}
-    if opened and case_open then model.native_slots = native_slots(player) end
-    model.mode = case_open and "case" or "home"
+    if opened and (case_open or popup) then model.native_slots = native_slots(player) end
+    model.popup = popup ~= nil
+    model.mode = case_open and "case" or (popup and "container" or "home")
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
 
     model.debug = opened and ModSettingGet("noita_hideout.test_tools") ~= false
@@ -513,6 +556,7 @@ function OnWorldPostUpdate()
 end
 
 function OnPlayerDied()
+    popup=nil
     opened, case_open = false, nil
     if GlobalsGetValue(run_key, "") == "" then return end
     next_attempt = 0

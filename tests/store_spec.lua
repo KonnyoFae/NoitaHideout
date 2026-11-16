@@ -170,3 +170,16 @@ assert(NHStore.safeCapacity({safe={}})==1)
 settings[head_key] = nil
 assert(not NHStore.load())  -- Missing head on established data cannot reset inventory.
 print("Store: safe/carry loss, paid production, no double reward, save isolation and recovery passed.")
+
+-- Read the last dedicated-slot format with a full, upgraded case.
+selected=4
+profiles[4]={}
+local old=load()
+old.sharedSlots,old.safeCapacity,old.pouch.slot=nil,3,nil
+for i=1,3 do old.safe[i]={id=i,slot=i,item={kind="wand",name="Wand"}} end
+old=save(old)
+assert(old.safeCapacity==4 and old.pouch.slot==4 and not NHStore.freeSafeSlot(old))
+old=save(old)
+assert(old.safeCapacity==4 and old.safe[3].slot==3)
+old.pouch.location="bag"
+assert(NHStore.freeSafeSlot(old,4)==4)

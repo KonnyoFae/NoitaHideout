@@ -13,6 +13,7 @@ end
 
 local function draft(state)
     local s = copy(state)
+    s.safe = copy(state.safe)
     s.pouch = copy(state.pouch)
     s.issuedDoses = copy(state.issuedDoses)
     return s
@@ -22,6 +23,7 @@ local function commit(state, changed)
     local ok, err = NHStore.commit(changed)
     if not ok then return nil, err end
     state.revision, state.nextItemId = changed.revision, changed.nextItemId
+    state.safe = changed.safe
     state.pouch, state.issuedDoses = changed.pouch, changed.issuedDoses
     return true
 end
@@ -80,22 +82,49 @@ function NHDoses.takePouch(s, player, deliver)
     return true, id
 end
 
-function NHDoses.storePouch(s, player, id)
+function NHDoses.storePouch(s, player, id, preferred)
     if not is_open_run(s) or not NHDoses.isPouch(s, id) or EntityGetRootEntity(id) ~= player then
         return nil, "Hold your injector pouch first."
     end
     local changed = draft(s)
-    changed.pouch = {location = "safe", doses = s.pouch.doses}
+    local slot = NHStore.freeSafeSlot(s,preferred)
+    if not slot then return nil, "Secure valuables slot is full." end
+    changed.pouch = {location = "safe", slot=slot, doses = s.pouch.doses}
     local ok, reason = commit(s, changed)
     if not ok then return nil, reason end
     dispose(player, id)
     return true
 end
 
-function NHDoses.withdraw(s, player, deliver)
+local function add_safe_dose(s,slot)
+    table.insert(s.safe,{id=s.nextItemId,slot=slot,item={kind="dose"}})
+    s.nextItemId=s.nextItemId+1
+end
+
+function NHDoses.moveDose(s,slot,to_safe)
+    if not is_open_run(s) or s.pouch.location=="lost" then return nil,"Pouch unavailable." end
+    local changed=draft(s)
+    if to_safe then
+        if s.pouch.doses<1 or not NHStore.freeSafeSlot(s,slot) then return nil,"Slot unavailable." end
+        changed.pouch.doses=changed.pouch.doses-1
+        add_safe_dose(changed,slot)
+    else
+        local index=NHStore.safeIndex(s,slot)
+        if not index or s.safe[index].item.kind~="dose" then return nil,"Slot unavailable." end
+        table.remove(changed.safe,index)
+        changed.pouch.doses=changed.pouch.doses+1
+    end
+    return commit(s,changed)
+end
+
+function NHDoses.withdraw(s, player, deliver, pouch, safe_slot)
     if not is_open_run(s) then return nil, "Run already closed." end
-    if s.pouch.location == "lost" or s.pouch.doses < 1 then return nil, "No dose available." end
-    if s.pouch.location == "bag" and not NHDoses.isPouch(s, NHNative.held(player)) then return nil, "Hold your injector pouch first." end
+    local safe_index
+    if safe_slot then
+        safe_index=NHStore.safeIndex(s,safe_slot)
+        if not safe_index or s.safe[safe_index].item.kind~="dose" then return nil,"Slot unavailable." end
+    elseif s.pouch.location == "lost" or s.pouch.doses < 1 then return nil, "No dose available." end
+    if not safe_slot and s.pouch.location == "bag" and not (pouch and NHDoses.isPouch(s,pouch) and EntityGetRootEntity(pouch)==player or NHDoses.isPouch(s, NHNative.held(player))) then return nil, "Hold your injector pouch first." end
     local x, y = EntityGetTransform(player)
     y = y - 4
     local entity, err = NHNative.spawn("dose", x, y)
@@ -110,8 +139,9 @@ function NHDoses.withdraw(s, player, deliver)
     end
     local changed = draft(s)
     changed.nextItemId = changed.nextItemId + 1
-    changed.pouch.doses = changed.pouch.doses - 1
-    changed.issuedDoses[token] = {x = x, y = y}
+    if safe_index then table.remove(changed.safe,safe_index)
+    else changed.pouch.doses = changed.pouch.doses - 1 end
+    changed.issuedDoses[token] = {x = x, y = y, safeSlot=safe_slot}
     if deliver and not deliver(entity) then
         dispose(player, entity)
         return nil, "Inventory slot changed."
@@ -122,13 +152,14 @@ function NHDoses.withdraw(s, player, deliver)
     return true, entity
 end
 
-local function retire(s, player, entity, to_pouch)
+local function retire(s, player, entity, to_pouch, slot)
     if not is_open_run(s) then return nil, "Run already closed." end
     if not entity or entity == 0 or not EntityGetIsAlive(entity) or NHNative.kind(entity) ~= "dose" then
         return nil, "Select a syringe."
     end
     if to_pouch then
-        if s.pouch.location == "lost" then return nil, "Pouch lost." end
+        if slot and not NHStore.freeSafeSlot(s,slot) then return nil,"Slot unavailable." end
+        if not slot and s.pouch.location == "lost" then return nil, "Pouch lost." end
         if EntityGetRootEntity(entity) ~= player then
             return nil, "The selected item is no longer in your quick inventory."
         end
@@ -141,15 +172,16 @@ local function retire(s, player, entity, to_pouch)
     end
     local changed = draft(s)
     changed.issuedDoses[token] = nil
-    if to_pouch then changed.pouch.doses = changed.pouch.doses + 1 end
+    if slot then add_safe_dose(changed,slot)
+    elseif to_pouch then changed.pouch.doses = changed.pouch.doses + 1 end
     local ok, err = commit(s, changed)
     if not ok then return nil, err end
     dispose(player, entity)
     return true
 end
 
-function NHDoses.deposit(s, player, entity)
-    return retire(s, player, entity, true)
+function NHDoses.deposit(s, player, entity, slot)
+    return retire(s, player, entity, true, slot)
 end
 
 function NHDoses.consume(s, player, entity)
@@ -193,8 +225,11 @@ function NHDoses.reconcile(s, player)
         and GlobalsGetValue(receipt(pouch.token), "") ~= "1"
         and math.abs(x-pouch.x) < 64 and math.abs(y-pouch.y) < 64
         and DoesWorldExistAt(math.floor(pouch.x)-16, math.floor(pouch.y)-16, math.ceil(pouch.x)+16, math.ceil(pouch.y)+16) then
-        changed = draft(s)
-        changed.pouch = {location = "safe", doses = pouch.doses}
+        local slot = NHStore.freeSafeSlot(s,pouch.slot) or NHStore.freeSafeSlot(s)
+        if slot then
+            changed = draft(s)
+            changed.pouch = {location = "safe", slot=slot, doses = pouch.doses}
+        end
     end
     for token, origin in pairs(issued) do
         -- An apparently missing item may have been legitimately used or unloaded.
@@ -204,10 +239,19 @@ function NHDoses.reconcile(s, player)
             and math.abs(x - origin.x) < 64 and math.abs(y - origin.y) < 64
             and DoesWorldExistAt(math.floor(origin.x) - 16, math.floor(origin.y) - 16,
                 math.ceil(origin.x) + 16, math.ceil(origin.y) + 16)
-            and s.pouch.location ~= "lost" then
-            changed = changed or draft(s)
-            changed.issuedDoses[token] = nil
-            changed.pouch.doses = changed.pouch.doses + 1
+            and (origin.safeSlot or s.pouch.location ~= "lost") then
+            if origin.safeSlot then
+                local slot=NHStore.freeSafeSlot(changed or s,origin.safeSlot) or NHStore.freeSafeSlot(changed or s)
+                if slot then
+                    changed=changed or draft(s)
+                    add_safe_dose(changed,slot)
+                    changed.issuedDoses[token]=nil
+                end
+            else
+                changed=changed or draft(s)
+                changed.issuedDoses[token] = nil
+                changed.pouch.doses = changed.pouch.doses + 1
+            end
         end
     end
     if changed then return commit(s, changed) end

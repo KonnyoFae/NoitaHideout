@@ -51,7 +51,7 @@ end
 local model={lang="en",open=false,near=false,status=""}
 assert(not render(model,2))
 model.open,model.mode,model.pouch_location,model.case_count=true,"case","safe",2
-model.capacity,model.revision,model.secure_loot=4,1,{}
+model.capacity,model.revision,model.secure_loot=4,1,{[3]={kind="pouch",name="Pouch"}}
 model.native_slots={native("wand",0,0,42,"wand"),native("tool",4,0,43,"dose"),
     native("spell",0,0,44,"spell"),native("spell",5,5),native("tool",6,2),native("wand",3,3)}
 local function point(x,y,event)
@@ -61,28 +61,41 @@ end
 local cx,cy=width-187-5,height-72-5
 render(model)
 point(28,28,"press")
-local cmd,arg=point(cx+123,cy+36,"release")
+local cmd,arg=point(cx+12,cy+30,"release")
 assert(cmd=="place" and arg.entity==42 and arg.safeSlot==1)
 point(198,28,"press")
-cmd,arg=point(cx+144,cy+36,"release")
+cmd,arg=point(cx+35,cy+30,"release")
 assert(cmd=="place" and arg.entity==44 and arg.safeSlot==2)
 model.secure_loot[2]={kind="spell",name="Bomb",id=22}
-point(cx+144,cy+36,"press")
+point(cx+35,cy+30,"press")
 assert(not point(88,28,"release"),"spell cannot go in wand row")
-point(cx+144,cy+36,"press")
+point(cx+35,cy+30,"press")
 cmd,arg=point(298,28,"release")
 assert(cmd=="secure_withdraw" and arg.xslot==5 and arg.storedId==22 and arg.safeSlot==2)
-point(cx+12,cy+36,"press")
+point(cx+58,cy+30,"press")
+cmd,arg=point(cx+58,cy+30,"release")
+assert(cmd=="open_container" and arg.safeSlot==3)
+model.popup=true
+point(cx+58,cy+30,"press")
 cmd,arg=point(148,28,"release")
-assert(cmd=="take_pouch" and arg.xslot==2)
+assert(cmd=="take_pouch" and arg.xslot==2 and arg.safeSlot==3)
 point(108,28,"press")
-cmd,arg=point(cx+12,cy+36,"release")
-assert(cmd=="place" and arg.entity==43)
+cmd,arg=point(cx+12,cy-38,"release")
+assert(cmd=="place" and arg.entity==43 and arg.intoContainer)
+point(cx+12,cy-38,"press")
+cmd,arg=point(cx+12,cy+30,"release")
+assert(cmd=="unpack_dose" and arg.safeSlot==1)
+model.secure_loot[1]={kind="dose",id=9}
+point(cx+12,cy+30,"press")
+cmd,arg=point(cx+12,cy-38,"release")
+assert(cmd=="pack_dose" and arg.safeSlot==1)
+assert(render(model,38)=="close_container")
+model.popup=false
 point(198,28,"press")
 assert(not point(298,28,"release"),"vanilla reorder")
 render(model,36)
 point(198,28,"press")
-cmd,arg=point(cx+123,cy+36,"release")
+cmd,arg=point(cx+12,cy+30,"release")
 assert(arg.safeSlot==4)
 point(cx+12,cy+36,"press")
 model.open=false

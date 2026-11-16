@@ -11,8 +11,8 @@ local function fresh(profile)
     return {
         version = 1, profile = profile, revision = 0,
         runSerial = 0, rewardedThrough = 0, closedThrough = 0,
-        nextItemId = 1, warehouse = {}, safe = {}, safeCapacity = 1,
-        pouch = {location = "safe", doses = 2},
+        nextItemId = 1, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true,
+        pouch = {location = "safe", slot = 2, doses = 2},
         order = false, finished = 0,
     }
 end
@@ -42,11 +42,12 @@ end
 
 function NHStore.freeSafeSlot(s, preferred)
     local capacity = NHStore.safeCapacity(s)
+    local occupied = s.pouch and s.pouch.location=="safe" and s.pouch.slot
     if preferred then
-        if whole(preferred) and preferred >= 1 and preferred <= capacity and not NHStore.safeIndex(s,preferred) then return preferred end
+        if preferred~=occupied and whole(preferred) and preferred >= 1 and preferred <= capacity and not NHStore.safeIndex(s,preferred) then return preferred end
         return nil
     end
-    for i=1,capacity do if not NHStore.safeIndex(s,i) then return i end end
+    for i=1,capacity do if i~=occupied and not NHStore.safeIndex(s,i) then return i end end
 end
 
 -- Persistent flags belong to the game's save slot. Mod settings can be shared.
@@ -91,6 +92,10 @@ local function validate(s)
         local slot = row.slot or 1
         assert(whole(slot) and slot>=1 and slot<=capacity and not seen[slot],"Invalid secure inventory slot")
         seen[slot]=true
+    end
+    if s.sharedSlots and s.pouch.location=="safe" then
+        local slot=s.pouch.slot
+        assert(whole(slot) and slot>=1 and slot<=capacity and not seen[slot],"Invalid pouch slot")
     end
     assert(type(s.pouch) == "table" and whole(s.pouch.doses), "Invalid injector case")
     assert(s.pouch.location == "safe" or s.pouch.location == "bag" or s.pouch.location == "lost",
@@ -197,6 +202,12 @@ local function unpack_slot(raw)
     assert(expected == checksum(payload), "Snapshot checksum mismatch")
     local s = decode(payload)
     validate(s)
+    if not s.sharedSlots then
+        s.safeCapacity = NHStore.safeCapacity(s)+1
+        s.sharedSlots = true
+        if s.pouch.location=="safe" then s.pouch.slot=s.safeCapacity end
+        validate(s)
+    end
     return s
 end
 
@@ -294,7 +305,9 @@ function NHStore.useDose(state)
 end
 
 function NHStore.restock(state)
-    state.pouch = {location = "safe", doses = 2}
+    local slot = state.pouch.location=="safe" and state.pouch.slot or NHStore.freeSafeSlot(state)
+    if not slot then return false, "Secure valuables slot is full." end
+    state.pouch = {location = "safe", slot=slot, doses = 2}
     return true, "Two test doses placed in secure case."
 end
 
