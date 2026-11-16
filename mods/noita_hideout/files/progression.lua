@@ -23,24 +23,29 @@ define("injector","expansion","针剂工位","Injector station",1,{{"water",250}
 define("grenade","expansion","手雷工位","Grenade station",1,{{"gunpowder",150},{"oil",100}},
     {effect={"制造手雷","Craft grenades"}})
 define("salvage","expansion","拆解台","Salvage bench",1,{{"sand",250},{"oil",100}},
-    {effect={"回收碎片，提取法术精华","Recover scrap or extract spell essences"}})
+    {effect={"回收碎片、提取精华和合成法术","Recover scrap, extract essences and craft spells"}})
 define("support","expansion","支援站","Support station",0,{},
     {planned=true,effect={"呼叫支援","Call for support"}})
 define("perk_pack","expansion","特质打包台","Perk packing",1,{{"slime",200},{"arcane_scrap",1}},
     {effect={"封装附近未拾取的免疫特质","Pack nearby immunity perks"}})
 define("safe","upgrade","随身安全箱","Secure case",4,{{"sand",250},{"slime",150}})
 define("perk_slots","upgrade","特质栏","Perk slots",3,{{"water",250},{"slime",100}})
-define("farmland","expansion","田地","Farmland",4,{{"farm_sand",150},{"water",100}})
+define("farmland","expansion","田地","Farmland",4,{{"farm_soil",150},{"water",100}})
 define("agri_equipment","expansion","农业设备","Farm equipment",1,{{"farm_sand",300},{"water",200}},
     {effect={"种植香料与激活草药","Grow spices and stimulating herbs"}})
 define("livestock","expansion","畜牧设备","Livestock pens",3,{{"farm_sand",200},{"water",150}})
 
-local farm_sand={alternatives={"sand","sandstone","sandstone_surface"}}
+local material_groups={
+    farm_sand={alternatives={"sand","sandstone","sandstone_surface"}},
+    -- All three powders display as soil in the base game.
+    farm_soil={alternatives={"soil","soil_lush","soil_lush_dark"}},
+}
 local material_names={
     water={"水","Water"},sand={"沙","Sand"},slime={"黏液","Slime"},oil={"油","Oil"},
     gunpowder={"火药","Gunpowder"},arcane_scrap={"奥术碎片","Arcane scrap"},
     empty_container={"仓库空容器","Empty containers in storage"},container_scrap={"容器碎片","Container scrap"},
     farm_sand={"沙与砂岩（合计）","Sand and sandstone (total)"},
+    farm_soil={"泥土","Soil"},
 }
 local function inventory(s,key)
     if key=="arcane_scrap" or key=="container_scrap" then return s.resources end
@@ -78,7 +83,7 @@ local function costs(s,entry,level,empty_count,lang)
     local result={}
     local function add(key,amount)
         local available=key=="empty_container" and empty_count or inventory(s,key)[key] or 0
-        if key=="farm_sand" then available=NHStore.ingredientStock(s,farm_sand) end
+        if material_groups[key] then available=NHStore.ingredientStock(s,material_groups[key]) end
         result[#result+1]={key=key,name=material_names[key][lang=="zh" and 1 or 2],amount=amount,available=available}
     end
     for _,part in ipairs(entry.cost) do add(part[1],part[2]*(level+1)) end
@@ -194,7 +199,8 @@ function NHStore.buyUpgrade(s,request)
     for _,part in ipairs(payment) do
         if part.key~="empty_container" then
             local stock=inventory(s,part.key)
-            local sources=part.key=="farm_sand" and farm_sand.alternatives or {part.key}
+            local group=material_groups[part.key]
+            local sources=group and group.alternatives or {part.key}
             local required=part.amount
             for _,key in ipairs(sources) do
                 local available=stock[key] or 0

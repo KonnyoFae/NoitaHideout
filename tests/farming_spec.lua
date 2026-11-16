@@ -32,15 +32,21 @@ end
 
 assert(#NHFarm.view(s,"zh",0).plots==0)
 assert(not NHFarm.plant(s,request(1,"fiber"),0))
-s.materials={sand=40,sandstone=70,sandstone_surface=650,water=99,rock_static=500}
+s.materials={sand=40,sandstone=70,sandstone_surface=200,water=500,mud=500,soil_dead=500,soil_dark=500}
 local project=expansion("farmland")
-assert(project.costs[1].available==760 and project.costs[1].amount==150 and not project.canBuy)
-assert(not build("farmland") and s.materials.sand==40 and s.materials.sandstone==70)
+assert(project.costs[1].name=="Soil" and project.costs[1].available==0 and project.costs[1].amount==150)
+assert(not project.canBuy and not build("farmland") and s.materials.water==500)
+s.materials.soil,s.materials.soil_lush,s.materials.soil_lush_dark=100,30,320
+s.materials.water=99
+project=expansion("farmland")
+assert(project.costs[1].available==450 and not project.canBuy)
+assert(not build("farmland") and s.materials.soil==100 and s.materials.soil_lush==30)
 s.materials.water=500
 assert(not build("agri_equipment") and not expansion("agri_equipment").canBuy)
-assert(build("farmland") and not s.materials.sand and not s.materials.sandstone and s.materials.sandstone_surface==610)
-assert(build("farmland") and s.materials.water==200 and s.materials.sandstone_surface==310)
-assert(s.materials.rock_static==500)
+assert(build("farmland") and not s.materials.soil and not s.materials.soil_lush and s.materials.soil_lush_dark==300)
+assert(build("farmland") and s.materials.water==200 and not s.materials.soil_lush_dark)
+assert(s.materials.sand==40 and s.materials.sandstone==70 and s.materials.sandstone_surface==200)
+assert(s.materials.mud==500 and s.materials.soil_dead==500 and s.materials.soil_dark==500)
 assert(not NHFarm.plant(s,request(1,"spice"),0))
 assert(build("agri_equipment") and not s.materials.water and s.materials.sandstone_surface==10)
 assert(not build("agri_equipment"))
@@ -111,9 +117,9 @@ assert(not NHFarm.due(s,18600) and NHFarm.observe(s,601)==18601)
 assert(NHFarm.sync(s,30600) and s.resources.fiber==18 and s.resources.active_herb==3)
 assert(NHFarm.plant(s,request(1,"grain"),30600) and s.farm.plots[1].readyAt==37800)
 
-s.materials.sand,s.materials.water=1050,700
+s.materials.soil,s.materials.water=1050,700
 assert(build("farmland") and build("farmland") and #NHFarm.view(s,"en",s.farm.time).plots==4)
-assert(not build("farmland") and not s.materials.sand and not s.materials.water)
+assert(not build("farmland") and not s.materials.soil and not s.materials.water)
 assert(NHFarm.plant(s,request(3,"grain"),s.farm.time))
 local rates=cropRates(s.farm.time)
 assert(rates.grain==4 and rates.active_herb==0.6 and rates.fiber==0 and rates.herb==0)

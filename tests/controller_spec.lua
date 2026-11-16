@@ -1196,7 +1196,7 @@ local function testFarmController()
     new_world()
     local seeded=state()
     seeded.levels.medical=1
-    seeded.materials={sand=50,sandstone=100,water=100}
+    seeded.materials={soil=50,soil_lush=100,water=100}
     seeded.resources={herb=2,sugar=1}
     assert(NHStore.commit(seeded))
     boot()
@@ -1207,7 +1207,7 @@ local function testFarmController()
     tick(nil,"buy_upgrade",{id="farmland",level=0})
     view=tick()
     assert(#view.farm.plots==1 and has_project(view.recipes,"bread").unlocked)
-    assert(not state().materials.water and not state().materials.sandstone and not state().materials.sand)
+    assert(not state().materials.water and not state().materials.soil_lush and not state().materials.soil)
     local function quote(crop)
         local plot=tick().farm.plots[1]
         return {plot=plot.id,token=plot.token,crop=crop}
@@ -1272,7 +1272,7 @@ local function testFarmController()
     new_world()
     assert(NHFarm.observe(state(),frame)==elapsed and state().farm.plots[1].readyAt==deadline)
     local supplies=state()
-    supplies.materials.sand,supplies.materials.water=300,200
+    supplies.materials.soil,supplies.materials.water=300,200
     assert(NHStore.commit(supplies))
     boot()
     inventory_open=true
@@ -1567,3 +1567,39 @@ local function testCompanionAffinity()
 end
 testCompanionAffinity()
 print("Controller: affinity checkpoints, pause and new game, continue and death retain each companion's exact progress.")
+
+local function testSpellWorkshopController()
+    settings,flags={},{}
+    new_world()
+    local saved=state()
+    saved.levels.salvage=1
+    saved.resources={essence_healing=175,essence_lightning=1000}
+    assert(NHStore.commit(saved))
+    boot()
+    inventory_open=true
+    local view=tick()
+    assert(#view.spellFamilies==17)
+    local healing=assert(has_project(view.spellRecipes.essence_healing,"spell_HEAL_BULLET"))
+    assert(healing.ready and healing.actionId=="HEAL_BULLET" and healing.inputs[1].essence=="essence_healing")
+    assert(healing.inputs[1].amount==175 and healing.inputs[1].available==175)
+    assert(has_project(view.spellRecipes.essence_healing,"spell_REGENERATION_FIELD").spellType=="static_projectile")
+    local cloud="spell_CLOUD_THUNDER"
+    assert(not has_project(view.spellRecipes.essence_lightning,cloud).unlocked)
+    inventory_open=false
+    tick()
+    AddFlagPersistent("card_unlocked_cloud_thunder")
+    inventory_open=true
+    assert(has_project(tick().spellRecipes.essence_lightning,cloud).ready)
+    tick(nil,"craft",{id=healing.id})
+    local order=state().order
+    assert(order and not state().resources.essence_healing and tick().warehouse.spell[order.output.slot].kind=="reserved")
+    boot()
+    tick()
+    advance(order.required)
+    local card=tick().warehouse.spell[order.output.slot]
+    assert(card.spell_uses==20 and card.essence.amount==175 and state().finished==1)
+    tick(nil,"salvage",{id=card.id,kind="spell",slot=order.output.slot,mode="essence"})
+    assert(state().resources.essence_healing==175 and #state().warehouse==0)
+end
+testSpellWorkshopController()
+print("Controller: native discovery refresh, spell reservations, full-charge delivery and exact essence refund passed.")

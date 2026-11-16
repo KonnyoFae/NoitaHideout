@@ -70,7 +70,7 @@ print("Workshop: empty-container payment, reserved delivery, retries, multiple i
 run=NHStore.newRun(s)
 s.resources.fiber=4
 assert(not NHStore.startOrder(s,"card_wallet"))
-s.materials={sand=350,water=200}
+s.materials={soil=150,sand=200,water=200}
 assert(NHStore.buyUpgrade(s,{id="farmland",level=0}))
 assert(not NHStore.startOrder(s,"card_wallet") and s.resources.fiber==4)
 add_flask(2,{})

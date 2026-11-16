@@ -4,8 +4,7 @@ local gui
 local tab = "orders"
 local warehouse_tab, folded = "wand", false
 local warehouse_pages = {}
-local bank_amount=1
-local bank_amounts={1,10,100,1000}
+local bank_hold
 local warehouse_tabs_y=22
 local warehouse_tabs = {
     {id=75,key="wand",zh="魔杖",en="Wands",shortZh="杖",shortEn="Wand"},
@@ -21,6 +20,7 @@ local workshop_folded=false
 local list_pages={}
 local entries_per_page=5
 local recipe_category="alchemy"
+local spell_family
 local alchemy_mode="synthesis"
 local shop_category="materials"
 local selected_entry,salvage_target
@@ -31,7 +31,6 @@ local work_tabs={
     {key="expansion",id=218,zh="扩建",en="Build"},
     {key="upgrade",id=219,zh="升级",en="Upgrades"},
     {key="shop",id=220,zh="商店",en="Shop"},
-    {key="bank",id=224,zh="存钱罐",en="Piggy bank"},
     {key="farm",id=221,zh="种植",en="Farm"},
     {key="livestock",id=223,zh="畜牧",en="Livestock"},
     {key="samples",id=213,zh="测试物资",en="Supplies"},
@@ -42,6 +41,7 @@ local recipe_tabs={
     {key="weapons",id=252,zh="武器",en="Weapons"},
     {key="equipment",id=253,zh="装备",en="Equipment"},
     {key="food",id=222,zh="食物",en="Food"},
+    {key="spell",id=225,zh="法术",en="Spells"},
 }
 local alchemy_tabs={
     {key="synthesis",id=254,zh="炼成",en="Synthesis"},
@@ -275,73 +275,54 @@ local function time_text(seconds)
     return string.format("%d:%02d",math.floor(seconds/60),seconds%60)
 end
 
-local function bank_balances(model,width,scale,tr)
-    local rows={{title=tr("随身金币","Wallet"),value=model.walletGold,infinite=model.walletInfinite},
-        {title=tr("存款","Savings"),value=model.bankGold}}
-    local y=0
-    local room=(width-8)*scale
-    for _,r in ipairs(rows) do
-        r.amount=r.infinite and "∞" or (r.value and string.format("%.0f",r.value) or "—")
-        r.y=y
-        local w=GuiGetTextDimensions(gui,r.amount,scale)
-        if GuiGetTextDimensions(gui,r.title,scale)+3*scale+w>room then y=y+11 end
-        r.value_y=y
-        r.value_scale=scale*math.min(1,room/w)
-        y=y+13
+local function transfer_batch(elapsed,limit)
+    if elapsed==0 then return 1 end
+    if elapsed>=24 and (elapsed-24)%6==0 then
+        return math.min(limit,5*2^math.floor((elapsed-24)/24))
     end
-    return rows,y
 end
 
-local function draw_bank(model,left,top,width,scale,tr,dispatch,rows,controls_y)
-    local x=left+4*scale
-    local right=left+(width-4)*scale
-    for _,r in ipairs(rows) do
-        tint(muted)
-        GuiText(gui,x,top+r.y*scale,r.title,scale)
-        tint(gold)
-        GuiText(gui,right-GuiGetTextDimensions(gui,r.amount,r.value_scale),top+r.value_y*scale,r.amount,r.value_scale)
-        if r.infinite then GuiTooltip(gui,tr("无限金币钱包不支持存取","Transfers unavailable with infinite gold"),"")
-        elseif r.value==nil then GuiTooltip(gui,tr("当前钱包不可用","Wallet unavailable"),"") end
-    end
-    local controls=top+controls_y*scale
+local function draw_shop_bank(model,left,top,width,scale,tr,dispatch,mx,my)
+    local x=left+6*scale
+    local right=left+(width-6)*scale
+    local title=tr("存款余额","Savings")
+    local amount=string.format("%.0f",model.bankGold)
+    local name_width=GuiGetTextDimensions(gui,title,scale)
+    local value_width=GuiGetTextDimensions(gui,amount,scale)
+    local value_scale=scale*math.min(1,(right-x-name_width-3*scale)/value_width)
     tint(muted)
-    GuiText(gui,x,controls+4*scale,tr("存取金额","Transfer amount"),scale)
-    local titles,total={},0
-    for i,n in ipairs(bank_amounts) do
-        titles[i]=n==bank_amount and ("["..n.."]") or tostring(n)
-        total=total+GuiGetTextDimensions(gui,titles[i],scale)
-    end
-    local gaps=#bank_amounts-1
-    local factor=math.min(1,(right-x-2*scale*gaps)/total)
-    local gap=(right-x-total*factor)/gaps
-    local bx=x
-    for i,n in ipairs(bank_amounts) do
-        tint(n==bank_amount and gold or white)
-        if GuiButton(gui,269+i,bx,controls+17*scale,titles[i],scale*factor) and not drag then
-            bank_amount=n
+    GuiText(gui,x,top,title,scale)
+    tint(gold)
+    GuiText(gui,right-GuiGetTextDimensions(gui,amount,value_scale),top,amount,value_scale)
+
+    local deposit,withdraw=tr("[存入]","[Deposit]"),tr("[取出]","[Withdraw]")
+    local total=GuiGetTextDimensions(gui,deposit,scale)+GuiGetTextDimensions(gui,withdraw,scale)
+    local button_scale=scale*math.min(1,(right-x-4*scale)/total)
+    local y=top+12*scale
+    local frame=GameGetFrameNum()
+    local previous=bank_hold
+    bank_hold=nil
+    local function transfer(id,caption,direction,bx,source,destination)
+        local limit=source and destination and not model.walletInfinite and math.min(source,NHStore.maxGold-destination) or 0
+        tint(limit>0 and green or muted)
+        GuiButton(gui,id,bx,y,caption,button_scale)
+        local help=tr("点按转移 1 金币，按住加速","Click for 1 gold, hold to transfer faster")
+        if model.walletInfinite then help=tr("无限金币钱包不支持存取","Transfers unavailable with infinite gold")
+        elseif not model.walletGold then help=tr("当前钱包不可用","Wallet unavailable")
+        else help=help.."\n"..tr("随身金币 ","Wallet ")..string.format("%.0f",model.walletGold) end
+        GuiTooltip(gui,caption,help)
+        local w,h=GuiGetTextDimensions(gui,caption,button_scale)
+        if limit<=0 or drag or mx<bx or mx>=bx+w or my<y or my>=y+h or not InputIsMouseButtonDown(1) then return end
+        if InputIsMouseButtonJustDown(1) then bank_hold={id=id,start=frame}
+        elseif previous and previous.id==id and previous.frame==frame-1 then bank_hold=previous end
+        if bank_hold then
+            bank_hold.frame=frame
+            local batch=transfer_batch(frame-bank_hold.start,10000)
+            if batch then dispatch("bank_transfer",{direction=direction,amount=math.min(limit,batch)}) end
         end
-        bx=bx+GuiGetTextDimensions(gui,titles[i],scale*factor)+gap
     end
-    local function action(id,y,title,direction,amount,source,destination,other_title)
-        local n=amount=="all" and (source or 0) or amount
-        local enabled=not model.walletInfinite and source and destination and n>0 and source>=n
-            and n<=NHStore.maxGold-destination
-        local shown=title
-        if other_title and GuiGetTextDimensions(gui,title,scale)+GuiGetTextDimensions(gui,other_title,scale)+3*scale>right-x then
-            shown=tr("全部","All")
-        end
-        local bx=amount=="all" and right-GuiGetTextDimensions(gui,shown,scale) or x
-        tint(enabled and green or muted)
-        if GuiButton(gui,id,bx,controls+y*scale,shown,scale) and enabled and not drag then
-            dispatch("bank_transfer",{direction=direction,amount=amount})
-        end
-        if shown~=title then GuiTooltip(gui,title,"") end
-    end
-    local deposit,withdraw=tr("存入","Deposit"),tr("取出","Withdraw")
-    action(274,35,deposit,"deposit",bank_amount,model.walletGold,model.bankGold)
-    action(276,35,tr("全部存入","Deposit all"),"deposit","all",model.walletGold,model.bankGold,deposit)
-    action(275,51,withdraw,"withdraw",bank_amount,model.bankGold,model.walletGold)
-    action(277,51,tr("全部取出","Withdraw all"),"withdraw","all",model.bankGold,model.walletGold,withdraw)
+    transfer(274,deposit,"deposit",x,model.walletGold,model.bankGold)
+    transfer(275,withdraw,"withdraw",right-GuiGetTextDimensions(gui,withdraw,button_scale),model.bankGold,model.walletGold)
 end
 
 local essence_columns,essence_rows=4,5
@@ -480,11 +461,14 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local nav_end=body
     local crafting=tab=="orders"
     local alchemy=crafting and recipe_category=="alchemy"
+    local spells=crafting and recipe_category=="spell"
     local shopping=tab=="shop"
     local farming=tab=="farm"
     local ranching=tab=="livestock"
     local menu=model.progression[tab]
-    if crafting then
+    if spells then
+        menu=spell_family and model.spellRecipes[spell_family] or model.spellFamilies
+    elseif crafting then
         menu={}
         for _,recipe in ipairs(model.recipes) do
             if recipe.category==recipe_category and (not alchemy or recipe.alchemyMode==alchemy_mode) then
@@ -505,11 +489,6 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local catalysts=crafting and selected and selected.catalysts
     local catalyst_count=catalysts and #catalysts or 0
     local show_outputs=outputs and (#outputs>1 or (#outputs==1 and (outputs[1].name~=selected.name or catalyst_count>0)))
-    local savings,wrap_savings
-    if shopping and selected then
-        savings=string.format("%.0f",model.bankGold)
-        wrap_savings=GuiGetTextDimensions(gui,tr("存款余额","Savings").."   "..savings,scale)>(width-12)*scale
-    end
     local salvage
     if salvage_target and model.salvage_enabled then
         local category=model.warehouse[NHStore.category(salvage_target.kind)]
@@ -518,6 +497,11 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             or (salvage_target.mode=="essence" and not salvage.essence) then salvage_target,salvage=nil,nil end
     end
     local per_card=salvage and salvage_target.mode=="essence" and salvage.essence.per_card
+    local shop_bank=shopping and not salvage
+    if shop_bank then
+        nav_end=body+26
+        body=nav_end
+    end
     local category_tabs
     if not salvage then
         if crafting and not selected then category_tabs=recipe_tabs
@@ -537,13 +521,9 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         return item.canBuy
     end
     local body_height=62
-    local balances,transfer_y
     if tab=="samples" and not salvage then body_height=82
     elseif salvage then
         body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)+(per_card and 13 or 0)
-    elseif tab=="bank" then
-        balances,transfer_y=bank_balances(model,width,scale,tr)
-        body_height=transfer_y+65
     elseif ranching then
         if livestock_page=="produce" then body_height=13*(1+#model.farm.produce)+5
         elseif selected_pen and model.farm.pens[selected_pen] then body_height=84
@@ -556,15 +536,17 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         else body_height=(plot.crop and 42 or 28)+13*#farm.crops+2 end
     elseif crafting and selected then
         body_height=68+12*#selected.inputs
+        if spells then body_height=body_height+13 end
         if catalyst_count>0 then body_height=body_height+13+12*catalyst_count end
         if show_outputs then body_height=body_height+13+12*#outputs end
         if selected.note then body_height=body_height+13 end
         if model.order_active and selected.unlocked==false then body_height=body_height+13 end
     elseif shopping and selected then
-        body_height=(wrap_savings and 112 or 99)+(NHLivestock.species[selected.id] and 39 or 0)
+        body_height=86+(NHLivestock.species[selected.id] and 39 or 0)
     elseif selected then body_height=80+12*#selected.costs
     elseif menu then
         body_height=5+13*math.max(1,math.min(#menu,entries_per_page))
+        if spells and spell_family then body_height=body_height+13 end
         if #menu>entries_per_page then body_height=body_height+13 end
         if crafting and model.order_active then body_height=body_height+15 end
     end
@@ -576,11 +558,11 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         GuiText(gui,left+6*scale,top+y*scale,txt,scale)
         if short then GuiTooltip(gui,value,"") end
     end
-    local function button(id,x,y,value,color,tip)
+    local function button(id,x,y,value,color,tip,detail)
         local txt,short=fit(value,(width-x-5)*scale,scale)
         tint(color or gold)
         local clicked=GuiButton(gui,id,left+x*scale,top+y*scale,txt,scale)
-        if tip or short then GuiTooltip(gui,tip or value,"") end
+        if tip or short then GuiTooltip(gui,tip or value,detail or "") end
         return clicked and not drag
     end
     GuiZSetForNextWidget(gui,-79)
@@ -599,13 +581,14 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             return hover
         end
     end
+    if shop_bank then draw_shop_bank(model,left,top+layout.navEnd*scale,width,scale,tr,dispatch,mx,my) end
     -- Keep all navigation above the scrolling body when there is room. On a
     -- narrow screen wrapped subcategories may scroll, but the main tabs stay put.
     local scroll=body+body_height>height-2
     local scroll_y=height-body>=38 and body or nav_end
     local in_scroll=false
     local function begin_scroll()
-        local view_key=table.concat({tab,recipe_category,alchemy_mode,shop_category,
+        local view_key=table.concat({tab,recipe_category,alchemy_mode,shop_category,spells and spell_family or "",
             farm_page,selected_plot or "",livestock_page,selected_pen or "",selected_entry or "",
             salvage and salvage.id or "",salvage_target and salvage_target.mode or ""},"/")
         GuiIdPushString(gui,view_key)
@@ -692,9 +675,27 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             else GuiTooltip(gui,tr("每分钟产量","Output per minute"),tr("按当前完整生产周期计算","Average over a full production cycle")) end
         end
     end
-    local function cost(y,name,have,need,detail)
-        value_row(y,name,compact(have).." / "..compact(need),have>=need and green or gold,
-            string.format("%s  %.0f / %.0f",name,have,need),detail)
+    local function cost(y,name,have,need,detail,essence)
+        local balance=compact(have).." / "..compact(need)
+        local tip=string.format("%s  %.0f / %.0f",name,have,need)
+        local kind=NHEssences.types[essence]
+        if not kind then
+            value_row(y,name,balance,have>=need and green or gold,tip,detail)
+            return
+        end
+        local x,right=left+6*scale,left+(width-6)*scale
+        local text=name
+        local amount_width=GuiGetTextDimensions(gui,balance,scale)
+        if GuiGetTextDimensions(gui,text,scale)+amount_width+3*scale>right-x then
+            text=tr(kind.zh:gsub("精华$",""),kind.shortEn)
+        end
+        local factor=math.min(1,(right-x-3*scale)/(GuiGetTextDimensions(gui,text,scale)+amount_width))
+        tint(kind.color)
+        GuiText(gui,x,top+y*scale,text,scale*factor)
+        GuiTooltip(gui,tip,detail or "")
+        tint(kind.color)
+        GuiText(gui,right-amount_width*factor,top+y*scale,balance,scale*factor)
+        GuiTooltip(gui,tip,detail or "")
     end
     local function order_status(y)
         local remaining=time_text(model.order_remaining)
@@ -752,9 +753,6 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             end
         else label(y+26,tr("库存已满","Storage full"),muted) end
         if button(261,6,y+38,tr("取消","Cancel")) then salvage_target=nil end
-    elseif tab=="bank" then
-        if in_scroll then balances,transfer_y=bank_balances(model,width,scale,tr) end
-        draw_bank(model,left,top+body*scale,width,scale,tr,dispatch,balances,transfer_y)
     elseif ranching then
         if livestock_page=="produce" then stock_table(model.farm.produce,body)
         else draw_livestock(model.farm,body,tr,button,label,value_row) end
@@ -764,7 +762,10 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     elseif crafting and selected then
         local back=tr("< 返回配方","< Recipes")
         local confirm=tr("确认制造","Confirm craft")
-        if alchemy then
+        if spells then
+            local family=NHEssences.types[spell_family]
+            back,confirm="< "..tr(family.zh,family.en),tr("合成法术","Craft spell")
+        elseif alchemy then
             if alchemy_mode=="synthesis" then
                 back,confirm=tr("< 炼成","< Synthesis"),tr("确认炼成","Synthesize")
             else
@@ -775,10 +776,15 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         label(body+14,show_outputs and selected.name or selected.name.." ×"..selected.output,available(selected) and green or white)
         value_row(body+27,tr("预计用时","Craft time"),time_text(selected.duration),white)
         local y=body+40
+        if spells then
+            local spell_type=selected.spellType=="static_projectile" and tr("静态投射物","Static projectile") or tr("投射物","Projectile")
+            label(y,spell_type..tr(" → 法术仓库"," → Spell storage"),muted)
+            y=y+13
+        end
         label(y,tr("原料  库存 / 所需","Ingredients  stock / cost"),muted)
         for _,input in ipairs(selected.inputs) do
             y=y+12
-            cost(y,input.name,input.available,input.amount,input.detail)
+            cost(y,input.name,input.available,input.amount,input.detail,input.essence)
         end
         if catalyst_count>0 then
             y=y+13
@@ -825,12 +831,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if animal then destination=tr(animal.pen[1],animal.pen[2]) end
         value_row(body+40,animal and tr("送往","Destination") or tr("入库","Warehouse"),destination,white)
         value_row(body+53,tr("价格","Price"),string.format("%.0f",selected.price),gold)
-        local confirm_y=body+83
-        if wrap_savings then
-            label(body+66,tr("存款余额","Savings"),muted)
-            label(body+79,savings,white)
-            confirm_y=confirm_y+13
-        else value_row(body+66,tr("存款余额","Savings"),savings,white) end
+        local confirm_y=body+70
         if animal then
             local resource=NHLivestock.resources[animal.product]
             value_row(confirm_y,tr("成长时间","Growth time"),time_text(animal.growth/60),white)
@@ -869,10 +870,18 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             label(y,tr("先开垦一块田","Build a field first"),muted)
         else label(y,tr("所需物料不足","Insufficient stock"),gold) end
     elseif menu then
-        local list_key=alchemy and alchemy_mode or (crafting and recipe_category) or (shopping and shop_category) or tab
+        local list_key=(spells and spell_family) or (alchemy and alchemy_mode) or (crafting and recipe_category) or (shopping and shop_category) or tab
         local pages=math.max(1,math.ceil(#menu/entries_per_page))
         local current=math.min(list_pages[list_key] or 1,pages)
         local y=body
+        if spells and spell_family then
+            local family=NHEssences.types[spell_family]
+            if button(226,6,y,"< "..tr(family.zh,family.en),family.color,tr("返回精华分类","Back to essence types")) then
+                spell_family=nil
+                return finish()
+            end
+            y=y+13
+        end
         if crafting and model.order_active then
             order_status(y)
             y=y+15
@@ -890,10 +899,20 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         for i=1,entries_per_page do
             local item=menu[(current-1)*entries_per_page+i]
             if item then
+                local row_y=y+(i-1)*13
                 local color=available(item) and green or white
                 if item.planned or item.maxed or item.unlocked==false then color=muted end
-                if button(243+i,6,y+(i-1)*13,item.name,color) then
-                    selected_entry=item.id
+                if spells and not spell_family then color=NHEssences.types[item.id].color end
+                local x=6
+                if spells and item.icon then
+                    local iw,ih=GuiGetImageDimensions(gui,item.icon)
+                    if iw>0 and ih>0 then
+                        GuiImage(gui,600+i,left+x*scale,top+row_y*scale,item.icon,1,10*scale/math.max(iw,ih))
+                        x=x+12
+                    end
+                end
+                if button(243+i,x,row_y,item.name,color,item.actionId and item.name,item.actionId) then
+                    if spells and not spell_family then spell_family=item.id else selected_entry=item.id end
                     return finish()
                 end
             end
@@ -1100,9 +1119,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                             end
                             if loading and loading.name==mat.key and loading.id==dock.id and InputIsMouseButtonDown(1) then
                                 held_target=true
-                                local elapsed=frame-loading.start
-                                if elapsed==0 or (elapsed>=24 and (elapsed-24)%6==0) then
-                                    local batch=elapsed==0 and 1 or math.min(100,5*2^math.floor((elapsed-24)/24))
+                                local batch=transfer_batch(frame-loading.start,100)
+                                if batch then
                                     dispatch("material_transfer",{container="docks",slot=mat.slot,storedId=dock.id,material=mat.key,amount=batch})
                                 end
                             end

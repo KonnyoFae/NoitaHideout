@@ -675,6 +675,10 @@ table.insert(NHStore.recipes,{
     materials={magic_liquid_hp_regeneration=250,purifying_powder=250},count=500,
 })
 
+for _,recipe in ipairs(dofile("mods/noita_hideout/files/spell_recipes.lua")) do
+    NHStore.recipes[#NHStore.recipes+1]=recipe
+end
+
 local function findRecipe(id)
     for _,recipe in ipairs(NHStore.recipes) do if recipe.id==id then return recipe end end
 end
@@ -831,6 +835,7 @@ end
 function NHStore.canStartBatch(state,recipe)
     recipe=recipe or NHStore.recipe
     if recipe.facility and NHStore.level(state,recipe.facility)==0 then return false,"Facility is locked." end
+    if recipe.unlockFlag and not HasFlagPersistent(recipe.unlockFlag) then return false,"Spell not unlocked in this save." end
     if state.order then return false,"Another order is active." end
     for key,amount in pairs(recipe.resources or {}) do
         if (state.resources[key] or 0)<amount then return false,"Not enough workshop resources." end
@@ -890,7 +895,8 @@ function NHStore.startOrder(state,id)
         local ok,reason=NHStore.spendEmptyContainers(state,recipe.emptyContainers)
         if not ok then return false,reason end
     end
-    local output={item=recipe.item,slot=slot,materials=delivery}
+    -- The paid order owns its item, including a spell's nested native card fields.
+    local output={item=recipe.item and decode(encode(recipe.item)),slot=slot,materials=delivery}
     if ingredientIndex then table.remove(state.warehouse,ingredientIndex) end
     deductStock(state.materials,payment)
     if recipe.resources then deductStock(state.resources,recipe.resources) end

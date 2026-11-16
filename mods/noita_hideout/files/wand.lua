@@ -433,7 +433,8 @@ end
 function NHSpell.restore(record,x,y)
     local child = CreateItemActionEntity(record.card.id,x,y)
     if not child or child == 0 then return nil, "Unavailable spell: " .. record.card.id end
-    local ok, reason = pcall(configure_card,child,record.card,true)
+    -- A crafted card uses the factory's pickup scripts. Captured cards replay their saved script state.
+    local ok, reason = pcall(configure_card,child,record.card,not record.card.useDefaultPickups)
     if ok then return child end
     EntityKill(child)
     return nil,tostring(reason)

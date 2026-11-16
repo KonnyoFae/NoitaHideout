@@ -182,7 +182,7 @@ print("Native inventory drag, spell row, exact slot, upgrade pages and close can
 model.near,model.warehouse=true,{}
 model.warehouse_capacity={wand=48,spell=48,containers=48,supplies=48,equipment=48,collection=48,materials=16}
 model.debug=true
-local profile={safeCapacity=2,levels={},materials={water=500,sand=350,slime=200},resources={},warehouse={}}
+local profile={safeCapacity=2,levels={},materials={water=500,sand=350,soil=150,slime=200},resources={},warehouse={}}
 model.progression=NHStore.progressMenu(profile,"en")
 model.recipes={
     {id="stable",category="alchemy",alchemyMode="synthesis",name="Teleportatium",output=500,duration=120,ready=true,inputs={{name="Slime",available=300,amount=250}}},
@@ -341,69 +341,98 @@ dragFlaskAcrossTab(77)
 model.warehouse.containers[1]=model.docks[1]
 render(model)
 
--- The bank can be used alongside the current warehouse page.
-model.walletGold,model.bankGold=234,120345
-render(model,224)
-render(model)
-assert(drawn.Wallet and drawn.Savings and drawn["234"] and drawn["120345"] and panels[299] and not buttons[81])
-assert(tiles[1004].x==first_tile.x,"opening the bank should keep warehouse items accessible")
-assert(not render(model,272))
-cmd,arg=render(model,274)
-assert(cmd=="bank_transfer" and arg.direction=="deposit" and arg.amount==100)
-cmd,arg=render(model,275)
-assert(cmd=="bank_transfer" and arg.direction=="withdraw" and arg.amount==100)
-assert(not render(model,273))
-assert(not render(model,274) and not green_button(274))
-cmd,arg=render(model,276)
-assert(cmd=="bank_transfer" and arg.direction=="deposit" and arg.amount=="all")
-cmd,arg=render(model,277)
-assert(cmd=="bank_transfer" and arg.direction=="withdraw" and arg.amount=="all")
-model.walletGold=0
-assert(not render(model,276) and green_button(277))
-model.walletGold=nil
-assert(not render(model,277) and not green_button(275) and drawn["—"])
-model.walletInfinite=true
-assert(not render(model,277) and not green_button(276) and drawn["∞"])
-model.walletInfinite=false
-model.walletGold,model.bankGold=NHStore.maxGold-2,20
-assert(not render(model,277) and drawn["9007199254740989"],"all requires space for the entire source balance")
-assert(not render(model,270))
-assert(green_button(275))
-model.walletGold,model.bankGold=20,NHStore.maxGold-2
-assert(not render(model,276) and green_button(274))
-model.walletGold,model.bankGold=13,0
-assert(not render(model,277) and not green_button(275))
-assert(not render(model,270))
-assert(green_button(274))
-for _,lang in ipairs({"zh","en"}) do
-    model.lang=lang
-    for _,sw in ipairs({320,427,640}) do
-        width=sw
-        render(model)
-        local panel=panels[210]
-        local function inside(id)
-            local b=reveal(model,id)
-            assert(b.x>=panel.x and b.x+GuiGetTextDimensions(nil,b.name,b.scale)<=panel.x+panel.w+0.01 and b.y+9*b.scale<panel.y+panel.h)
-            return b
-        end
-        for i=270,277 do inside(i) end
-        for i=274,275 do
-            local a,b=inside(i),inside(i+2)
-            assert(a.x+GuiGetTextDimensions(nil,a.name,a.scale)<b.x)
-        end
-        assert(drawn[lang=="zh" and "存钱罐" or "Piggy bank"])
+-- The shop keeps the balance and both transfers fixed above its goods.
+local function testShopTransfers()
+    model.walletGold,model.bankGold,model.shopGoods=234,120345,{}
+    render(model,220)
+    render(model)
+    assert(drawn.Shop and drawn.Savings and drawn["120345"] and panels[299])
+    assert(not buttons[224] and not buttons[270] and not buttons[276])
+    assert(tips["[Deposit]"]:find("234",1,true))
+    assert(tiles[1004].x==first_tile.x,"shopping keeps warehouse items accessible")
+    local function press(id)
+        local b=buttons[id]
+        local action,arg=point(b.x+1,b.y+1,"press")
+        pointer.pressed=false
+        return action,arg
     end
+    local function apply(id,amount,action,arg)
+        assert(action=="bank_transfer" and arg.direction==(id==274 and "deposit" or "withdraw") and arg.amount==amount)
+        local delta=id==274 and amount or -amount
+        model.walletGold,model.bankGold=model.walletGold-delta,model.bankGold+delta
+    end
+    apply(274,1,press(274))
+    for i=1,65 do
+        local action,arg=render(model)
+        if i>=24 and (i-24)%6==0 then apply(274,i<48 and 5 or 10,action,arg)
+        else assert(not action,"no transfer between repeat ticks") end
+    end
+    assert(not point(pointer.x,pointer.y,"release"))
+    apply(275,1,press(275))
+    pointer.x=buttons[274].x+1
+    for i=1,31 do assert(not render(model),"sliding to the other button must not reverse a transfer") end
+    assert(not point(pointer.x,pointer.y,"release"))
+
+    model.bankGold,model.walletGold=NHStore.maxGold-3,100
+    apply(274,1,press(274))
+    for i=1,23 do assert(not render(model)) end
+    apply(274,2,render(model))
+    for i=1,30 do assert(not render(model) and not green_button(274),"stop when the savings limit is reached") end
+    point(pointer.x,pointer.y,"release")
+    model.walletGold,model.bankGold=0,3
+    apply(275,1,press(275))
+    for i=1,23 do assert(not render(model)) end
+    apply(275,2,render(model))
+    for i=1,30 do assert(not render(model) and not green_button(275),"stop when savings run out") end
+    point(pointer.x,pointer.y,"release")
+    model.walletGold=nil
+    assert(not press(274) and not green_button(274) and tips["[Deposit]"]=="Wallet unavailable")
+    model.walletInfinite=true
+    assert(not press(275) and tips["[Withdraw]"]=="Transfers unavailable with infinite gold")
+    model.walletGold,model.bankGold,model.walletInfinite=1000,100,false
+
+    for _,lang in ipairs({"zh","en"}) do
+        model.lang=lang
+        for _,sw in ipairs({320,427,640}) do
+            width=sw
+            render(model)
+            local panel=panels[210]
+            local a,b=buttons[274],buttons[275]
+            assert(not a.scroll and not b.scroll and a.y==b.y and a.x>=panel.x and b.y+9*b.scale<=panel.y+panel.h)
+            assert(a.x+GuiGetTextDimensions(nil,a.name,a.scale)<b.x)
+            assert(b.x+GuiGetTextDimensions(nil,b.name,b.scale)<=panel.x+panel.w)
+        end
+    end
+    width=427
+    render(model)
+    apply(274,1,press(274))
+    model.near=false
+    render(model)
+    model.near=true
+    for i=1,30 do assert(not render(model),"leaving the hideout cancels a held transfer") end
+    point(pointer.x,pointer.y,"release")
+    apply(274,1,press(274))
+    render(model,212)
+    render(model,220)
+    for i=1,30 do assert(not render(model),"switching tabs cancels a held transfer") end
+    point(pointer.x,pointer.y,"release")
+    apply(274,1,press(274))
+    model.open=false
+    render(model)
+    model.open=true
+    for i=1,30 do assert(not render(model),"closing the inventory cancels a held transfer") end
+    point(pointer.x,pointer.y,"release")
+
+    local case_flask,bank_button=tiles[1001],buttons[274]
+    point(case_flask.x+1,case_flask.y+1,"press")
+    pointer={x=bank_button.x+1,y=bank_button.y+1,down=true}
+    for i=1,30 do assert(not render(model),"dragging an item cannot start a transfer") end
+    point(pointer.x,pointer.y,"release")
+    render(model,212)
+    render(model)
+    assert(drawn["[1]"] and not buttons[274])
 end
-width=427
-render(model)
-local case_flask,bank_button=tiles[1001],buttons[276]
-point(case_flask.x+1,case_flask.y+1,"press")
-pointer={x=bank_button.x+1,y=bank_button.y+1,released=true}
-assert(not render(model,276),"dragging an item over a money button cannot transfer gold")
-pointer.released=false
-render(model,212)
-render(model)
-assert(drawn["[1]"] and not buttons[274])
+testShopTransfers()
 render(model,71)
 render(model)
 assert(drawn["[+] Stash"] and not drawn.Materials)
@@ -656,7 +685,7 @@ for _,lang in ipairs({"zh","en"}) do
     for _,sw in ipairs({320,427,640}) do
         width=sw
         render(model)
-        local bench,b=panels[210],assert(buttons[258])
+        local bench,b=panels[210],reveal(model,258)
         assert(bench.y>=0 and b.x>=bench.x and b.x+GuiGetTextDimensions(nil,b.name)<=bench.x+bench.w
             and b.y+9<=bench.y+bench.h and green_button(258))
         assert(drawn[lang=="zh" and "确认购买" or "Confirm purchase"])
@@ -1134,9 +1163,11 @@ local function testCardWalletPanel()
     point(tiles[1006].x+1,tiles[1006].y+1)
     assert(drawn["Affinity 100/100"] and drawn["Restores 15% flight fuel per second"])
     model.lang="zh"
+    render(model)
     point(tiles[1009].x+1,tiles[1009].y+1)
     assert(drawn["好感度 40/100   下一阶段 100"] and drawn["每 3 秒恢复 1 HP"])
     model.lang="en"
+    render(model)
     action,req=drag_tiles(8,4)
     assert(action=="move_wallet_card" and req.walletId==95 and req.entity==201 and req.from==1 and req.targetCell==1)
     assert(not drag_tiles(8,5) and not drag_tiles(8,6),"cannot stack worn or other-species cards")
@@ -1176,7 +1207,7 @@ local function testFixedWorkshop()
     for i=1,18 do inputs[i]={name="Ingredient "..i,amount=1,available=3} end
     model.recipes={{id="long_recipe",category="medical",name="Long recipe",duration=120,
         output=1,ready=true,inputs=inputs}}
-    local tabs={212,218,219,220,224,221,223,213}
+    local tabs={212,218,219,220,221,223,213}
     for _,lang in ipairs({"en","zh"}) do
         model.lang=lang
         for _,size in ipairs({{320,180},{427,240},{640,360}}) do
@@ -1260,3 +1291,54 @@ local function testWarehouseTabs()
 end
 testWarehouseTabs()
 print("UI: single-row warehouse navigation, localized labels and bottle dragging across tabs passed.")
+
+local function testSpellRecipes(lang,sw,sh)
+    width,height,model.lang=sw,sh,lang
+    model.order_active=false
+    local key="essence_healing"
+    local family=NHEssences.types[key]
+    local label=family[lang]
+    local spell=lang=="zh" and "治疗魔弹" or "Healing Bolt"
+    local card={id="spell_HEAL_BULLET",actionId="HEAL_BULLET",name=spell,category="spell",spellType="projectile",
+        icon="data/ui_gfx/gun_actions/heal_bullet.png",ready=true,output=1,duration=120,
+        inputs={{name=label,essence=key,amount=175,available=NHStore.maxResourceAmount}}}
+    model.spellFamilies={{id=key,name=label}}
+    model.spellRecipes={[key]={card}}
+    render(model,212)
+    render(model,225)
+    render(model)
+    assert(buttons[244].name==label or tips[label])
+    render(model,244)
+    render(model)
+    assert(buttons[226] and tips[spell]==card.actionId and drawn[card.icon] and green_button(244))
+    render(model,244)
+    local cells={}
+    local draw=GuiText
+    function GuiText(g,x,y,title,s)
+        cells[#cells+1]={name=title,color=next_color,x=x,y=y,w=GuiGetTextDimensions(g,title,s)}
+        draw(g,x,y,title,s)
+    end
+    render(model)
+    GuiText=draw
+    local amount
+    for i,v in ipairs(cells) do if v.name=="9007.1T / 175" then amount=i end end
+    local num=cells[assert(amount,"missing spell price")]
+    local name=cells[amount-1]
+    assert(name.name==label or name.name==(lang=="zh" and "治疗" or family.shortEn))
+    assert(name.x+name.w<num.x and name.y==num.y,"the whole price must fit beside its name")
+    for i,c in ipairs(family.color) do assert(name.color[i]==c and num.color[i]==c) end
+    local command,request=render(model,214)
+    assert(command=="craft" and request.id==card.id)
+    card.ready=false
+    card.reason="Insufficient essence"
+    assert(not render(model,214) and not buttons[214])
+    render(model,240)
+    render(model)
+    assert(buttons[226] and not green_button(244))
+    render(model,226)
+    render(model)
+    assert(not buttons[226] and (buttons[244].name==label or tips[label]))
+end
+testSpellRecipes("zh",320,180)
+testSpellRecipes("en",640,360)
+print("UI: spell family navigation, localized card identities, warehouse colors and crafting passed.")

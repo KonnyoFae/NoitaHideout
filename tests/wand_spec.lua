@@ -176,3 +176,28 @@ local spell=assert(NHSpell.capture(loose))
 local clone=assert(NHSpell.restore(spell,0,0))
 local again=assert(NHSpell.capture(clone))
 assert(again.card.id=="LIGHT_BULLET" and again.card.item.uses_remaining==3 and again.card.stack==4)
+
+-- A newly crafted card starts with native pickup helpers. A later capture
+-- preserves the actual state if that helper is disabled or removed in play.
+local create=CreateItemActionEntity
+local helper="data/scripts/particles/test_pickup.lua"
+missing_action=nil
+function CreateItemActionEntity(action)
+    local e=create(action)
+    EntityAddComponent2(e,"LuaComponent",{script_item_picked_up=helper})
+    return e
+end
+function EntityGetTransform() return 0,0 end
+local fresh={kind="spell",card={id="BOMB",x=0,y=0,item={uses_remaining=3},useDefaultPickups=true}}
+local made=assert(NHSpell.restore(fresh,0,0))
+local script=assert(EntityGetFirstComponentIncludingDisabled(made,"LuaComponent"))
+local physical=EntityGetFirstComponentIncludingDisabled(made,"ItemComponent")
+assert(ComponentGetValue2(physical,"uses_remaining")==3 and ComponentGetIsEnabled(script))
+EntitySetComponentIsEnabled(made,script,false)
+local used=assert(NHSpell.capture(made))
+assert(not used.card.useDefaultPickups and used.card.pickups[helper]==false)
+local restored=assert(NHSpell.restore(used,0,0))
+assert(not ComponentGetIsEnabled(assert(EntityGetFirstComponentIncludingDisabled(restored,"LuaComponent"))))
+EntityRemoveComponent(made,script)
+local removed=assert(NHSpell.restore(assert(NHSpell.capture(made)),0,0))
+assert(not EntityGetFirstComponentIncludingDisabled(removed,"LuaComponent"))

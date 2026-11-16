@@ -11,7 +11,7 @@ dofile("mods/noita_hideout/files/potion.lua")
 
 local state=assert(NHStore.load())
 local run=NHStore.newRun(state)
-state.materials={sand=350,sandstone=1150,water=1250,slime=100}
+state.materials={soil=350,soil_lush=1150,water=1250,slime=100}
 for level=0,3 do assert(NHStore.buyUpgrade(state,{id="farmland",level=level})) end
 assert(NHStore.buyUpgrade(state,{id="medical",level=0}))
 assert(not next(state.materials))

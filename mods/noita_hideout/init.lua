@@ -55,6 +55,7 @@ local error_translations = {
     ["Upgrade level changed."] = "项目等级已变动，请重新查看。",
     ["Not enough construction resources."] = "建设所需的库存不足。",
     ["Facility is locked."] = "请先扩建对应的工位。",
+    ["Spell not unlocked in this save."] = "请先在当前存档中解锁这张原版法术。",
     ["Product storage is full."] = "成品所属仓库没有可预留的空格。",
     ["Perk already equipped."] = "已装备同一种特质。",
     ["No packable perk nearby."] = "附近没有可封装的特质。",
@@ -443,16 +444,27 @@ local function inventory_view()
     end
     local facility_names={}
     for _,project in ipairs(model.progression.expansion) do facility_names[project.id]=project.name end
-    model.recipes={}
+    model.recipes,model.spellRecipes,model.spellFamilies={},{},{}
     for _,recipe in ipairs(NHStore.recipes) do
         local ready,reason,payment=NHStore.canStartBatch(state,recipe)
         local view={id=recipe.id,category=recipe.category,alchemyMode=recipe.alchemyMode,
             name=tr(recipe.zh,recipe.en),output=recipe.count or 1,
             inputs={},outputs={},catalysts={},note=recipe.noteZh and tr(recipe.noteZh,recipe.noteEn),
             duration=math.ceil(NHStore.productionFrames(recipe)/60),
-            ready=ready,unlocked=not recipe.facility or NHStore.level(state,recipe.facility)>0,
+            ready=ready,unlocked=reason~="Facility is locked." and reason~="Spell not unlocked in this save.",
             facility_name=facility_names[recipe.facility] or recipe.facility}
-        if not view.unlocked then
+        if recipe.category=="spell" then
+            local card=recipe.item
+            view.actionId=card.card.id
+            view.name=translated(card.name) or view.name
+            view.spellType=recipe.spellType
+            view.icon=card.icon
+            local family=NHEssences.byAction[view.actionId]
+            local list=model.spellRecipes[family]
+            if not list then list={}; model.spellRecipes[family]=list end
+            list[#list+1]=view
+        end
+        if reason=="Facility is locked." then
             view.reason=tr("需要先建造","Build first: ")..view.facility_name
         elseif not ready then
             view.reason=(lang=="zh" and error_translations[reason]) or reason
@@ -479,7 +491,8 @@ local function inventory_view()
         table.sort(resources)
         for _,key in ipairs(resources) do
             local kind=NHEssences.types[key] or NHFarm.crops[key] or NHLivestock.resources[key]
-            table.insert(view.inputs,{name=tr(kind.zh,kind.en),amount=recipe.resources[key],available=state.resources[key] or 0})
+            table.insert(view.inputs,{name=tr(kind.zh,kind.en),amount=recipe.resources[key],available=state.resources[key] or 0,
+                essence=NHEssences.types[key] and key})
         end
         if recipe.storedIngredient then
             local kind=recipe.storedIngredient
@@ -501,6 +514,11 @@ local function inventory_view()
         end
         table.insert(model.recipes,view)
         if state.order and recipe.id==(state.order.recipe or "stable") then model.order_name=view.name end
+    end
+    for _,entry in ipairs(model.essences) do
+        if model.spellRecipes[entry.key] then
+            model.spellFamilies[#model.spellFamilies+1]={id=entry.key,name=entry.name}
+        end
     end
     if state.order and not model.order_name then
         local product=state.order.output.item
@@ -650,9 +668,7 @@ local function workshop_action(player,action,index)
         if not save(draft) then return end
         bank_synced,reason=NHBank.reconcile(state,player)
         if not bank_synced then report(reason); return end
-        local message=index.direction=="deposit" and tr("已存入 %.0f 金币。","Deposited %.0f gold.")
-            or tr("已取出 %.0f 金币。","Withdrew %.0f gold.")
-        feedback(string.format(message,amount))
+        last_error,status=nil,""
     elseif action=="shop_buy" and type(index)=="table" then
         if not bank_synced then report("Waiting for wallet settlement."); return end
         if NHLivestock.species[index.id] then
@@ -1029,6 +1045,8 @@ function OnWorldPostUpdate()
         elseif item and (NHCompanions.use(player,item,lang) or NHProducts.use(player,item)) then mouse_release=true end
     end
     if not active_run() then return end
+    -- Discoveries made outside the hideout can unlock vanilla spells without changing its inventory.
+    if case_open and (not was_case_open or (nearby and model_cache and not model_cache.near)) then model_cache=nil end
     local model = opened and inventory_view() or {}
     if opened and nearby then
         model.bankGold=state.bankGold
