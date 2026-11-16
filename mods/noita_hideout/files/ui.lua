@@ -18,11 +18,13 @@ local recipe_category="alchemy"
 local alchemy_mode="synthesis"
 local shop_category="materials"
 local selected_entry,salvage_target
+local farm_page,selected_plot,selected_crop="plots",nil,nil
 local work_tabs={
     {key="orders",id=212,zh="工坊",en="Workshop"},
     {key="expansion",id=218,zh="扩建",en="Build"},
     {key="upgrade",id=219,zh="升级",en="Upgrades"},
     {key="shop",id=220,zh="商店",en="Shop"},
+    {key="farm",id=221,zh="种植",en="Farm"},
     {key="samples",id=213,zh="测试物资",en="Supplies"},
 }
 local recipe_tabs={
@@ -30,6 +32,7 @@ local recipe_tabs={
     {key="medical",id=251,zh="医疗",en="Medical"},
     {key="weapons",id=252,zh="武器",en="Weapons"},
     {key="equipment",id=253,zh="装备",en="Equipment"},
+    {key="food",id=222,zh="食物",en="Food"},
 }
 local alchemy_tabs={
     {key="synthesis",id=254,zh="炼成",en="Synthesis"},
@@ -38,6 +41,10 @@ local alchemy_tabs={
 local shop_tabs={
     {key="materials",id=256,zh="物料",en="Materials"},
     {key="supplies",id=257,zh="消耗品",en="Consumables"},
+}
+local farm_tabs={
+    {key="plots",id=410,zh="田地",en="Plots"},
+    {key="stock",id=411,zh="农产库存",en="Harvest stock"},
 }
 local white = { 0.96, 0.93, 0.84 }
 local gold = { 1.00, 0.83, 0.47 }
@@ -256,6 +263,71 @@ local function draw_essences(entries,start,limit,left,top,width,scale,mx,my)
     return tip
 end
 
+local function draw_farm(farm,y,tr,button,label,value_row,dispatch)
+    if farm_page=="stock" then
+        for i,crop in ipairs(farm.crops) do
+            value_row(y+(i-1)*13,crop.name,compact(crop.stock),crop.stock>0 and green or muted,
+                crop.name.."  "..string.format("%.0f",crop.stock))
+        end
+        return
+    end
+    if #farm.plots==0 then
+        if button(412,6,y,tr("去扩建田地","Build farmland")) then
+            tab,selected_entry="expansion","farmland"
+        end
+        return
+    end
+    local plot=selected_plot and farm.plots[selected_plot]
+    local crops={}
+    for _,crop in ipairs(farm.crops) do crops[crop.id]=crop end
+    if not plot then
+        for i,entry in ipairs(farm.plots) do
+            local crop=crops[entry.crop]
+            local state=tr("空闲","Empty")
+            if crop then
+                state=(entry.ready and tr("成熟","Ready") or time_text(entry.remaining)).."  "..crop.name
+            end
+            local title=string.format(tr("田 %d","Plot %d"),i).."   "..state
+            if button(420+i,6,y+(i-1)*13,title,entry.ready and green or white) then
+                selected_plot,selected_crop=i,nil
+            end
+        end
+        return
+    end
+    local crop=crops[plot.crop or selected_crop]
+    if button(413,6,y,(plot.crop or not crop) and tr("< 田地","< Plots") or tr("< 作物","< Crops")) then
+        if plot.crop or not crop then selected_plot=nil end
+        selected_crop=nil
+        return
+    end
+    local title=string.format(tr("田 %d","Plot %d"),plot.id)
+    if not crop then
+        label(y+14,title..tr(" · 选择作物"," · Choose crop"),white)
+        for i,choice in ipairs(farm.crops) do
+            if button(430+i,6,y+27+(i-1)*13,choice.name,choice.unlocked and gold or muted) then selected_crop=choice.id end
+        end
+        return
+    end
+    label(y+14,title.." · "..crop.name,white)
+    local eta=plot.crop and plot.remaining or crop.duration
+    value_row(y+28,plot.crop and tr("距离成熟","Time left") or tr("生长时间","Grow time"),time_text(eta),white)
+    value_row(y+41,tr("每次收获","Harvest yield"),"+"..crop.amount,green)
+    value_row(y+54,tr("农产库存","In storage"),compact(crop.stock),white,string.format("%.0f",crop.stock))
+    if plot.crop then
+        if not plot.ready then label(y+69,tr("生长中","Growing"),muted)
+        elseif crop.amount>NHStore.maxResourceAmount-crop.stock then label(y+69,tr("农产库存已满","Storage full"),muted)
+        elseif button(415,6,y+69,tr("收获入库","Harvest crop"),green) then
+            dispatch("farm_harvest",{plot=plot.id,token=plot.token,crop=crop.id})
+            selected_plot,selected_crop=nil,nil
+        end
+    elseif not crop.unlocked then
+        label(y+69,tr("需要农业设备","Needs farming equipment"),muted)
+    elseif button(414,6,y+69,tr("确认播种","Plant crop"),green) then
+        dispatch("farm_plant",{plot=plot.id,token=plot.token,crop=crop.id})
+        selected_crop=nil
+    end
+end
+
 local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local left,width=layout.middle,layout.bench
     if not model.debug and tab=="samples" then tab="orders" end
@@ -276,6 +348,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local crafting=tab=="orders"
     local alchemy=crafting and recipe_category=="alchemy"
     local shopping=tab=="shop"
+    local farming=tab=="farm"
     local menu=model.progression[tab]
     if crafting then
         menu={}
@@ -317,6 +390,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if alchemy then alchemy_nav,body=position_tabs(alchemy_tabs,body) end
     elseif shopping and not selected and not salvage then
         category_nav,body=position_tabs(shop_tabs,body)
+    elseif farming and not salvage then
+        category_nav,body=position_tabs(farm_tabs,body)
     end
     local function available(item)
         if crafting then return item.ready and item.unlocked~=false and not model.order_active end
@@ -326,6 +401,13 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local body_height=62
     if salvage then
         body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)+(per_card and 13 or 0)
+    elseif farming then
+        local farm=model.farm
+        local plot=selected_plot and farm.plots[selected_plot]
+        if farm_page=="stock" then body_height=13*#farm.crops+5
+        elseif not plot then body_height=13*math.max(1,#farm.plots)+5
+        elseif not plot.crop and not selected_crop then body_height=27+13*#farm.crops+5
+        else body_height=85 end
     elseif crafting and selected then
         body_height=68+12*#selected.inputs
         if catalyst_count>0 then body_height=body_height+13+12*catalyst_count end
@@ -340,7 +422,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if crafting and model.order_active then body_height=body_height+15 end
     end
     local height=workshop_folded and 18 or body+body_height
-    if (salvage or crafting and selected) and height*scale>sh-10 then
+    if height*scale>sh-10 then
         local panel_width=width*scale
         scale=(sh-10)/height
         width=panel_width/scale
@@ -370,13 +452,15 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     for _,t in ipairs(nav) do
         if button(t.id,t.x,t.y,t.name,t.key==tab and gold or muted) then
             tab,selected_entry,salvage_target=t.key,nil,nil
+            selected_plot,selected_crop=nil,nil
             return hover
         end
     end
     for _,t in ipairs(category_nav or {}) do
-        local current=shopping and shop_category or recipe_category
+        local current=farming and farm_page or (shopping and shop_category or recipe_category)
         if button(t.id,t.x,t.y,t.name,t.key==current and gold or muted) then
-            if shopping then shop_category=t.key else recipe_category=t.key end
+            if farming then farm_page,selected_plot,selected_crop=t.key,nil,nil
+            elseif shopping then shop_category=t.key else recipe_category=t.key end
             selected_entry=nil
             return hover
         end
@@ -458,6 +542,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             end
         else label(y+26,tr("库存已满","Storage full"),muted) end
         if button(261,6,y+38,tr("取消","Cancel")) then salvage_target=nil end
+    elseif farming then
+        draw_farm(model.farm,body,tr,button,label,value_row,dispatch)
     elseif crafting and selected then
         local back=tr("< 返回配方","< Recipes")
         local confirm=tr("确认制造","Confirm craft")
@@ -553,6 +639,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             end
         elseif selected.planned then label(y,tr("尚未开放","In development"),muted)
         elseif selected.maxed then label(y,tr("已完成","Complete"),muted)
+        elseif selected.id=="agri_equipment" and model.farm and #model.farm.plots==0 then
+            label(y,tr("先开垦一块田","Build a field first"),muted)
         else label(y,tr("所需物料不足","Insufficient stock"),gold) end
     elseif menu then
         local list_key=alchemy and alchemy_mode or (crafting and recipe_category) or (shopping and shop_category) or tab

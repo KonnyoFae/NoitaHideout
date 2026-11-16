@@ -1,6 +1,7 @@
 -- Two revisioned snapshots in Noita's normal mod settings. A complete
 -- readback checks the settings API; it does not force the engine to flush.
 NHStore = {}
+dofile("mods/noita_hideout/files/farming.lua")
 dofile("mods/noita_hideout/files/essences.lua")
 dofile("mods/noita_hideout/files/pouches.lua")
 local progression=dofile("mods/noita_hideout/files/progression.lua")
@@ -28,7 +29,7 @@ local function fresh(profile)
         runSerial = 0, closedThrough = 0, checkpoints = {},
         nextItemId = 1, materials = {}, docks = {}, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true,
         pouches = {},
-        order = false, finished = 0, levels = {}, storageBase = {}, resources = {}, bankGold = 0, bankWalletNet = 0,
+        order = false, finished = 0, levels = {}, storageBase = {}, resources = {}, farm={time=0,plots={}}, bankGold = 0, bankWalletNet = 0,
     }
     s.starterPouchId=NHPouches.create(s,"safe",2,2)
     return s
@@ -174,6 +175,7 @@ local function validate(s)
     assert(type(s.warehouse) == "table" and type(s.safe) == "table", "Invalid inventory")
     assert(type(s.materials)=="table" and type(s.docks)=="table","Invalid bulk storage")
     progression.validate(s,whole)
+    NHFarm.validate(s,whole)
     for name,amount in pairs(s.materials) do
         assert(type(name)=="string" and name~="" and whole(amount) and amount>0,"Invalid material stock")
     end
@@ -368,6 +370,7 @@ local function unpack_slot(raw)
         end
     end
     progression.adopt(s)
+    if s.farm==nil then s.farm={time=0,plots={}} end
     if not s.sharedSlots then
         s.safeCapacity = NHStore.safeCapacity(s)+1
         s.sharedSlots = true
@@ -517,6 +520,10 @@ end
 
 local fireInjector={kind="dose",remaining=3,count=1}
 local magicGrenade={kind="grenade",name="$nh_hideout_grenade",icon="mods/noita_hideout/files/items/grenade.png"}
+local function farmItem(kind)
+    return {kind=kind,name="$nh_hideout_"..kind,icon="mods/noita_hideout/files/items/"..kind..".png"}
+end
+local medkit={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"}
 
 -- Inputs and the paid order are committed together. Only loose stock is spendable.
 NHStore.recipes={
@@ -568,9 +575,20 @@ NHStore.recipes={
         materials={void_liquid=500},count=500,
         noteZh="原版列出两份液体产物，每批回收 500。",noteEn="The vanilla reaction yields two parts of liquid. This batch recovers 500."},
     {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",
-        inputs={{name="water",amount=100},{name="blood",amount=50}},
-        item={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"},
+        inputs={{name="water",amount=100},{name="blood",amount=50}},item=medkit,
         noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
+    {id="bandage",category="medical",facility="medical",zh="绷带",en="Bandage",
+        inputs={},resources={fiber=2,sugar=1},item=farmItem("bandage"),
+        noteZh="单次使用，最多恢复 5 生命。",noteEn="Single use. Restores up to 5 HP."},
+    {id="field_medkit",category="medical",facility="medical",zh="小医疗包（绷带与草药）",en="Medkit (bandage and herbs)",
+        inputs={},resources={herb=2},storedIngredient="bandage",item=medkit,
+        noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
+    {id="bread",category="food",facility="farmland",zh="面包",en="Bread",
+        inputs={},resources={grain=2},item=farmItem("bread"),
+        noteZh="食用后每 4 秒恢复 1 生命，持续 120 秒。",noteEn="Restores 1 HP every 4 seconds for 120 seconds."},
+    {id="sugar_cube",category="food",facility="farmland",zh="糖块",en="Sugar cube",
+        inputs={},resources={sugar=2},item=farmItem("sugar_cube"),
+        noteZh="食用后行动速度提高，持续 120 秒。",noteEn="Increases movement speed for 120 seconds."},
     {id="injector",category="medical",facility="injector",zh="耐火激活剂",en="Fire injector",inputs={{name="water",amount=100},{name="lava",amount=25}},
         item=fireInjector},
     {id="injector_essence",category="medical",facility="injector",zh="耐火激活剂（火焰精华）",en="Fire injector (fire essence)",
@@ -743,6 +761,18 @@ local function batchPayment(stock,inputs,held,freeSlots)
     return payment,alternative
 end
 
+function NHStore.warehouseIngredientCount(state,kind)
+    local count,firstIndex,firstSlot=0,nil,nil
+    for i,row in ipairs(state.warehouse) do
+        if row.item.kind==kind then
+            count=count+1
+            local slot=row.slot or i
+            if not firstSlot or slot<firstSlot then firstIndex,firstSlot=i,slot end
+        end
+    end
+    return count,firstIndex
+end
+
 function NHStore.canStartBatch(state,recipe)
     recipe=recipe or NHStore.recipe
     if recipe.facility and NHStore.level(state,recipe.facility)==0 then return false,"Facility is locked." end
@@ -768,9 +798,18 @@ function NHStore.canStartBatch(state,recipe)
         return false,"Not enough empty containers."
     end
     if recipe.item then
-        local slot=NHStore.freeSlot(state,"warehouse",nil,recipe.item.kind)
+        local slot,ingredientIndex
+        if recipe.storedIngredient then
+            local count
+            count,ingredientIndex=NHStore.warehouseIngredientCount(state,recipe.storedIngredient)
+            if count==0 then return false,"Missing stored ingredient." end
+            if NHStore.category(recipe.storedIngredient)==NHStore.category(recipe.item.kind) then
+                slot=state.warehouse[ingredientIndex].slot or ingredientIndex
+            end
+        end
+        slot=slot or NHStore.freeSlot(state,"warehouse",nil,recipe.item.kind)
         if not slot then return false,"Product storage is full." end
-        return true,slot,payment
+        return true,slot,payment,nil,nil,ingredientIndex
     end
     if NHStore.canStockMaterials(state,delivery,payment) then return true,nil,payment,delivery,held end
     if alternative then
@@ -790,13 +829,14 @@ end
 function NHStore.startOrder(state,id)
     local recipe=findRecipe(id or "stable")
     if not recipe then return false,"Unknown recipe." end
-    local ready,slot,payment,delivery,held=NHStore.canStartBatch(state,recipe)
+    local ready,slot,payment,delivery,held,ingredientIndex=NHStore.canStartBatch(state,recipe)
     if not ready then return false,slot end
     if recipe.emptyContainers then
         local ok,reason=NHStore.spendEmptyContainers(state,recipe.emptyContainers)
         if not ok then return false,reason end
     end
     local output={item=recipe.item,slot=slot,materials=delivery}
+    if ingredientIndex then table.remove(state.warehouse,ingredientIndex) end
     deductStock(state.materials,payment)
     if recipe.resources then deductStock(state.resources,recipe.resources) end
     state.order={id=state.finished+1,recipe=recipe.id,progress=0,required=NHStore.productionFrames(recipe),output=output,catalysts=held}

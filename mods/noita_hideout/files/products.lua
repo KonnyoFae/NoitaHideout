@@ -5,7 +5,7 @@ local function valid_uses(n)
     return type(n)=="number" and n>=1 and n<=3 and n==math.floor(n)
 end
 
-for _,kind in ipairs({"medkit","grenade"}) do
+for _,kind in ipairs({"medkit","grenade","bandage","bread","sugar_cube"}) do
     local id=kind
     NHTransfers.registerItem(id,function(entity) return EntityHasTag(entity,"noita_hideout_"..id) end,{
         capture=function(entity)
@@ -31,19 +31,55 @@ for _,kind in ipairs({"medkit","grenade"}) do
     })
 end
 
+local function heal(player,amount)
+    local damage=EntityGetFirstComponentIncludingDisabled(player,"DamageModelComponent")
+    if not damage then return false end
+    local hp,max_hp=ComponentGetValue2(damage,"hp"),ComponentGetValue2(damage,"max_hp")
+    if hp<=0 or hp>=max_hp then return false end
+    ComponentSetValue2(damage,"hp",math.min(max_hp,hp+amount))
+    return true
+end
+
+local function eat(player,entity,kind,component,field,duration)
+    local tag="noita_hideout_effect_"..kind
+    local effect
+    for _,child in ipairs(EntityGetAllChildren(player,tag) or {}) do
+        if EntityHasTag(child,tag) then effect=child; break end
+    end
+    local fresh=not effect
+    if fresh then
+        local x,y=EntityGetTransform(player)
+        effect=EntityLoad("mods/noita_hideout/files/effect_"..kind..".xml",x,y)
+        if not effect or effect==0 then return end
+    end
+    local timer=EntityGetFirstComponentIncludingDisabled(effect,component)
+    if not timer then
+        if fresh then EntityKill(effect) end
+        return
+    end
+    ComponentSetValue2(timer,field,duration)
+    if fresh then EntityAddChild(player,effect) end
+    GameKillInventoryItem(player,entity)
+    return true
+end
+
 function NHProducts.use(player,entity)
     if not entity or GameIsInventoryOpen() or NHNative.held(player)~=entity then return end
     if EntityHasTag(entity,"noita_hideout_medkit") then
-        local damage=EntityGetFirstComponentIncludingDisabled(player,"DamageModelComponent")
         local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
-        if not damage or not item then return end
-        local hp,max_hp=ComponentGetValue2(damage,"hp"),ComponentGetValue2(damage,"max_hp")
-        local uses=ComponentGetValue2(item,"uses_remaining")
-        if hp<=0 or hp>=max_hp or not valid_uses(uses) then return end
-        ComponentSetValue2(damage,"hp",math.min(max_hp,hp+0.4))
+        local uses=item and ComponentGetValue2(item,"uses_remaining")
+        if not valid_uses(uses) or not heal(player,0.4) then return end
         if uses==1 then GameKillInventoryItem(player,entity)
         else ComponentSetValue2(item,"uses_remaining",uses-1) end
         return true
+    elseif EntityHasTag(entity,"noita_hideout_bandage") then
+        if not heal(player,0.2) then return end
+        GameKillInventoryItem(player,entity)
+        return true
+    elseif EntityHasTag(entity,"noita_hideout_bread") then
+        return eat(player,entity,"bread","VariableStorageComponent","value_int",120)
+    elseif EntityHasTag(entity,"noita_hideout_sugar_cube") then
+        return eat(player,entity,"sugar_cube","GameEffectComponent","frames",7200)
     elseif EntityHasTag(entity,"noita_hideout_grenade") then
         local controls=EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")
         if not controls then return end

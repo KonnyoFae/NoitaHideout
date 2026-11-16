@@ -12,6 +12,12 @@ function NHNative.registerTranslations()
     local labels = {
         {"nh_hideout_medkit","Medkit","医疗包"},
         {"nh_hideout_medkit_desc","Three uses. Each use restores up to 10 HP.","可使用三次，每次最多恢复 10 点生命。"},
+        {"nh_hideout_bandage","Bandage","绷带"},
+        {"nh_hideout_bandage_desc","Single use. Restores up to 5 HP.","单次使用，最多恢复 5 点生命。"},
+        {"nh_hideout_bread","Bread","面包"},
+        {"nh_hideout_bread_desc","Restores 1 HP every 4 seconds for 120 seconds. Eating again refreshes the duration.","每 4 秒恢复 1 点生命，持续 120 秒。再次食用刷新时长。"},
+        {"nh_hideout_sugar_cube","Sugar cube","糖块"},
+        {"nh_hideout_sugar_cube_desc","Increases movement speed for 120 seconds. Eating again refreshes the duration.","提高行动速度，持续 120 秒。再次食用刷新时长。"},
         {"nh_hideout_grenade","Magic grenade","魔法手雷"},
         {"nh_hideout_grenade_desc","Use once to throw a magic grenade.","向瞄准方向投出一枚魔法手雷，使用一次后消耗。"},
         {"nh_hideout_pouch", "Injector pouch", "针剂包"},

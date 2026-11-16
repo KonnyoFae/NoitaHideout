@@ -29,11 +29,16 @@ define("perk_pack","expansion","特质打包台","Perk packing",1,{{"slime",200}
     {effect={"封装附近未拾取的免疫特质","Pack nearby immunity perks"}})
 define("safe","upgrade","随身安全箱","Secure case",4,{{"sand",250},{"slime",150}})
 define("perk_slots","upgrade","特质栏","Perk slots",3,{{"water",250},{"slime",100}})
+define("farmland","expansion","田地","Farmland",4,{{"farm_sand",150},{"water",100}})
+define("agri_equipment","expansion","农业设备","Farm equipment",1,{{"farm_sand",300},{"water",200}},
+    {effect={"种植香料与激活草药","Grow spices and stimulating herbs"}})
 
+local farm_sand={alternatives={"sand","sandstone","sandstone_surface"}}
 local material_names={
     water={"水","Water"},sand={"沙","Sand"},slime={"黏液","Slime"},oil={"油","Oil"},
     gunpowder={"火药","Gunpowder"},arcane_scrap={"奥术碎片","Arcane scrap"},
     empty_container={"仓库空容器","Empty containers in storage"},container_scrap={"容器碎片","Container scrap"},
+    farm_sand={"沙与砂岩（合计）","Sand and sandstone (total)"},
 }
 local function inventory(s,key)
     if key=="arcane_scrap" or key=="container_scrap" then return s.resources end
@@ -71,6 +76,7 @@ local function costs(s,entry,level,empty_count,lang)
     local result={}
     local function add(key,amount)
         local available=key=="empty_container" and empty_count or inventory(s,key)[key] or 0
+        if key=="farm_sand" then available=NHStore.ingredientStock(s,farm_sand) end
         result[#result+1]={key=key,name=material_names[key][lang=="zh" and 1 or 2],amount=amount,available=available}
     end
     for _,part in ipairs(entry.cost) do add(part[1],part[2]*(level+1)) end
@@ -126,6 +132,7 @@ local function description(s,entry,offset,lang)
     end
     if entry.id=="safe" then return (NHStore.safeCapacity(s)+offset)..(zh and " 格" or " slots") end
     local level=NHStore.level(s,entry.id)+offset
+    if entry.id=="farmland" then return level..(zh and " 块田地" or (level==1 and " field" or " fields")) end
     if entry.id=="perk_slots" then return level..(zh and " 个特质栏位" or " perk slots") end
     if level==0 then return zh and "未解锁" or "Locked" end
     return entry.effect[zh and 1 or 2]
@@ -145,6 +152,10 @@ function NHStore.progressMenu(s,lang)
         else
             row.next=description(s,entry,1,lang)
             row.costs=costs(s,entry,level,empty_count,lang)
+            if entry.id=="agri_equipment" and NHStore.level(s,"farmland")==0 then
+                row.canBuy=false
+                row.next=(zh and "先开垦一块田 · " or "Requires farmland · ")..row.next
+            end
             for _,part in ipairs(row.costs) do
                 if part.available<part.amount then row.canBuy=false end
             end
@@ -159,6 +170,7 @@ function NHStore.buyUpgrade(s,request)
     if not entry or entry.planned then return false,"Construction unavailable." end
     local level=NHStore.level(s,entry.id)
     if level~=request.level or level>=entry.max then return false,"Upgrade level changed." end
+    if entry.id=="agri_equipment" and NHStore.level(s,"farmland")==0 then return false,"A farm plot is required." end
     local payment=costs(s,entry,level,NHStore.emptyContainerCount(s))
     local shells
     for _,part in ipairs(payment) do
@@ -176,8 +188,17 @@ function NHStore.buyUpgrade(s,request)
     for _,part in ipairs(payment) do
         if part.key~="empty_container" then
             local stock=inventory(s,part.key)
-            local remaining=stock[part.key]-part.amount
-            stock[part.key]=remaining>0 and remaining or nil
+            local sources=part.key=="farm_sand" and farm_sand.alternatives or {part.key}
+            local required=part.amount
+            for _,key in ipairs(sources) do
+                local available=stock[key] or 0
+                local spent=math.min(required,available)
+                if spent>0 then
+                    stock[key]=available>spent and available-spent or nil
+                    required=required-spent
+                end
+                if required==0 then break end
+            end
         end
     end
     s.levels[entry.id]=level+1

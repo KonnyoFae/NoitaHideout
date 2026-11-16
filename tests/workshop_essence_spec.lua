@@ -15,7 +15,9 @@ assert(recipe.category=="medical" and recipe.facility=="medical" and not recipe.
 assert(recipe.item.kind=="medkit" and recipe.item.remaining==3)
 assert(not recipes.medkit_essence)
 for _,entry in ipairs(NHStore.recipes) do
-    if entry.item and entry.item.kind=="medkit" then assert(not entry.resources) end
+    if entry.item and entry.item.kind=="medkit" then
+        assert(not (entry.resources and entry.resources.essence_healing))
+    end
 end
 
 local s=assert(NHStore.load())

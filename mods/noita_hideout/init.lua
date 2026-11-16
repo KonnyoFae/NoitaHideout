@@ -56,6 +56,12 @@ local error_translations = {
     ["Another order is active."] = "工坊已有一张在制订单。",
     ["Not enough bulk ingredients."] = "物料库存中的原料不足。",
     ["Not enough workshop resources."] = "仓库中的制造资源不足。",
+    ["Missing stored ingredient."] = "消耗品仓库中缺少所需成品。",
+    ["Farm plot changed."] = "田块已变化，请重新选择。",
+    ["Unknown crop."] = "无法识别这种作物。",
+    ["Farm equipment is required."] = "种植这类作物需要先扩建农业设备。",
+    ["A farm plot is required."] = "请先开垦一块田。",
+    ["Crop is still growing."] = "作物尚未成熟。",
     ["Missing catalyst."] = "物料库中缺少所需的催化样品。",
     ["Invalid gold transfer."] = "无法识别这笔存取操作。",
     ["Invalid gold amount."] = "请输入有效的金币数额。",
@@ -223,7 +229,7 @@ local function commit_edit(edit, zh, en, arg)
     return true
 end
 
-local function update_workshop(player,frame)
+local function update_workshop(player,frame,farm_time)
     local order=state.order
     local elapsed=NHClock.observe(state,frame)
     if frame>=next_room_check and not pending_visit then
@@ -233,12 +239,14 @@ local function update_workshop(player,frame)
     end
     -- World globals carry sub-checkpoint progress through save/continue.
     -- Avoid serializing the entire warehouse every frame or interrupting a drag.
-    if not pending_visit and (not order or (elapsed<order.required and elapsed-order.progress<600)) then return true end
+    local farm_due=NHFarm.due(state,farm_time)
+    if not pending_visit and not farm_due and (not order or (elapsed<order.required and elapsed-order.progress<600)) then return true end
     local draft=active_draft()
     if not draft then return false end
     local changed,done=NHStore.advanceProduction(draft,{run=run_id,orderId=order and order.id or false,
         progress=elapsed,checkpoint=pending_visit})
-    if changed then
+    local farm_changed=farm_due and NHFarm.sync(draft,farm_time)
+    if changed or farm_changed then
         if not save(draft,not done) then return false end
         if done and pending_visit and elapsed<order.required then
             feedback(tr("圣山加速完成了订单，成品已入库。","Holy Mountain boost completed the order. Output delivered."))
@@ -438,9 +446,17 @@ local function inventory_view()
             end
             table.insert(view.inputs,{name=name,amount=input.amount,detail=detail,available=NHStore.ingredientStock(state,input)})
         end
-        for key,amount in pairs(recipe.resources or {}) do
-            local kind=NHEssences.types[key]
-            table.insert(view.inputs,{name=tr(kind.zh,kind.en),amount=amount,available=state.resources[key] or 0})
+        local resources={}
+        for key in pairs(recipe.resources or {}) do resources[#resources+1]=key end
+        table.sort(resources)
+        for _,key in ipairs(resources) do
+            local kind=NHEssences.types[key] or NHFarm.crops[key]
+            table.insert(view.inputs,{name=tr(kind.zh,kind.en),amount=recipe.resources[key],available=state.resources[key] or 0})
+        end
+        if recipe.storedIngredient then
+            local kind=recipe.storedIngredient
+            table.insert(view.inputs,{name=GameTextGetTranslatedOrNot("$nh_hideout_"..kind),amount=1,
+                available=NHStore.warehouseIngredientCount(state,kind),detail=tr("消耗品仓库","Supplies storage")})
         end
         local held=state.order and state.order.recipe==recipe.id and state.order.catalysts
         for _,sample in ipairs(recipe.catalysts or {}) do
@@ -599,6 +615,15 @@ local function workshop_action(player,action,index)
         commit_edit(NHStore.buyGood,"购买成功，商品已入库。","Purchased and delivered to storage.",index)
     elseif action=="buy_upgrade" and type(index)=="table" then
         commit_edit(NHStore.buyUpgrade,"建设完成。","Construction complete.",index)
+    elseif (action=="farm_plant" or action=="farm_harvest") and type(index)=="table" then
+        local frame=GameGetFrameNum()
+        local now=NHFarm.observe(state,frame)
+        local planting=action=="farm_plant"
+        local edit=planting and NHFarm.plant or NHFarm.harvest
+        if commit_edit(function(draft) return edit(draft,index,now) end,
+            planting and "已播种。" or "已收获，农产已入库。",planting and "Crop planted." or "Harvest stored.") then
+            NHFarm.observe(state,frame)
+        end
     elseif action=="salvage" and type(index)=="table" then
         if index.mode=="essence" then
             commit_edit(NHStore.salvage,"提取完成，精华已入库。","Essence extracted and stored.",index)
@@ -632,7 +657,7 @@ local function dispatch(player, action, index)
             return
         end
         if type(index)~="table" or action=="buy_upgrade" or action=="craft" or action=="salvage"
-            or action=="bank_transfer" or action=="shop_buy" then
+            or action=="bank_transfer" or action=="shop_buy" or action=="farm_plant" or action=="farm_harvest" then
             workshop_action(player,action,index)
             return
         end
@@ -798,6 +823,7 @@ end
 
 function OnWorldInitialized()
     NHClock.reset()
+    NHFarm.resetClock()
     NHHomeWandEdit.reset()
     bank_synced=false
     next_room_check,pending_visit=0,nil
@@ -815,6 +841,7 @@ function OnPlayerSpawned(player)
     NHHomeWandEdit.update(player,near_home(player))
     if attach() and active_run() then
         NHClock.observe(state,GameGetFrameNum())
+        NHFarm.observe(state,GameGetFrameNum())
         NHPerks.update(state,player)
     end
 end
@@ -849,13 +876,14 @@ function OnWorldPostUpdate()
     if not run_id and not traveler then return end
     if not attach() or not active_run() then return end
     local frame = GameGetFrameNum()
-    if not traveler then NHClock.suspend(); opened,case_open=false,nil; return end
+    if not traveler then NHClock.suspend(); NHFarm.suspendClock(); opened,case_open=false,nil; return end
     if player and not bank_synced then
         local reason
         bank_synced,reason=NHBank.reconcile(state,player)
         if bank_synced then model_cache=nil else report(reason) end
     end
-    if not update_workshop(traveler,frame) then return end
+    local farm_time=NHFarm.observe(state,frame)
+    if not update_workshop(traveler,frame,farm_time) then return end
     if not player then opened,case_open=false,nil; return end
     local inventory_open = GameIsInventoryOpen()
     local used = NHNative.pressed(player, inventory_open or opened or mouse_release)
@@ -892,6 +920,7 @@ function OnWorldPostUpdate()
         model.bankGold=state.bankGold
         model.walletGold,model.walletInfinite=NHBank.wallet(player)
         if not bank_synced then model.walletGold=nil end
+        model.farm=NHFarm.view(state,lang,farm_time)
     end
     if opened and state.order then
         model.order_remaining=math.ceil((state.order.required-NHClock.observe(state,frame))/60)
@@ -921,9 +950,11 @@ function OnPlayerDied()
     next_attempt = 0
     if not attach() or not active_run() then return end
     local elapsed=NHClock.observe(state,GameGetFrameNum())
+    local farm_time=NHFarm.observe(state,GameGetFrameNum())
     local order_id=state.order and state.order.id or false
     commit_edit(function(draft)
         NHStore.advanceProduction(draft,{run=run_id,orderId=order_id,progress=elapsed,checkpoint=pending_visit})
+        NHFarm.sync(draft,farm_time)
         return NHStore.endRun(draft,run_id)
     end)
 end

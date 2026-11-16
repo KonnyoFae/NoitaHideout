@@ -1165,3 +1165,69 @@ local function testSafehouseWandEditing()
 end
 testSafehouseWandEditing()
 print("Controller: held catalyst, net delivery, field-only gold and native home wand editing passed.")
+
+local function testFarmController()
+    settings,flags={},{}
+    new_world()
+    local seeded=state()
+    seeded.levels.medical=1
+    seeded.materials={sand=50,sandstone=100,water=100}
+    seeded.resources={herb=2,sugar=1}
+    assert(NHStore.commit(seeded))
+    boot()
+    inventory_open=true
+    local view=tick()
+    assert(#view.farm.plots==0 and not has_project(view.recipes,"bread").unlocked)
+    assert(has_project(view.progression.expansion,"farmland").canBuy)
+    tick(nil,"buy_upgrade",{id="farmland",level=0})
+    view=tick()
+    assert(#view.farm.plots==1 and has_project(view.recipes,"bread").unlocked)
+    assert(not state().materials.water and not state().materials.sandstone and not state().materials.sand)
+    local function quote(crop)
+        local plot=tick().farm.plots[1]
+        return {plot=plot.id,token=plot.token,crop=crop}
+    end
+    tick(nil,"farm_plant",quote("active_herb"))
+    assert(not state().farm.plots[1])
+    local sow=quote("fiber")
+    tick(nil,"farm_plant",sow)
+    local harvest=quote("fiber")
+    tick(nil,"farm_harvest",harvest)
+    assert(not state().resources.fiber and state().farm.plots[1].crop=="fiber")
+    local before=advance(360).farm.plots[1].remaining
+    boot()
+    assert(tick().farm.plots[1].remaining==before,"reloading retains partial growth")
+
+    entities[player].x=227+81
+    assert(not advance(NHFarm.crops.fiber.frames).near)
+    tick(nil,"farm_harvest",harvest)
+    entities[player].x=227
+    inventory_open=false
+    tick(nil,"farm_harvest",harvest)
+    inventory_open=true
+    assert(tick(nil,"farm_harvest",harvest).farm.plots[1].ready)
+    assert(not state().resources.fiber,"out-of-range, closed and inventory-opening inputs cannot harvest")
+    tick(nil,"farm_harvest",harvest)
+    tick(nil,"farm_harvest",harvest)
+    tick(nil,"farm_plant",sow)
+    view=tick()
+    assert(view.farm.crops[1].stock==6 and not view.farm.plots[1].crop and not state().materials.fiber)
+    local bandage=has_project(view.recipes,"bandage")
+    local kit=has_project(view.recipes,"field_medkit")
+    assert(bandage.ready and bandage.inputs[1].available==6 and bandage.inputs[1].amount==2)
+    assert(kit.inputs[1].available==2 and kit.inputs[2].available==0 and not kit.ready)
+    assert(kit.inputs[2].detail=="Supplies storage")
+    assert(has_project(view.recipes,"bread").category=="food" and has_project(view.recipes,"sugar_cube").category=="food")
+    tick(nil,"craft",{id="bandage"})
+    assert(state().resources.fiber==4 and not state().resources.sugar)
+    view=advance(state().order.required)
+    assert(view.warehouse.supplies[1].kind=="bandage")
+    kit=has_project(view.recipes,"field_medkit")
+    assert(kit.ready and kit.inputs[2].available==1 and kit.inputs[2].amount==1)
+    tick(nil,"craft",{id="field_medkit"})
+    view=advance(state().order.required)
+    assert(view.warehouse.supplies[1].kind=="medkit" and view.warehouse.supplies[1].remaining==3)
+    assert(not state().resources.herb and has_project(view.recipes,"field_medkit").inputs[2].available==0)
+end
+testFarmController()
+print("Controller: farmland expansion, field access, save/continue, harvesting and the bandage-to-medkit chain passed.")
