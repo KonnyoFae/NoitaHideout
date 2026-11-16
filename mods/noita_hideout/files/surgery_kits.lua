@@ -2,11 +2,11 @@ local kits={
     order={"field_surgery_kit","tactical_surgery_kit","advanced_surgery_kit"},
     types={
         field_surgery_kit={zh="野战手术包",en="Field surgery kit",uses=1,healPercent=20,castFrames=180,
-            ingredient="medkit",herbs=3,essence=20,workSeconds=30},
+            ingredient="medkit",herbs=3,essence=2,workSeconds=30},
         tactical_surgery_kit={zh="战术手术包",en="Tactical surgery kit",uses=1,healPercent=35,castFrames=240,
-            ingredient="tactical_medkit",herbs=5,essence=35,workSeconds=90},
+            ingredient="tactical_medkit",herbs=5,essence=3,workSeconds=90},
         advanced_surgery_kit={zh="高端手术包",en="Advanced surgery kit",uses=1,healPercent=50,castFrames=300,
-            ingredient="advanced_medkit",herbs=8,essence=50,workSeconds=180},
+            ingredient="advanced_medkit",herbs=8,essence=4,workSeconds=180},
     },
 }
 

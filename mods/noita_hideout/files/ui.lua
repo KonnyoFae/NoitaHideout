@@ -87,6 +87,7 @@ local function fit(value, available, scale)
 end
 
 local drag, last_case_frame
+local last_inventory_layout
 local page = 1
 local loading
 local material_rows=4
@@ -102,6 +103,49 @@ end
 local function storage_key(key)
     if key=="valuable" then return "safe" end
     if key=="warehouse" or key=="docks" then return key end
+end
+
+local function slot_at(layout,x,y)
+    for i=#layout,1,-1 do
+        local box=layout[i]
+        if x>=box.x and y>=box.y and x<box.x+box.w and y<box.y+box.h then return box.slot end
+    end
+end
+
+local function use_source(slot)
+    if not slot or not slot.kind or not NHNative.usableKind(slot.kind) then return end
+    local source={kind=slot.kind}
+    if slot.key=="native" and slot.entity then
+        source.container,source.entity,source.parent="native",slot.entity,slot.parent
+        source.lane,source.xslot,source.yslot=slot.lane,slot.xslot,slot.yslot
+    elseif (slot.key=="warehouse" or slot.key=="valuable") and slot.entity then
+        source.container,source.slot,source.storedId=storage_key(slot.key),slot.safeSlot,slot.entity
+    elseif slot.key=="dose" and slot.pouchId then
+        source.container,source.pouchId,source.cell="pouch",slot.pouchId,slot.cell
+    elseif slot.key=="card_cell" and slot.walletId then
+        source.container,source.walletId,source.cell="card_wallet",slot.walletId,slot.cell
+    else return end
+    source.remaining,source.count,source.subtype,source.species=slot.remaining,slot.count,slot.subtype,slot.species
+    return source
+end
+
+function NHUI.useTarget()
+    local layout=last_inventory_layout
+    if not layout or drag then return end
+    local age=GameGetFrameNum()-layout.frame
+    if age<0 or age>1 then return end
+    local sw,sh=GuiGetScreenDimensions(gui)
+    if sw~=layout.width or sh~=layout.height then return end
+    local wx,wy=DEBUG_GetMouseWorld()
+    local cx,cy,cw,ch=GameGetCameraBounds()
+    return use_source(slot_at(layout,(wx-cx)*sw/cw,(wy-cy)*sh/ch))
+end
+
+local function same_use(source,prepared)
+    if not source then return false end
+    for key,value in pairs(source) do if prepared[key]~=value then return false end end
+    for key,value in pairs(prepared) do if source[key]~=value then return false end end
+    return true
 end
 local full_tile = "data/ui_gfx/inventory/full_inventory_box.png"
 local tile = "data/ui_gfx/inventory/quick_inventory_box.png"
@@ -153,7 +197,7 @@ local function item_details(slot,model,tr)
         return lines
     end
     if slot.kind=="pouch" or slot.kind=="card_wallet" then
-        local details={slot.name,tr("点击打开，拖动移动","Click to open or drag to move")}
+        local details={slot.name,tr("点击或右键打开，拖动移动","Click or right-click to open. Drag to move.")}
         if slot.view and slot.view.doses then
             table.insert(details,2,tr("针剂数量 ","Injectors: ")..slot.view.doses)
         end
@@ -209,6 +253,10 @@ local function item_details(slot,model,tr)
         local d=NHInjectors.get(slot.subtype)
         return {tr(d.zh,d.en),tr("耐久 ","Durability ")..(slot.remaining or model.maxUses).."/"..model.maxUses
             ..tr("   数量 ","   Count ")..(slot.count or 1),tr(d.zhEffect,d.enEffect)}
+    end
+    local throwable=NHThrowables.types[slot.kind]
+    if throwable then
+        return {tr(throwable.zh,throwable.en).." ×"..(slot.count or 1),tr(throwable.noteZh,throwable.noteEn)}
     end
     if slot.kind=="bandage" and (slot.count or 1)>1 then
         return {slot.name.." ×"..string.format("%.0f",slot.count)}
@@ -470,7 +518,7 @@ local function position_work_tabs(tabs,y,width,scale,tr,debug)
     return positions,y+16
 end
 
-local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
+local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
     local left,width=layout.middle,layout.bench
     if not model.debug and tab=="samples" then tab="orders" end
     local nav,body=layout.workTabs,layout.navEnd
@@ -569,6 +617,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     end
     local height=workshop_folded and 20 or layout.panelHeight
     local top=sh-5-height*scale
+    panels[#panels+1]={x=left,y=top,w=width*scale,h=height*scale,slot={key="panel"}}
     local function label(y,value,color)
         local txt,short=fit(value,(width-12)*scale,scale)
         tint(color or white)
@@ -964,6 +1013,21 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     return finish()
 end
 
+local function draw_surgery(cast,tr,x,y,width,scale)
+    local caption=string.format(tr("手术中  %.1f 秒","Surgery  %.1f s"),math.ceil((cast.total-cast.elapsed)/6)/10)
+    local factor=math.min(scale,width/GuiGetTextDimensions(gui,caption))
+    tint(white)
+    GuiText(gui,x,y,caption,factor)
+    local pixel="data/ui_gfx/1px_white.png"
+    tint(muted)
+    GuiImage(gui,5031,x,y+12*scale,pixel,0.4,width,2*scale)
+    if cast.elapsed>0 then
+        GuiZSetForNextWidget(gui,-81)
+        tint(green)
+        GuiImage(gui,5032,x,y+12*scale,pixel,1,width*cast.elapsed/cast.total,2*scale)
+    end
+end
+
 local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layout,pw)
     local frame = GameGetFrameNum()
     local fresh = last_case_frame ~= frame - 1
@@ -973,6 +1037,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     local cx, cy, cw, ch = GameGetCameraBounds()
     local mx, my = (wx-cx)*sw/cw, (wy-cy)*sh/ch
     local slots = {}
+    local panels={}
     -- Container rows advance by the native tile width, including its border.
     local qw,qh = GuiGetImageDimensions(gui,tile)
     local function slot(column,y,key,kind,name,icon,entity,left,top)
@@ -1034,9 +1099,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         end)
     end
     local stock_tip
-    local panel_hover=false
     if layout then
-        panel_hover=draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
+        draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         local left,width=layout.left,layout.stash
         local cols=math.max(1,math.min(10,math.floor((width-16)/qw)))
         local tabs,grid_y=layout.tabs,layout.gridY
@@ -1044,7 +1108,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         local height=folded and 20 or layout.panelHeight
         local top=sh-5-height*scale
         local warehouse_hover=mx>=left and mx<left+width*scale and my>=top and my<top+height*scale
-        panel_hover=panel_hover or warehouse_hover
+        panels[#panels+1]={x=left,y=top,w=width*scale,h=height*scale,slot={key="panel"}}
         if warehouse_hover and drag and not folded then
             local src=drag.source
             if src.key=="dose" then warehouse_tab="supplies"
@@ -1180,25 +1244,32 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     local native_y = tonumber(MagicNumbersGetValue("UI_BARS_POS_Y"))
     local full_offset = tonumber(MagicNumbersGetValue("UI_FULL_INVENTORY_OFFSET_X"))
     local fw,fh = GuiGetImageDimensions(gui,full_tile)
-    local hovered
-    -- Hit-test the vanilla widgets without drawing over them or consuming
-    -- their clicks. Normal reordering and wand editing remain engine-owned.
+    -- Both pre-update input gating and this frame's dispatch use this draw order.
+    local boxes={width=sw,height=sh,frame=frame}
     for _, v in ipairs(model.native_slots) do
         local full = v.lane=="spell"
         local w,h = full and fw or qw,full and fh or qh
         local x = native_x + (full and full_offset or 0) + v.col*w
         local y = native_y + v.yslot*h
-        if (not standalone or not full) and mx>=x and my>=y and mx<x+w and my<y+h then hovered=v; break end
+        if not standalone or not full then boxes[#boxes+1]={x=x,y=y,w=w,h=h,slot=v} end
     end
-    if panel_hover or (perk_top and mx>=ox and mx<ox+pw*scale and my>=perk_top and my<oy) then hovered={key="panel"} end
+    local panel_top=perk_top or (oy+(model.popup and popupY or 0)*scale)
+    panels[#panels+1]={x=ox,y=panel_top,w=pw*scale,h=oy+72*scale-panel_top,slot={key="panel"}}
+    for _,box in ipairs(panels) do boxes[#boxes+1]=box end
     for _,v in ipairs(slots) do
-        if mx>=v.x and my>=v.y and mx<v.x+qw*scale and my<v.y+qh*scale then hovered=v end
+        boxes[#boxes+1]={x=v.x,y=v.y,w=qw*scale,h=qh*scale,slot=v}
     end
-    if not hovered and mx>=ox and my>=oy+(model.popup and popupY or 0)*scale and mx<ox+pw*scale and my<oy+72*scale then
-        hovered = {key="panel"}
-    end
+    last_inventory_layout=boxes
+    local hovered=slot_at(boxes,mx,my)
     if drag and (model.revision~=drag.revision or model.pouchId~=drag.pouchId or model.walletId~=drag.walletId) then drag=nil end
-    if model.salvage_enabled and hovered and hovered.key=="warehouse" and hovered.view and hovered.view.salvage_yield
+    local prepared,pending_use=model.rightUse
+    if prepared then
+        model.rightUse=nil
+        if not fresh and not drag and not InputIsMouseButtonDown(1) then
+            local source=use_source(hovered)
+            if same_use(source,prepared) then pending_use=source end
+        end
+    elseif model.salvage_enabled and hovered and hovered.key=="warehouse" and hovered.view and hovered.view.salvage_yield
         and not fresh and not drag and InputIsMouseButtonJustDown(2) then
         salvage_target={id=hovered.entity,kind=hovered.kind,slot=hovered.safeSlot,mode=hovered.view.essence and "essence" or "scrap"}
         workshop_folded=false
@@ -1317,7 +1388,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         end
         local caption
         local kit=NHMedkits.types[v.kind]
-        if v.kind=="bandage" and (v.count or 1)>1 then
+        if (v.kind=="bandage" or NHThrowables.types[v.kind]) and (v.count or 1)>1 then
             caption="×"..compact(v.count)
         elseif kit and v.key~="native" then
             caption=(v.remaining or kit.uses).."/"..kit.uses
@@ -1343,13 +1414,19 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         tip=item_details(hovered,model,tr)
         if model.salvage_enabled and hovered.key=="warehouse" and hovered.view.salvage_yield then
             tip[#tip+1]=tr("右键预览拆解","Right-click to preview dismantling")
+        elseif hovered.kind~="pouch" and hovered.kind~="card_wallet" and use_source(hovered) then
+            tip[#tip+1]=tr("右键使用","Right-click to use")
         end
     end
     if tip then cursor_tip(tip,mx,my,sw,sh,scale) end
-    if standalone or pw>=145 or model.capacity<=3 then
+    if standalone and model.surgery then
+        draw_surgery(model.surgery,tr,ox+8*scale,oy+49*scale,(pw-16)*scale,scale)
+    elseif standalone or pw>=145 or model.capacity<=3 then
         label(8,56,(model.status~="" and model.status) or tr("拖动物品以存取","Drag items to transfer"),pw-16,muted)
     end
-    if drag and InputIsMouseButtonJustUp(1) then
+    if pending_use then
+        dispatch("use_inventory",pending_use)
+    elseif drag and InputIsMouseButtonJustUp(1) then
         local action, arg, safeSlot, storedId = drop(hovered)
         drag=nil
         if action=="equip_stored_perk" or action=="store_equipped_perk" then
@@ -1372,6 +1449,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
 end
 
 function NHUI.draw(model, dispatch)
+    last_inventory_layout=nil
     if not model.open then drag,last_case_frame,salvage_target=nil,nil,nil end
     if not gui then gui = GuiCreate() end
     GuiStartFrame(gui)
@@ -1381,22 +1459,11 @@ function NHUI.draw(model, dispatch)
     local function tr(zh, en) return model.lang == "zh" and zh or en end
     if not model.open then
         if model.surgery then
-            local cast=model.surgery
-            local caption=string.format(tr("手术中  %.1f 秒","Surgery  %.1f s"),math.ceil((cast.total-cast.elapsed)/6)/10)
-            local w=math.max(84,GuiGetTextDimensions(gui,caption)+10)
+            local w=88
             local x,y=math.floor((sw-w)/2),sh-25
             GuiZSetForNextWidget(gui,-79)
             GuiImageNinePiece(gui,1,x,y,w,19,0.96)
-            tint(white)
-            GuiText(gui,x+5,y+1,caption)
-            local pixel="data/ui_gfx/1px_white.png"
-            tint(muted)
-            GuiImage(gui,2,x+5,y+14,pixel,0.4,w-10,2)
-            if cast.elapsed>0 then
-                GuiZSetForNextWidget(gui,-81)
-                tint(green)
-                GuiImage(gui,3,x+5,y+14,pixel,1,(w-10)*cast.elapsed/cast.total,2)
-            end
+            draw_surgery(model.surgery,tr,x+5,y+1,w-10,1)
             return
         end
         if not model.near then return end
@@ -1445,6 +1512,11 @@ function NHUI.draw(model, dispatch)
         GuiText(gui, ox + x * s, oy + y * s, txt, s)
         if truncated then GuiTooltip(gui, tostring(value), "") end
     end
-    if model.mode=="case" then label(9,5,tr("安全箱","Secure case"),pw-16,white) end
+    if model.mode=="case" then
+        if model.surgery then
+            local width=pw-16-((model.capacity>3 and pw>=145) and 70 or 0)
+            draw_surgery(model.surgery,tr,ox+8*s,oy+4*s,width*s,s)
+        else label(9,5,tr("安全箱","Secure case"),pw-16,white) end
+    end
     draw_case(model,ox,oy,s,sw,sh,tr,label,dispatch,layout,pw)
 end

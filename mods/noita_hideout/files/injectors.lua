@@ -9,10 +9,10 @@ local function define(id,zh,en,essence,cost,zhEffect,enEffect)
         tag="noita_hideout_"..effect,zhEffect=zhEffect,enEffect=enEffect}
 end
 
-define("fire","耐火激活剂","Fire injector","essence_fire",180,"60 秒火焰免疫","60 seconds of fire immunity")
-define("lightning","耐电激活剂","Lightning injector","essence_lightning",180,"60 秒雷电免疫","60 seconds of electricity immunity")
-define("frost","耐冰激活剂","Frost injector","essence_frost",180,"60 秒冰冻免疫","60 seconds of freeze immunity")
-define("healing","持续治疗激活剂","Regeneration injector","essence_healing",90,
+define("fire","耐火激活剂","Fire injector","essence_fire",6,"60 秒火焰免疫","60 seconds of fire immunity")
+define("lightning","耐电激活剂","Lightning injector","essence_lightning",6,"60 秒雷电免疫","60 seconds of electricity immunity")
+define("frost","耐冰激活剂","Frost injector","essence_frost",6,"60 秒冰冻免疫","60 seconds of freeze immunity")
+define("healing","持续治疗激活剂","Regeneration injector","essence_healing",4,
     "60 秒内每 2 秒恢复 1 点生命","1 HP every 2 seconds for 60 seconds")
 
 function M.get(id)

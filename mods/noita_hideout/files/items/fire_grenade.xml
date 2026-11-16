@@ -1,0 +1,10 @@
+<Entity name="$nh_hideout_fire_grenade" tags="noita_hideout_fire_grenade,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/fire_grenade.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/fire_grenade.png" offset_x="6" offset_y="6" />
+        <ItemComponent item_name="$nh_hideout_fire_grenade" uses_remaining="1" ui_description="$nh_hideout_fire_grenade_desc"
+            ui_sprite="mods/noita_hideout/files/items/fire_grenade.png" />
+        <UIInfoComponent name="$nh_hideout_fire_grenade" />
+        <AbilityComponent ui_name="$nh_hideout_fire_grenade" />
+    </Base>
+</Entity>

@@ -4,6 +4,7 @@ local item_path = "mods/noita_hideout/files/items/"
 local injectors=NHInjectors or dofile("mods/noita_hideout/files/injectors.lua")
 local medkits=NHMedkits or dofile("mods/noita_hideout/files/medkits.lua")
 local surgery_kits=NHSurgeryKits or dofile("mods/noita_hideout/files/surgery_kits.lua")
+local throwables=NHThrowables or dofile("mods/noita_hideout/files/throwables.lua")
 local tag = {pouch = "noita_hideout_pouch", dose = "noita_hideout_dose"}
 NHNative.icons = {pouch = item_path .. "pouch.png", dose = item_path .. "dose.png"}
 
@@ -14,7 +15,7 @@ function NHNative.registerTranslations()
     if not original then return end
     local labels = {
         {"nh_hideout_card_wallet","Card wallet","卡片夹"},
-        {"nh_hideout_card_wallet_desc","Four slots for summoning cards. Matching full-charge cards stack.","四个召唤卡格。同种满耐久卡可以叠放。"},
+        {"nh_hideout_card_wallet_desc","Right-click to open the four-slot card wallet. Matching full-charge cards stack.","右键打开四格卡片夹。同种满耐久召唤卡可以叠放。"},
         {"nh_card_dryad","Dryad summon card","树精召唤卡"},
         {"nh_card_flower_fairy","Flower fairy summon card","花妖召唤卡"},
         {"nh_card_minotaur","Minotaur maiden summon card","米诺陶少女召唤卡"},
@@ -28,17 +29,15 @@ function NHNative.registerTranslations()
         {"nh_hideout_bandage_desc","Each roll restores up to 5 HP. The counter shows rolls left.","每卷最多恢复 5 点生命，数字为剩余卷数。"},
         {"nh_hideout_food_regen","Food regeneration","食物再生"},
         {"nh_hideout_food_regen_desc","Restores 1 HP every 4 seconds.","每 4 秒恢复 1 点生命。"},
-        {"nh_hideout_grenade","Magic grenade","魔法手雷"},
-        {"nh_hideout_grenade_desc","Use once to throw a magic grenade.","向瞄准方向投出一枚魔法手雷，使用一次后消耗。"},
         {"nh_hideout_pouch", "Injector pouch", "针剂包"},
-        {"nh_hideout_pouch_desc", "Use to open the pouch. Drag injectors into or out of it.", "手持使用可打开针剂包。拖动针剂即可存入或取出。"},
+        {"nh_hideout_pouch_desc", "Right-click to open the injector pouch. Drag injectors into or out of it.", "右键打开针剂包。拖动针剂即可存入或取出。"},
     }
-    for _,catalog in ipairs({medkits,surgery_kits}) do
+    for _,catalog in ipairs({medkits,surgery_kits,throwables}) do
         for _,id in ipairs(catalog.order) do
-            local kit=catalog.types[id]
+            local definition=catalog.types[id]
             local key="nh_hideout_"..id
-            labels[#labels+1]={key,kit.en,kit.zh}
-            labels[#labels+1]={key.."_desc",kit.noteEn,kit.noteZh}
+            labels[#labels+1]={key,definition.en,definition.zh}
+            labels[#labels+1]={key.."_desc",definition.noteEn,definition.noteZh}
         end
     end
     for _,id in ipairs(injectors.order) do
@@ -95,35 +94,92 @@ function NHNative.spawn(kind, x, y, subtype)
     return item
 end
 
-local last_player, was_down, after_panel
-
-function NHNative.resetInput()
-    last_player, was_down, after_panel = nil, false, false
+function NHNative.usableKind(kind)
+    return kind~=nil and (kind=="pouch" or kind=="card_wallet" or NHInventoryUse.supports(kind))
 end
 
--- Read Noita's bound primary action, including gamepad and remapped buttons.
--- The caller polls all player frames, including open inventories and menus.
-function NHNative.pressed(player, blocked)
-    local controls = EntityGetFirstComponentIncludingDisabled(player, "ControlsComponent")
-    if not controls then return false end
-    local down = ComponentGetValue2(controls, "mButtonDownFire")
-    if player ~= last_player then
-        last_player, was_down, after_panel = player, down, blocked
-        return false
+function NHNative.heldUseSlot(player,entity)
+    local parent=EntityGetParent(entity)
+    if not parent or parent==0 or EntityGetName(parent)~="inventory_quick" then return end
+    local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
+    if not item then return end
+    local x,y=ComponentGetValue2(item,"inventory_slot")
+    return {container="held",owner=player,entity=entity,parent=parent,lane="tool",xslot=x,yslot=y}
+end
+
+-- The native inventory can queue a throw or drop the item between the world
+-- callbacks. Restore only the entity and slot identified at the initial click.
+function NHNative.recoverUseSlot(player,slot,place)
+    if slot.owner and slot.owner~=player then return false end
+    local id=slot.entity
+    if not id or id==0 then return false end
+    local inventory=EntityGetFirstComponentIncludingDisabled(player,"Inventory2Component")
+    if inventory and ComponentGetValue2(inventory,"mThrowItem")==id then ComponentSetValue2(inventory,"mThrowItem",0) end
+    return EntityGetIsAlive(id) and EntityGetRootEntity(id)==id and place(player,id,slot)
+end
+
+local last_player,last_menu,right_down,last_right_mouse,right_claimed,left_claimed
+local last_item,held_usable
+function NHNative.resetInput()
+    last_player,last_menu,last_item=nil,nil,nil
+    right_down,last_right_mouse,right_claimed,left_claimed,held_usable=false,false,false,false,false
+end
+
+local function suppress(controls,action)
+    ComponentSetValue2(controls,"mButtonDown"..action,false)
+    ComponentSetValue2(controls,"mButtonFrame"..action,-1)
+end
+
+-- Run before the native inventory and shooter update. The raw mouse state
+-- survives suppression of the bound actions. The caller rechecks this exact
+-- entity or UI slot after the simulation before applying an effect.
+function NHNative.prepareRightUse(player,menuOpen,menuTarget)
+    if not player then NHNative.resetInput(); return end
+    local controls=EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")
+    if not controls then NHNative.resetInput(); return end
+    local newPlayer=last_player~=player
+    if newPlayer then NHNative.resetInput() end
+    local held=NHNative.held(player)
+    if held~=last_item then
+        last_item=held
+        held_usable=held and NHNative.usableKind(NHNative.kind(held) or NHTransfers.item_kind(held))
     end
-    local fresh = down and not was_down
-    was_down = down
-    if blocked then
-        after_panel = true
-        return false
+    local leftMouse=InputIsMouseButtonDown(1)
+    local rightMouse=InputIsMouseButtonDown(2)
+    local primary=leftMouse or ComponentGetValue2(controls,"mButtonDownFire")
+    local secondary=rightMouse or (not leftMouse and ComponentGetValue2(controls,"mButtonDownThrow"))
+    local target
+    if menuOpen then
+        if menuTarget and NHNative.usableKind(menuTarget.kind) then target=menuTarget end
+    elseif held_usable then target=held end
+    -- A physical release/press can arrive before the engine clears the mapped
+    -- Throw field. The mouse edge still represents a distinct click.
+    local fresh=secondary and (not right_down or (rightMouse and not last_right_mouse))
+    -- Refuse a carried-over edge when a submenu closes while a button is held.
+    -- For a remapped Throw action, its stamp distinguishes a press from the
+    -- engine re-populating a held ControlsComponent field we just cleared.
+    if fresh and not rightMouse then
+        local stamp=ComponentGetValue2(controls,"mButtonFrameThrow")
+        fresh=type(stamp)=="number" and math.abs(stamp-GameGetFrameNum())<=1
     end
-    if not fresh then return false end
-    if after_panel then
-        -- UI suppression of gameplay input can produce a false rising edge when a
-        -- menu closes. An actual new press has a current engine input timestamp.
-        local stamp = ComponentGetValue2(controls, "mButtonFrameFire")
-        if math.abs(stamp - GameGetFrameNum()) > 1 then return false end
-        after_panel = false
+    local menuOpening=menuOpen and not last_menu
+    if not secondary then right_claimed=false
+    elseif (not menuOpen and held_usable) or (fresh and (target or menuOpening)) then right_claimed=true end
+    if not primary then left_claimed=false
+    elseif (not menuOpen and held_usable) or (right_claimed and not leftMouse) then left_claimed=true end
+    if left_claimed then
+        suppress(controls,"Fire")
+        ComponentSetValue2(controls,"mButtonLastFrameFire",-1)
+        ComponentSetValue2(controls,"mButtonDownDelayLineFire",0)
+        if not menuOpen then suppress(controls,"LeftClick") end
     end
-    return true
+    if right_claimed then suppress(controls,"RightClick") end
+    if right_claimed or (left_claimed and not menuOpen) then
+        suppress(controls,"Throw")
+        suppress(controls,"Fire2")
+        ComponentSetValue2(controls,"mButtonDownDelayLineThrow",0)
+        ComponentSetValue2(controls,"mButtonDownDelayLineFire2",0)
+    end
+    last_player,last_menu,right_down,last_right_mouse=player,menuOpen,secondary,rightMouse
+    if fresh and not newPlayer and not menuOpening then return target end
 end

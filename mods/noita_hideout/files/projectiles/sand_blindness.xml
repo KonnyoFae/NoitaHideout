@@ -1,0 +1,5 @@
+<Entity>
+    <Base file="data/entities/misc/effect_blindness.xml">
+        <GameEffectComponent frames="75" />
+    </Base>
+</Entity>

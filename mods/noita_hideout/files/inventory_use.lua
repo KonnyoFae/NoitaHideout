@@ -1,0 +1,127 @@
+-- Operations on an NHStore.load() draft. The caller commits the charge before
+-- applying the effect. No inventory item needs to be spawned or equipped.
+local M={}
+local foods={}
+for _,food in ipairs(dofile("mods/noita_hideout/files/cooking.lua")) do foods[food.id]=true end
+
+function M.supports(kind)
+    return foods[kind] or kind=="bandage" or kind=="dose" or kind=="summon_card"
+        or NHMedkits.types[kind]~=nil or NHSurgeryKits.types[kind]~=nil or NHThrowables.types[kind]~=nil
+end
+
+local function maxUses(kind)
+    if kind=="dose" then return NHStore.doseDurability end
+    if kind=="summon_card" then return NHCompanions.durability end
+    local kit=NHMedkits.types[kind] or NHSurgeryKits.types[kind]
+    return kit and kit.uses
+end
+
+local function location(state,player,ref)
+    if not state or state.runSerial<=state.closedThrough or type(ref)~="table" or not M.supports(ref.kind) then return end
+    local item,cells,index,pouch
+    if ref.container=="warehouse" or ref.container=="safe" then
+        if not ref.slot or not ref.storedId then return end
+        index=NHStore.slotIndex(state,ref.container,ref.slot,ref.kind)
+        local row=index and state[ref.container][index]
+        if not row or row.id~=ref.storedId then return end
+        item=row.item
+    elseif ref.container=="pouch" and ref.cell and ref.kind=="dose" then
+        pouch=state.pouches[ref.pouchId]
+        if not pouch then return end
+        cells,index=pouch.cells,ref.cell
+        local cell=cells[index]
+        if cell then item={kind="dose",subtype=cell.subtype,remaining=cell.remaining,count=cell.count} end
+    elseif ref.container=="card_wallet" and ref.cell and ref.kind=="summon_card" then
+        local row=NHCardWallets.get(state,player,ref.wallet)
+        if not row then return end
+        cells,index=row.item.cells,ref.cell
+        item=cells[index]
+    end
+    if not item or item.kind~=ref.kind or (ref.count or 1)~=(item.count or 1) then return end
+    local full=maxUses(item.kind)
+    if (ref.remaining or full)~=(item.remaining or full) then return end
+    if item.kind=="dose" and (item.subtype or "fire")~=(ref.subtype or "fire") then return end
+    if item.kind=="summon_card" and item.species~=ref.species then return end
+    return item,index,cells,pouch
+end
+
+function M.peek(state,player,ref)
+    local item=location(state,player,ref)
+    return item
+end
+
+local function freeCell(cells,capacity)
+    for slot=1,capacity do if not cells[slot] then return slot end end
+end
+
+-- In a full container, other full-condition stacks can absorb the untouched
+-- units and leave the clicked cell available for the partially used one.
+local function mergeUntouched(state,ref,item,sourceIndex,cells,cellCapacity,quantity)
+    local rows=state[ref.container]
+    local moves={}
+    for i=1,cellCapacity or #rows do
+        local other
+        if cells then other=cells[i] else other=rows[i].item end
+        if i~=sourceIndex and other and (not other.kind or other.kind==item.kind) then
+            local compatible=item.kind=="dose" and NHStore.acceptsDose(other,NHStore.doseDurability,item.subtype)
+                or item.kind=="summon_card" and NHCompanions.canStack(other,item)
+            if compatible then
+                local take=math.min(quantity,NHStore.maxResourceAmount-(other.count or 1))
+                moves[#moves+1]={item=other,count=(other.count or 1)+take}
+                quantity=quantity-take
+                if quantity==0 then
+                    for _,move in ipairs(moves) do move.item.count=move.count end
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+function M.spend(draft,player,ref)
+    local item,index,cells,pouch=location(draft,player,ref)
+    if not item then return nil,"Inventory slot changed." end
+    local count=item.count or 1
+    local remaining=item.remaining or maxUses(item.kind) or 1
+    local source=cells and cells[index] or item
+    if count>1 and remaining>1 then
+        -- Only full syringes and summon cards can stack. Keep the untouched
+        -- units in place and put the worn one in the same container.
+        local slot,capacity
+        if cells then
+            capacity=pouch and NHStore.pouchCapacity or NHCardWallets.capacity
+            slot=freeCell(cells,capacity)
+        else
+            slot=NHStore.freeSlot(draft,ref.container,nil,item.kind)
+        end
+        if not slot or (not cells and draft.nextItemId>=NHStore.maxResourceAmount) then
+            if mergeUntouched(draft,ref,item,index,cells,capacity,count-1) then
+                source.count,source.remaining=1,remaining-1
+                return true
+            end
+            return nil,slot and "Item ID limit reached." or "Need a free slot for the used item."
+        end
+        local worn={}
+        for k,v in pairs(source) do worn[k]=v end
+        worn.count,worn.remaining=1,remaining-1
+        source.count=count-1
+        if cells then cells[slot]=worn
+        else
+            table.insert(draft[ref.container],{id=draft.nextItemId,slot=slot,item=worn})
+            draft.nextItemId=draft.nextItemId+1
+        end
+    elseif remaining>1 then
+        source.remaining=remaining-1
+    elseif count>1 then
+        source.count=count-1
+    elseif cells then
+        cells[index]=nil
+        if pouch then pouch.doses=pouch.doses-1 end
+    else
+        table.remove(draft[ref.container],index)
+    end
+    return true
+end
+
+return M

@@ -6,6 +6,7 @@ dofile_once(files .. "home_wand_edit.lua")
 dofile_once(files .. "wand.lua")
 dofile_once(files .. "potion.lua")
 dofile_once(files .. "transfers.lua")
+NHInventoryUse=dofile(files .. "inventory_use.lua")
 NHCompanions.registerItems()
 NHCardWallets.registerItem()
 dofile_once(files .. "products.lua")
@@ -30,6 +31,8 @@ local opened, mouse_release, case_open = false, false, nil
 local lang, status, last_error = "en", "", nil
 local model_cache, next_attempt = nil, 0
 local last_dose_frame = -1
+local right_use
+local inventory_aim={x=1,y=0}
 local next_room_check,pending_visit=0,nil
 local bank_synced=false
 
@@ -39,6 +42,8 @@ end
 
 local error_translations = {
     ["Invalid bandage count."] = "绷带的剩余卷数无效。",
+    ["Invalid throwable count."] = "投掷物的剩余数量无效。",
+    ["Need a free slot for the used item."] = "需要一个空格存放使用后的物品。",
     ["Invalid medkit."] = "医疗包的剩余次数无效。",
     ["Invalid surgery kit."] = "手术包的使用次数无效。",
     ["Card wallet changed."] = "卡片夹已移动，请重新选择。",
@@ -300,12 +305,10 @@ local function find_stimulant(player,tag,component)
     end
 end
 
-local function use_dose(player, item)
+local function inject(player,subtype,pay)
     local frame = GameGetFrameNum()
     if last_dose_frame == frame then return end
     last_dose_frame = frame
-    local remaining,subtype=NHDoses.remaining(state,item)
-    if not remaining then report("This syringe is no longer available."); return end
     local d=NHInjectors.get(subtype)
     local healing=d.id=="healing"
     local component=healing and "VariableStorageComponent" or "GameEffectComponent"
@@ -322,16 +325,17 @@ local function use_dose(player, item)
             report(tr("无法创建激活剂效果。", "Could not create the stimulant effect.")); return
         end
     end
-    local consumed, reason = NHDoses.consume(state, player, item)
+    local consumed, reason = pay()
     if not consumed then
         if created then EntityKill(created) end
-        report(reason)
+        if reason then report(reason) end
         return
     end
     ComponentSetValue2(effect,healing and "value_int" or "frames",healing and 60 or 3600)
     if created then EntityAddChild(player, created) end
     mouse_release = true
     feedback(tr("已注射，剩余耐久 ","Injected. Durability ") .. reason .. "/" .. NHStore.doseDurability)
+    return true
 end
 
 local spell_names={
@@ -353,6 +357,8 @@ local function item_label(entry)
         return tr(d.zh,d.en)
     end
     if item.kind=="bandage" then return translated(item.name) or tr("绷带","Bandage") end
+    local throwable=NHThrowables.types[item.kind]
+    if throwable then return tr(throwable.zh,throwable.en) end
     local kit=NHMedkits.types[item.kind] or NHSurgeryKits.types[item.kind]
     if kit then return translated(item.name) or tr(kit.zh,kit.en) end
     if item.kind == "spell" then
@@ -375,7 +381,7 @@ local function stored_view(entry)
     return {id=entry.id,kind=item.kind,name=item_label(entry),potion=potion,
         icon=potion and NHPotion.inventoryIcon(potion) or (item.kind=="dose" and NHInjectors.get(item.subtype).icon)
             or item.icon or (item.sprite and item.sprite.image_file),
-        remaining=NHMedkits.remaining(item),count=item.count or (item.kind=="bandage" and 1 or nil),
+        remaining=NHMedkits.remaining(item),count=item.count or ((item.kind=="bandage" or item.kind=="grenade") and 1 or nil),
         subtype=item.subtype,species=item.species,dockSlot=NHPotion.dockSlot(item)}
 end
 
@@ -666,6 +672,80 @@ local function matches_wallet(player,id)
     return popup and popup.kind=="card_wallet" and popup.id==id and popup_accessible(player)
 end
 
+local function use_carried(player,entity,slot)
+    local kind=NHNative.kind(entity) or NHTransfers.item_kind(entity)
+    if kind=="pouch" then
+        local id=NHDoses.isPouch(state,entity)
+        if id then opened,popup=true,{id=id,entity=entity} end
+    elseif kind=="card_wallet" then
+        local row=NHCardWallets.carried(state,player,entity)
+        if row then opened,popup=true,{kind=kind,id=row.id,entity=entity} end
+    elseif kind=="dose" then
+        local remaining,subtype=NHDoses.remaining(state,entity)
+        if not remaining then report("This syringe is no longer available."); return end
+        inject(player,subtype,function() return NHDoses.consume(state,player,entity,slot~=nil) end)
+    elseif kind=="summon_card" then
+        NHCompanions.use(player,entity,lang,slot~=nil)
+    elseif NHSurgeryKits.types[kind] then
+        local _,reason=NHSurgery.start(player,entity,slot)
+        surgery_feedback(reason)
+    else
+        NHProducts.use(player,entity,slot~=nil,slot and inventory_aim)
+    end
+end
+
+local function inventory_access(player,source)
+    if not active_run() then return false end
+    if source.container=="warehouse" then return near_home(player) end
+    if source.container=="pouch" then return matches_popup(player,source.pouchId) end
+    if source.container=="card_wallet" then return matches_wallet(player,source.walletId) end
+    return source.container=="safe"
+end
+
+local function use_inventory(player,source)
+    if source.container=="native" then
+        local slot=matching_slot(player,source)
+        if slot and slot.entity==source.entity and slot.kind==source.kind and EntityGetRootEntity(slot.entity)==player then
+            use_carried(player,slot.entity,slot)
+        end
+        return
+    end
+    if not inventory_access(player,source) then return end
+    if source.container=="safe" or source.container=="warehouse" then
+        if not case_open or not GameIsInventoryOpen() then return end
+        if source.kind=="pouch" then
+            local pouch=NHPouches.at(state,source.container,source.slot)
+            if pouch and pouch.id==source.storedId then popup={id=pouch.id,container=source.container,slot=pouch.slot} end
+            return
+        elseif source.kind=="card_wallet" then
+            local ref={kind="card_wallet",id=source.storedId,slot=source.slot,container=source.container}
+            if NHCardWallets.get(state,player,ref) then popup=ref end
+            return
+        end
+    elseif source.container=="card_wallet" then source.wallet=popup end
+    local item=NHInventoryUse.peek(state,player,source)
+    if not item then return end
+    local function pay()
+        if not inventory_access(player,source) then return false end
+        return commit_edit(function(draft) return NHInventoryUse.spend(draft,player,source) end)
+    end
+    if item.kind=="dose" then
+        local left=(item.remaining or NHStore.doseDurability)-1
+        inject(player,item.subtype,function()
+            if pay() then return true,left end
+        end)
+    elseif item.kind=="summon_card" then
+        NHCompanions.summon(player,item.species,lang,pay)
+    elseif NHSurgeryKits.types[item.kind] then
+        local _,reason=NHSurgery.begin(player,item.kind,function()
+            return inventory_access(player,source) and NHInventoryUse.peek(state,player,source)~=nil
+        end,pay)
+        surgery_feedback(reason)
+    else
+        NHProducts.apply(player,item.kind,pay,inventory_aim)
+    end
+end
+
 local function close_panel()
     popup=nil
     opened, case_open, mouse_release = false, nil, true
@@ -747,6 +827,10 @@ end
 local function dispatch(player, action, index)
     if not opened or not active_run() then return end
     if case_open or popup then
+        if action=="use_inventory" then
+            if type(index)=="table" then use_inventory(player,index) end
+            return
+        end
         if action=="close_container" then
             popup=nil
             if not case_open then close_panel() end
@@ -967,6 +1051,8 @@ end
 
 function OnWorldInitialized()
     NHSurgery.reset()
+    right_use=nil
+    inventory_aim.x,inventory_aim.y=1,0
     NHClock.reset()
     NHFarm.resetClock()
     NHHomeWandEdit.reset()
@@ -1013,6 +1099,19 @@ function OnWorldPreUpdate()
     local player = current_player()
     if player then set_home(player,false) end
     NHHomeWandEdit.update(player,player and (not state or active_run()) and near_home(player))
+    local menu=GameIsInventoryOpen() or opened
+    right_use=NHNative.prepareRightUse(player,menu,menu and NHUI.useTarget() or nil)
+    if type(right_use)=="number" then right_use=NHNative.heldUseSlot(player,right_use) end
+    if player and not menu then
+        local controls=EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")
+        if controls then
+            local x,y=ComponentGetValue2(controls,"mAimingVectorNormalized")
+            if type(x)=="number" and type(y)=="number" and x*x+y*y>0.000001 then
+                local length=math.sqrt(x*x+y*y)
+                inventory_aim.x,inventory_aim.y=x/length,y/length
+            end
+        end
+    end
     if not opened and not mouse_release then return end
     if GameIsInventoryOpen() then return end
     if not player then
@@ -1028,6 +1127,8 @@ end
 
 function OnWorldPostUpdate()
     local player = current_player()
+    local used=right_use
+    right_use=nil
     surgery_feedback(NHSurgery.update(player))
     if player then set_home(player, false) end
     local traveler=player or (EntityGetWithTag("polymorphed_player") or {})[1]
@@ -1044,7 +1145,10 @@ function OnWorldPostUpdate()
     if not update_workshop(traveler,frame,farm_time) then return end
     if not player then opened,case_open=false,nil; return end
     local inventory_open = GameIsInventoryOpen()
-    local used = NHNative.pressed(player, inventory_open or opened or mouse_release)
+    local restored
+    if used and (used.container=="held" or used.container=="native") then
+        restored=NHNative.recoverUseSlot(player,used,place_in_slot)
+    end
     if frame % 60 == 0 then
         local ok, err = NHTransfers.reconcile(state, player)
         if ok then ok, err = NHDoses.reconcile(state, player) end
@@ -1063,24 +1167,9 @@ function OnWorldPostUpdate()
         close_panel()
     elseif popup then
         if InputIsKeyJustDown(41) then close_panel() end
-    elseif used then
-        local item = NHNative.held(player)
-        local kind = NHNative.kind(item)
-        if kind == "pouch" then
-            local id=NHDoses.isPouch(state,item)
-            if id then opened,popup=true,{id=id,entity=item} end
-        elseif item and EntityHasTag(item,"noita_hideout_card_wallet") then
-            local row=NHCardWallets.carried(state,player,item)
-            if row then opened,popup=true,{kind="card_wallet",id=row.id,entity=item} end
-        elseif kind == "dose" then use_dose(player, item)
-        elseif item and (NHCompanions.use(player,item,lang) or NHProducts.use(player,item)) then mouse_release=true
-        elseif item then
-            local handled,reason=NHSurgery.start(player,item)
-            if handled then
-                mouse_release=true
-                surgery_feedback(reason)
-            end
-        end
+    elseif used and used.container=="held" and used.owner==player then
+        if NHNative.held(player)==used.entity then use_carried(player,used.entity)
+        elseif restored then use_carried(player,used.entity,used) end
     end
     if not active_run() then return end
     -- Discoveries made outside the hideout can unlock vanilla spells without changing its inventory.
@@ -1095,7 +1184,8 @@ function OnWorldPostUpdate()
     if opened and state.order then
         model.order_remaining=math.ceil((state.order.required-NHClock.observe(state,frame))/60)
     end
-    if opened and (case_open or popup) then model.native_slots = native_slots(player) end
+    if opened and (case_open or popup) then model.native_slots=native_slots(player) end
+    model.rightUse=used and used.container~="held" and used or nil
     model.popup = popup ~= nil
     model.walletId,model.pouchId,model.cells,model.pouchName=nil,nil,nil,nil
     if popup and popup.kind=="card_wallet" then
@@ -1113,7 +1203,6 @@ function OnWorldPostUpdate()
 
     if case_open then NHPerks.view(state,player,model) end
     model.debug = opened and ModSettingGet("noita_hideout.test_tools") ~= false
-    model.active = opened and find_stimulant(player) ~= nil
     NHUI.draw(model, function(action, index)
         -- Ignore transfers on the frame that opens the panel.
         if was_open and opened and (not case_open or was_case_open) then dispatch(player, action, index) end

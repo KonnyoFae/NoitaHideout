@@ -21,7 +21,7 @@ define("medical","expansion","医疗工位","Medical station",1,{{"water",250},{
 define("injector","expansion","针剂工位","Injector station",1,{{"water",250},{"oil",100}},
     {effect={"制造针剂","Craft injectors"}})
 define("grenade","expansion","手雷工位","Grenade station",1,{{"gunpowder",150},{"oil",100}},
-    {effect={"制造手雷","Craft grenades"}})
+    {effect={"制造手雷和飞刀","Craft grenades and throwing knives"}})
 define("salvage","expansion","拆解台","Salvage bench",1,{{"sand",250},{"oil",100}},
     {effect={"回收碎片、提取精华和合成法术","Recover scrap, extract essences and craft spells"}})
 define("support","expansion","支援站","Support station",0,{},

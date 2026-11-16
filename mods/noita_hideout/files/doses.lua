@@ -237,7 +237,7 @@ function NHDoses.withdraw(s, player, deliver, pouchEntity, safe_slot, cell, cont
     return true, entity
 end
 
-local function retire(s, player, entity, to_pouch, slot, cell, container, pouchId)
+local function retire(s, player, entity, to_pouch, fromInventory, slot, cell, container, pouchId)
     if not is_open_run(s) then return nil, "Run already closed." end
     if not entity or entity == 0 or not EntityGetIsAlive(entity) or NHNative.kind(entity) ~= "dose" then
         return nil, "Select a syringe."
@@ -247,7 +247,7 @@ local function retire(s, player, entity, to_pouch, slot, cell, container, pouchI
         if EntityGetRootEntity(entity) ~= player then
             return nil, "The selected item is no longer in your quick inventory."
         end
-    elseif NHNative.held(player) ~= entity or EntityGetRootEntity(entity) ~= player then
+    elseif (not fromInventory and NHNative.held(player) ~= entity) or EntityGetRootEntity(entity) ~= player then
         return nil, "Select a syringe."
     end
     local token = token_of(entity)
@@ -279,11 +279,11 @@ local function retire(s, player, entity, to_pouch, slot, cell, container, pouchI
 end
 
 function NHDoses.deposit(s,player,entity,slot,cell,container,pouchId)
-    return retire(s,player,entity,true,slot,cell,container,pouchId)
+    return retire(s,player,entity,true,false,slot,cell,container,pouchId)
 end
 
-function NHDoses.consume(s, player, entity)
-    return retire(s, player, entity, false)
+function NHDoses.consume(s, player, entity, fromInventory)
+    return retire(s,player,entity,false,fromInventory)
 end
 
 function NHDoses.reconcile(s, player)

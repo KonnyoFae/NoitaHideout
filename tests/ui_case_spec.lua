@@ -61,6 +61,8 @@ dofile("mods/noita_hideout/files/potion.lua")
 function CellFactory_GetType() return -1 end
 dofile("mods/noita_hideout/files/transfers.lua")
 dofile("mods/noita_hideout/files/perks.lua")
+NHInventoryUse=dofile("mods/noita_hideout/files/inventory_use.lua")
+dofile("mods/noita_hideout/files/native_items.lua")
 dofile("mods/noita_hideout/files/ui.lua")
 local function render(model, widget)
     frame = frame + 1
@@ -592,15 +594,15 @@ action,param=render(model,214)
 assert(action=="craft" and param.id=="medical" and drawn["0:05"])
 do
     local recipe={id="injector_essence",category="medical",name="Fire injector (fire essence)",output=1,duration=120,
-        ready=false,reason="Not enough workshop resources.",inputs={{name="Fire essence",available=179,amount=180}}}
+        ready=false,reason="Not enough workshop resources.",inputs={{name="Fire essence",available=5,amount=6}}}
     table.insert(model.recipes,recipe)
     render(model,240)
     render(model,246)
-    assert(not render(model,214) and drawn["179 / 180"] and tips["Fire essence  179 / 180"])
+    assert(not render(model,214) and drawn["5 / 6"] and tips["Fire essence  5 / 6"])
     assert(drawn[recipe.reason] or tips[recipe.reason])
-    recipe.ready,recipe.inputs[1].available=true,180
+    recipe.ready,recipe.inputs[1].available=true,6
     local order,request=render(model,214)
-    assert(drawn["180 / 180"] and order=="craft" and request.id=="injector_essence")
+    assert(drawn["6 / 6"] and order=="craft" and request.id=="injector_essence")
     render(model,240)
     table.remove(model.recipes)
     render(model,244)
@@ -1393,7 +1395,7 @@ local function testTieredMedkitDisplay()
     pointer={x=0,y=0}
     local kit=NHMedkits.types.advanced_medkit
     model.recipes={{id="advanced_medkit",name=kit.zh,category="medical",medkit=kit,output=1,duration=180,ready=true,
-        inputs={{name="治疗精华",amount=165,available=200,essence="essence_healing"},{name="草药",amount=8,available=8},
+        inputs={{name="治疗精华",amount=3,available=200,essence="essence_healing"},{name="草药",amount=8,available=8},
             {name="战术医疗包 (7/9)",amount=1,available=2,detail="优先消耗剩余次数最少的一包。"}}}}
     render(model,212)
     render(model,251)
@@ -1401,7 +1403,7 @@ local function testTieredMedkitDisplay()
     assert(green_button(244))
     render(model,244)
     render(model)
-    assert(drawn["3:00"] and drawn["12"] and drawn["25% 最大生命"] and drawn["200 / 165"] and drawn["8 / 8"] and drawn["2 / 1"])
+    assert(drawn["3:00"] and drawn["12"] and drawn["25% 最大生命"] and drawn["200 / 3"] and drawn["8 / 8"] and drawn["2 / 1"])
     assert(tips["战术医疗包 (7/9)"]:find("剩余次数最少",1,true))
     reveal(model,214)
     local cmd,arg=render(model,214)
@@ -1436,3 +1438,75 @@ local function testSurgeryDisplay()
 end
 testSurgeryDisplay()
 print("UI: surgery recipe, interruption information and in-world cast display passed.")
+
+local function testRightUse()
+    width,height=427,240
+    local m={open=true,lang="en",near=false,mode="case",capacity=2,revision=1,status="",maxUses=3,
+        secure_loot={{id=10,kind="bandage",count=7,name="Bandages"},{id=11,kind="card_wallet",name="Wallet"}},
+        native_slots={native("tool",4,0,41,"medkit"),native("wand",0,0,42,"wand")}}
+    render({open=false})
+    assert(not NHUI.useTarget())
+    pointer={x=102,y=22}
+    m.rightUse={container="native",kind="medkit",entity=41,parent=2,lane="tool",xslot=0,yslot=0}
+    assert(not render(m),"opening inventory cannot spend an item")
+    local function over(tile)
+        pointer={x=tiles[tile].x+1,y=tiles[tile].y+1}
+        return NHUI.useTarget()
+    end
+    local function use()
+        m.rightUse=assert(NHUI.useTarget())
+        local cmd,arg=render(m)
+        assert(cmd=="use_inventory" and not m.rightUse)
+        return arg
+    end
+    local native_use=use()
+    assert(native_use.container=="native" and native_use.entity==41 and native_use.lane=="tool" and native_use.xslot==0)
+    pointer={x=21,y=22}; assert(not NHUI.useTarget(),"wands keep native handling")
+    local saved=over(1001)
+    assert(saved.container=="safe" and saved.slot==1 and saved.storedId==10 and saved.count==7)
+    m.rightUse=saved
+    over(1002)
+    assert(not render(m),"moved from the prepared slot before dispatch")
+    over(1001)
+    m.rightUse=saved
+    m.secure_loot[1].count=6
+    assert(not render(m),"changed stack rejected")
+    assert(use().count==6 and not render(m))
+    over(1002);assert(use().kind=="card_wallet")
+    over(1001);pointer.down,pointer.pressed=true,true
+    render(m);assert(not NHUI.useTarget(),"left drag owns the slot")
+    pointer={x=0,y=0};render(m)
+    m.popup,m.pouchId,m.pouchName,m.pouchCapacity=true,99,"Pouch",2
+    m.cells={{subtype="frost",remaining=2,count=1}}
+    render(m)
+    assert(over(1003).cell==1)
+    local injection=use()
+    assert(injection.container=="pouch" and injection.pouchId==99 and injection.subtype=="frost" and injection.remaining==2)
+    local old=injection
+    m.pouchId=nil;m.walletId,m.walletCapacity,m.pouchName=80,2,"Wallet"
+    m.cells={{species="dryad",count=2,remaining=80}}
+    m.rightUse=old;assert(not render(m))
+    over(1003)
+    local card=use()
+    assert(card.container=="card_wallet" and card.walletId==80 and card.species=="dryad" and card.count==2)
+    m.popup,m.walletId,m.near=false,nil,true
+    m.warehouse={supplies={{id=71,name="Fire grenades",count=8,kind="fire_grenade"}}}
+    m.warehouse_capacity={wand=10,supplies=10,equipment=10,spell=10,containers=10,collection=10}
+    m.progression={expansion={},upgrade={}};m.recipes={};m.shopGoods={}
+    m.surgery={kind="field_surgery_kit",elapsed=60,total=180}
+    render(m,78);render(m)
+    assert(drawn["Surgery  2.0 s"] and drawn["data/ui_gfx/1px_white.png"])
+    over(1003)
+    local stack=use()
+    assert(stack.container=="warehouse" and stack.slot==1 and stack.storedId==71 and stack.count==8)
+    local panel=panels[210]
+    pointer={x=panel.x+8,y=panel.y+8}
+    local beneath=native("tool",math.floor((pointer.x-20)/20),0,99,"medkit")
+    beneath.yslot=math.floor((pointer.y-20)/20)
+    m.native_slots={beneath}
+    render(m);assert(not NHUI.useTarget(),"the hideout panel covers the native slot")
+    render({open=false})
+    assert(not NHUI.useTarget())
+end
+testRightUse()
+print("UI: exact right-click sources, moving cursor, stale stacks, occlusion, left drag and inventory surgery HUD passed.")

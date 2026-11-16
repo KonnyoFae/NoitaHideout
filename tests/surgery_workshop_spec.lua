@@ -37,9 +37,9 @@ NHNative.registerTranslations()
 assert(translations==registered)
 
 local tiers={
-    {id="field_surgery_kit",ingredient="medkit",herbs=3,essence=20,work=30,cast=3,heal=20},
-    {id="tactical_surgery_kit",ingredient="tactical_medkit",herbs=5,essence=35,work=90,cast=4,heal=35},
-    {id="advanced_surgery_kit",ingredient="advanced_medkit",herbs=8,essence=50,work=180,cast=5,heal=50},
+    {id="field_surgery_kit",ingredient="medkit",herbs=3,essence=2,work=30,cast=3,heal=20},
+    {id="tactical_surgery_kit",ingredient="tactical_medkit",herbs=5,essence=3,work=90,cast=4,heal=35},
+    {id="advanced_surgery_kit",ingredient="advanced_medkit",herbs=8,essence=4,work=180,cast=5,heal=50},
 }
 for _,tier in ipairs(tiers) do
     local id=tier.id

@@ -1,0 +1,5 @@
+<Entity name="$nh_hideout_shock_grenade">
+    <Base file="mods/noita_hideout/files/projectiles/throwable.xml" />
+    <SpriteComponent image_file="mods/noita_hideout/files/items/shock_grenade.png" offset_x="6" offset_y="7" />
+    <VariableStorageComponent _tags="nh_throwable_impact" value_string="shock_grenade" value_bool="0" />
+</Entity>

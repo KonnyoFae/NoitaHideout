@@ -253,12 +253,8 @@ function NHCompanions.clearSupport(player)
     end
 end
 
-function NHCompanions.use(player,entity,lang)
-    if not EntityHasTag(entity,"noita_hideout_summon_card") or GameIsInventoryOpen() or NHNative.held(player)~=entity then return end
-    local id=speciesOf(entity)
-    local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
-    local remaining=item and ComponentGetValue2(item,"uses_remaining")
-    if not NHCompanions.validCard({species=id,remaining=remaining}) then return end
+function NHCompanions.summon(player,id,lang,pay)
+    if not NHCompanions.species[id] then return end
     local previous=EntityGetAllChildren(player,"noita_hideout_companion") or {}
     local x,y=EntityGetTransform(player)
     local pet=EntityLoad(pets..id..".xml",x+12,y-8)
@@ -274,15 +270,32 @@ function NHCompanions.use(player,entity,lang)
     ComponentSetValue2(gifts,"value_int",ProceduralRandomi(x+GameGetFrameNum(),y,1,1000000))
     EntityAddChild(player,pet)
     if EntityGetParent(pet)~=player then EntityKill(pet); return end
+    local paid,reason=pay()
+    if not paid then dismiss(pet); return nil,reason end
     -- The 64-pixel source frames are displayed at half size in the world.
     EntitySetTransform(pet,x+12,y-8,0,0.5,0.5)
     for _,child in ipairs(previous) do
         if EntityGetIsAlive(child) then dismiss(child) end
     end
     NHCompanions.clearSupport(player)
-    if remaining==1 then GameKillInventoryItem(player,entity)
-    else ComponentSetValue2(item,"uses_remaining",remaining-1) end
     local spec=NHCompanions.species[id]
     GamePrint(lang=="zh" and (spec.zh.."开始随行。") or (spec.en.." joined you."))
     return true
+end
+
+function NHCompanions.use(player,entity,lang,fromInventory)
+    if not entity or not EntityHasTag(entity,"noita_hideout_summon_card") then return end
+    if fromInventory then
+        local parent=EntityGetParent(entity)
+        if not parent or parent==0 or EntityGetParent(parent)~=player or EntityGetName(parent)~="inventory_quick" then return end
+    elseif GameIsInventoryOpen() or NHNative.held(player)~=entity then return end
+    local id=speciesOf(entity)
+    local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
+    local remaining=item and ComponentGetValue2(item,"uses_remaining")
+    if not NHCompanions.validCard({species=id,remaining=remaining}) then return end
+    return NHCompanions.summon(player,id,lang,function()
+        if remaining==1 then GameKillInventoryItem(player,entity)
+        else ComponentSetValue2(item,"uses_remaining",remaining-1) end
+        return true
+    end)
 end

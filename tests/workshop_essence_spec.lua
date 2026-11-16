@@ -14,6 +14,13 @@ local recipe=assert(recipes.medical)
 assert(recipe.category=="medical" and recipe.facility=="medical" and not recipe.resources)
 assert(recipe.item.kind=="medkit" and recipe.item.remaining==3)
 assert(not recipes.medkit_essence)
+local healingCost={medkit=0}
+for _,kind in ipairs({"tactical_medkit","advanced_medkit","field_surgery_kit","tactical_surgery_kit","advanced_surgery_kit"}) do
+    local upgrade=assert(recipes[kind])
+    healingCost[kind]=healingCost[upgrade.storedIngredient]+upgrade.resources.essence_healing
+    assert(healingCost[kind]<=9 and healingCost[kind]*10<=NHEssences.values.HEAL_BULLET)
+end
+assert(healingCost.advanced_medkit==5 and healingCost.advanced_surgery_kit==9)
 for _,entry in ipairs(NHStore.recipes) do
     if entry.item and entry.item.kind=="medkit" then
         assert(not (entry.resources and entry.resources.essence_healing))
@@ -100,10 +107,10 @@ for _,typeId in ipairs(NHInjectors.order) do
     assert(item.kind=="dose" and item.subtype==typeId and item.remaining==3 and item.count==1)
 end
 for _,example in ipairs({
-    {id="grenade_essence",base="grenade",category="weapons",key="essence_high_energy",cost=30,kind="grenade"},
+    {id="grenade_essence",base="grenade",category="weapons",key="essence_high_energy",cost=6,kind="grenade"},
 }) do
     local entry,original=recipes[example.id],recipes[example.base]
-    assert(entry.category==example.category and entry.facility==original.facility and entry.item==original.item)
+    assert(entry.category==example.category and entry.facility==original.facility and entry.item.kind==original.item.kind and entry.item.count==8 and original.item.count==8)
     assert(entry.resources[example.key]==example.cost and #entry.inputs==0)
     s.resources[example.key]=example.cost
     local ok,reason=NHStore.startOrder(s,entry.id)

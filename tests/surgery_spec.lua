@@ -3,12 +3,15 @@ local cast=dofile("mods/noita_hideout/files/surgery.lua")
 local player,item,frame=10,20,0
 local health={hp=1,max_hp=4}
 local slot={uses_remaining=1}
+local carried_parent,slot_x,slot_y
 local kind,held,alive,open,negative,curseMaximum,hook,failHook
 local used,cleanses=0,0
 function GameGetFrameNum() return frame end
 function GameIsInventoryOpen() return open end
 function EntityHasTag(id,tag) return id==item and tag=="noita_hideout_"..kind end
-function EntityGetIsAlive(id) return id==player and alive or id==item and held==item end
+function EntityGetIsAlive(id) return id==player and alive or id==item and (held==item or carried_parent~=nil) end
+function EntityGetParent(id) assert(id==item); return carried_parent or 0 end
+function EntityGetRootEntity(id) return carried_parent and player or id end
 NHNative={held=function(p) assert(p==player); return held end}
 function EntityGetFirstComponentIncludingDisabled(id,component,tag)
     if component=="DamageModelComponent" then assert(id==player); return health end
@@ -28,7 +31,10 @@ function EntityAddComponent2(id,component,data)
     return hook
 end
 function EntityRemoveComponent(id,component) assert(id==player and component==hook); hook=nil end
-function ComponentGetValue2(component,key) return component[key] end
+function ComponentGetValue2(component,key)
+    if key=="inventory_slot" then assert(component==slot);return slot_x,slot_y end
+    return component[key]
+end
 function ComponentSetValue2(component,key,value) component[key]=value end
 function GetUpdatedEntityID() return player end
 function GetUpdatedComponentID() return hook end
@@ -37,9 +43,10 @@ function EntitySetComponentIsEnabled(id,component,enabled)
     hook.enabled=enabled
 end
 function GameKillInventoryItem(p,id)
-    assert(p==player and id==item and held==item and not hook)
+    assert(p==player and id==item and (held==item or carried_parent) and not hook)
     used=used+1
-    held=nil
+    if held==id then held=nil end
+    carried_parent=nil
 end
 NHSurgeryCleanse={
     has=function(p) assert(p==player); return negative end,
@@ -57,6 +64,7 @@ local function setup(id)
     kind,held,alive,open,negative,curseMaximum,failHook=id,item,true,false,false,nil,false
     health.hp,health.max_hp,slot.uses_remaining=1,40,1
     used,cleanses=0,0
+    carried_parent,slot_x,slot_y=nil,nil,nil
 end
 local function hit(amount)
     dofile(hook.script_damage_received)
@@ -147,3 +155,50 @@ assert(restored.start(player,item) and hook)
 restored.reset()
 assert(not hook and not restored.view() and used==0)
 print("Surgery: three durations and percentages, damage, clean interrupt, charge handling, health cap and reload passed.")
+
+-- A right-clicked physical kit stays bound to the original inventory slot even
+-- when a different item is held. Moving it halfway through cancels the cast.
+setup("field_surgery_kit")
+open,negative,held=true,true,81
+local location={parent=30,xslot=2,yslot=0}
+carried_parent,slot_x,slot_y=location.parent,location.xslot,location.yslot
+assert(cast.start(player,item,location) and cast.view())
+slot_x=1
+frame=frame+80
+assertInterrupted(player)
+assert(held==81 and carried_parent and negative and health.hp==1)
+slot_x=2
+assert(cast.start(player,item,location) and cast.view())
+frame=frame+180
+assert(cast.update(player)=="completed" and open and held==81 and not carried_parent)
+assert(used==1 and cleanses==1 and not negative and health.hp==9)
+
+-- Stored surgery keeps the record until payment succeeds on the final frame.
+setup("tactical_surgery_kit")
+open,negative,held=true,true,81
+local present,accept,attempts,quantity=true,false,0,1
+local function available() return present and quantity>0 end
+local function pay()
+    attempts=attempts+1
+    assert(not hook and negative and health.hp==1)
+    if not accept then return false end
+    quantity=quantity-1
+    return true
+end
+assert(cast.begin(player,kind,available,pay) and hook)
+frame=frame+239
+assert(not cast.update(player) and attempts==0 and cast.view().elapsed==239)
+frame=frame+1
+assertInterrupted(player)
+assert(attempts==1 and quantity==1 and negative and health.hp==1)
+assert(cast.begin(player,kind,available,pay) and hook)
+present=false
+frame=frame+1
+assertInterrupted(player)
+assert(attempts==1 and quantity==1 and negative and health.hp==1)
+present,accept=true,true
+assert(cast.begin(player,kind,available,pay) and hook)
+frame=frame+240
+assert(cast.update(player)=="completed" and not cast.update(player))
+assert(attempts==2 and quantity==0 and cleanses==1 and not negative and health.hp==15 and used==0 and held==81)
+print("Inventory surgery: open inventory, exact slot, lost source, failed payment and single successful treatment.")

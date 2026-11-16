@@ -38,14 +38,8 @@ local function hasCharge(entity,kind)
     return item and ComponentGetValue2(item,"uses_remaining")==NHSurgeryKits.types[kind].uses
 end
 
-function M.start(player,entity)
-    if not entity or entity==0 then return false end
-    local kind
-    for _,id in ipairs(NHSurgeryKits.order) do
-        if EntityHasTag(entity,"noita_hideout_"..id) then kind=id; break end
-    end
-    if not kind then return false end
-    if active or GameIsInventoryOpen() or NHNative.held(player)~=entity or not hasCharge(entity,kind) then return true end
+function M.begin(player,kind,available,pay)
+    if active or not available() then return true end
     local model,hp,maximum=health(player)
     if not model then return true end
     if hp>=maximum and not NHSurgeryCleanse.has(player) then return true,"unneeded" end
@@ -59,9 +53,29 @@ function M.start(player,entity)
     })
     if not hook or hook==0 then return true,"interrupted" end
     local frame=GameGetFrameNum()
-    active={player=player,entity=entity,kind=kind,hook=hook,model=model,hp=hp,maximum=maximum,
+    active={player=player,kind=kind,hook=hook,model=model,hp=hp,maximum=maximum,available=available,pay=pay,
         startFrame=frame,lastFrame=frame,duration=NHSurgeryKits.types[kind].castFrames}
     return true
+end
+
+function M.start(player,entity,inventorySlot)
+    if not entity or entity==0 then return false end
+    local kind
+    for _,id in ipairs(NHSurgeryKits.order) do
+        if EntityHasTag(entity,"noita_hideout_"..id) then kind=id; break end
+    end
+    if not kind then return false end
+    local function available()
+        if inventorySlot then
+            if not EntityGetIsAlive(entity) or EntityGetParent(entity)~=inventorySlot.parent or EntityGetRootEntity(entity)~=player then return false end
+            local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
+            if not item then return false end
+            local x,y=ComponentGetValue2(item,"inventory_slot")
+            if x~=inventorySlot.xslot or y~=inventorySlot.yslot then return false end
+        elseif GameIsInventoryOpen() or NHNative.held(player)~=entity then return false end
+        return hasCharge(entity,kind)
+    end
+    return M.begin(player,kind,available,function() GameKillInventoryItem(player,entity); return true end)
 end
 
 function M.update(player)
@@ -69,7 +83,7 @@ function M.update(player)
     if not cast then return end
     local frame=GameGetFrameNum()
     if player~=cast.player or frame<cast.lastFrame or not EntityGetIsAlive(player)
-        or GameIsInventoryOpen() or NHNative.held(player)~=cast.entity
+        or not cast.available()
         or EntityGetFirstComponent(player,"LuaComponent",hookTag)~=cast.hook then
         M.reset()
         return "interrupted"
@@ -83,19 +97,17 @@ function M.update(player)
     end
     cast.lastFrame,cast.hp,cast.maximum=frame,hp,maximum
     if frame-cast.startFrame<cast.duration then return end
-    if not hasCharge(cast.entity,cast.kind) then M.reset(); return "interrupted" end
 
     M.reset()
-    local cleansed=NHSurgeryCleanse.cleanse(player)
+    if hp>=maximum and not NHSurgeryCleanse.has(player) then return "unneeded" end
+    if not cast.pay() then return "interrupted" end
+    NHSurgeryCleanse.cleanse(player)
     -- Removing a health curse can change the current maximum during this step.
     model,hp,maximum=health(player)
-    local healed=model and hp<maximum
-    if healed then
+    if model and hp<maximum then
         local percent=NHSurgeryKits.types[cast.kind].healPercent
         ComponentSetValue2(model,"hp",math.min(maximum,hp+maximum*percent/100))
     end
-    if not cleansed and not healed then return "unneeded" end
-    GameKillInventoryItem(player,cast.entity)
     return "completed"
 end
 

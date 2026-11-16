@@ -1,6 +1,7 @@
 -- Simulate the game callbacks with real store, HUD case and syringe modules.
 local settings, flags, world = {}, {}, {}
-local frame, keys, fire, fire_stamp, inventory_open = 1, {}, false, 0, false
+local frame,keys,inventory_open=1,{},false
+local left_mouse,right_mouse=false,false
 local opened_click, model, ending, fail_effect, fail_commit = nil, nil, false, false, false
 local player, quick = 1, 2
 local entities, next_id, held
@@ -97,16 +98,12 @@ function EntityGetFirstComponentIncludingDisabled(id,kind,tag)
     return e and e.comps[kind .. (tag or "")]
 end
 function ComponentGetValue2(c,key)
-    if c==controls then
-        if key=="mButtonDownFire" then return fire end
-        if key=="mButtonFrameFire" then return fire_stamp end
-        return false
-    end
+    if c==controls then return controls[key] or false end
     if key=="inventory_slot" then return c.slotX or 0,c.slotY or 0 end
     return c[key]
 end
 function ComponentSetValue2(c,key,v,y)
-    if key=="inventory_slot" then c.slotX,c.slotY=v,y elseif c~=controls then c[key]=v end
+    if key=="inventory_slot" then c.slotX,c.slotY=v,y else c[key]=v end
 end
 function EntitySetComponentsWithTagEnabled() end
 function EntityLoad(path,x,y)
@@ -142,7 +139,7 @@ function GamePickUpInventoryItem(_,id) entities[id].parent=quick end
 function EntityAddChild(p,id) entities[id].parent=p end
 function GameIsInventoryOpen() return inventory_open end
 function InputIsKeyJustDown(key) return keys[key] end
-function InputIsMouseButtonDown() return fire end
+function InputIsMouseButtonDown(button) return (button==1 and left_mouse) or (button==2 and right_mouse) or false end
 function GameHasFlagRun(flag) return flag=="ending_game_completed" and ending end
 function dofile_once(path) dofile(path) end
 local function boot()
@@ -154,11 +151,16 @@ local function boot()
     OnWorldInitialized()
     OnPlayerSpawned(player)
 end
-local function tick(key,action,arg,down)
+local function tick(key,action,arg,button)
     frame=frame+1
     keys=key and {[key]=true} or {}
-    if down and not fire then fire_stamp=frame end
-    fire=down or false
+    local left=button=="left" or button=="both"
+    local right=button=="right" or button=="both"
+    if left and not left_mouse then controls.mButtonFrameFire=frame end
+    if right and not right_mouse then controls.mButtonFrameThrow=frame end
+    left_mouse,right_mouse=left,right
+    controls.mButtonDownFire,controls.mButtonDownLeftClick=left,left
+    controls.mButtonDownThrow,controls.mButtonDownRightClick=right,right
     model=nil
     opened_click=action and {action,arg}
     OnWorldPreUpdate()
@@ -176,7 +178,7 @@ local function starter()
     return saved.pouches[saved.starterPouchId]
 end
 local function new_world()
-    world,ending,fire,inventory_open={},false,false,false
+    world,ending,left_mouse,right_mouse,inventory_open={},false,false,false,false
     reset_entities()
     boot()
 end
@@ -210,29 +212,35 @@ tick()
 held=dose
 tick(13) -- J no longer spends a dose
 assert(EntityGetIsAlive(dose) and #EntityGetWithTag("noita_hideout_stimulant")==0)
+local charges_before_left=NHDoses.remaining(state(),dose)
+for i=1,4 do
+    tick(nil,nil,nil,"left")
+    assert(not controls.mButtonDownFire and NHDoses.remaining(state(),dose)==charges_before_left)
+end
+tick()
 inventory_open=true
-tick(nil,nil,nil,true)
+tick(nil,nil,nil,"right")
 inventory_open=false
-tick(nil,nil,nil,true)
+tick(nil,nil,nil,"right")
 assert(EntityGetIsAlive(dose))
 tick()
 fail_effect=true
-tick(nil,nil,nil,true)
+tick(nil,nil,nil,"right")
 assert(EntityGetIsAlive(dose) and #EntityGetWithTag("noita_hideout_stimulant")==0)
 tick()
 fail_effect,fail_commit=false,true
-tick(nil,nil,nil,true)
+tick(nil,nil,nil,"right")
 assert(EntityGetIsAlive(dose) and #EntityGetWithTag("noita_hideout_stimulant")==0)
 tick()
 fail_commit=false
-tick(nil,nil,nil,true)
-tick(nil,nil,nil,true)
+tick(nil,nil,nil,"right")
+tick(nil,nil,nil,"right")
 assert(EntityGetIsAlive(dose) and NHDoses.remaining(state(),dose)==2)
 tick()
-tick(nil,nil,nil,true)
+tick(nil,nil,nil,"right")
 assert(NHDoses.remaining(state(),dose)==1)
 tick()
-tick(nil,nil,nil,true)
+tick(nil,nil,nil,"right")
 assert(not EntityGetIsAlive(dose) and #EntityGetWithTag("noita_hideout_stimulant")==1 and starter().doses==1)
 boot()
 assert(state().runSerial==1 and starter().doses==1)
@@ -258,7 +266,7 @@ held=0
 tick()
 GamePickUpInventoryItem(player,pouch)
 held=pouch
-tick(nil,nil,nil,true)
+tick(nil,nil,nil,"right")
 assert(starter().doses==1 and #EntityGetWithTag("noita_hideout_dose")==0)
 assert(tick().mode=="container")
 local emptyTool=tool()
@@ -440,7 +448,7 @@ settings,flags={},{}
 new_world()
 local funded=state()
 funded.materials={sand=3000,slime=1800,water=2000,blood=100,lava=100,oil=500,gunpowder=300}
-funded.resources={active_herb=2,essence_fire=180}
+funded.resources={active_herb=2,essence_fire=6}
 assert(NHStore.commit(funded))
 boot()
 local request={id="safe",level=0}
@@ -511,7 +519,7 @@ end
 local first_product
 local products={
     {recipe="medical",kind="medkit",name="Medkit",ingredients={water=100,blood=50}},
-    {recipe="injector",kind="dose",name="Fire injector",stock="resources",ingredients={active_herb=2,essence_fire=180}},
+    {recipe="injector",kind="dose",name="Fire injector",stock="resources",ingredients={active_herb=2,essence_fire=6}},
     {recipe="grenade",kind="grenade",name="Magic grenade",ingredients={sand=100,slime=50}},
 }
 for n,expected in ipairs(products) do
@@ -587,7 +595,7 @@ assert(state().resources.arcane_scrap==1 and not tick().warehouse.spell)
 do
     local key=NHEssences.byAction.HEAL_BULLET
     local profile=NHEssences.healingProfiles.HEAL_BULLET
-    for _,test in ipairs({{"grenade_essence","essence_high_energy",30},{"injector","essence_fire",180}}) do
+    for _,test in ipairs({{"grenade_essence","essence_high_energy",6},{"injector","essence_fire",6}}) do
         local recipe=assert(has_project(tick().recipes,test[1]))
         assert(recipe.unlocked and not recipe.ready and recipe.reason=="Not enough workshop resources.")
         local i=#recipe.inputs
@@ -1321,7 +1329,7 @@ do
         inventory_open,held=false,syringe
         tick()
         tick() -- release the inventory's closing click before using the held item
-        tick(nil,nil,nil,true)
+        tick(nil,nil,nil,"right")
         effects[kind]=assert(EntityGetWithTag(d.tag)[1],kind)
         assert(EntityGetParent(effects[kind])==player and NHDoses.remaining(state(),syringe)==2)
         local timer=kind=="healing" and "VariableStorageComponent" or "GameEffectComponent"
@@ -1329,10 +1337,10 @@ do
         local component=EntityGetFirstComponentIncludingDisabled(effects[kind],timer)
         ComponentSetValue2(component,field,1)
         tick()
-        tick(nil,nil,nil,true)
+        tick(nil,nil,nil,"right")
         assert(#EntityGetWithTag(d.tag)==1 and ComponentGetValue2(component,field)==(kind=="healing" and 60 or 3600))
         tick()
-        tick(nil,nil,nil,true)
+        tick(nil,nil,nil,"right")
         assert(not EntityGetIsAlive(syringe))
     end
     for _,effect in pairs(effects) do assert(EntityGetIsAlive(effect)) end
@@ -1468,21 +1476,21 @@ local function testCompanionSwitch()
     tick()
     tick()
     held=assert(cards[first])
-    tick(nil,nil,nil,true)
+    tick(nil,nil,nil,"right")
     local original=summoned(first)
-    tick(nil,nil,nil,true)
+    tick(nil,nil,nil,"right")
     assert(summoned(first)==original and remaining(first)==79)
     tick()
     held=assert(cards[second])
-    tick(nil,nil,nil,true)
+    tick(nil,nil,nil,"right")
     local replacement=summoned(second)
     assert(not EntityGetIsAlive(original) and remaining(first)==79 and remaining(second)==79)
     tick()
-    tick(nil,nil,nil,true)
+    tick(nil,nil,nil,"right")
     assert(summoned(second)~=replacement and not EntityGetIsAlive(replacement) and remaining(second)==78)
     tick()
     held=assert(cards.griffin)
-    tick(nil,nil,nil,true)
+    tick(nil,nil,nil,"right")
     assert(summoned("griffin") and remaining("griffin")==79 and remaining(second)==78)
 end
 testCompanionSwitch()
@@ -1521,7 +1529,7 @@ local function testCardWalletController()
     inventory_open=false
     tick()
     tick()
-    tick(nil,nil,nil,true)
+    tick(nil,nil,nil,"right")
     view=tick()
     assert(view.mode=="container" and view.walletId==wallet and view.cells[3].species==card.species)
     local out=tool(1)
@@ -1619,7 +1627,7 @@ local function testTieredMedkits()
     new_world()
     local saved=state()
     saved.levels.medical=1
-    saved.resources={essence_healing=270,herb=12}
+    saved.resources={essence_healing=5,herb=12}
     for slot=1,2 do
         local item=NHMedkits.item("medkit")
         item.remaining=slot==2 and 1 or nil
@@ -1639,10 +1647,10 @@ local function testTieredMedkits()
         assert(input.name==ingredient and input.available==count and input.amount==1)
         assert(input.detail:find("fewest charges",1,true))
     end
-    checkRecipe("tactical_medkit",60,9,15,105,4,"Medkit (1/3)",2)
+    checkRecipe("tactical_medkit",60,9,15,2,4,"Medkit (1/3)",2)
     tick(nil,"craft",{id="tactical_medkit"})
     local order=state().order
-    assert(order.required==3600 and state().resources.essence_healing==165 and state().resources.herb==8)
+    assert(order.required==3600 and state().resources.essence_healing==3 and state().resources.herb==8)
     assert(tick().warehouse.supplies[1].remaining==3 and tick().warehouse.supplies[order.output.slot].kind=="reserved")
     advance(order.required)
     local built=state()
@@ -1653,7 +1661,7 @@ local function testTieredMedkits()
     end
     assert(NHStore.commit(built))
     boot()
-    checkRecipe("advanced_medkit",180,12,25,165,8,"Tactical medkit (7/9)",1)
+    checkRecipe("advanced_medkit",180,12,25,3,8,"Tactical medkit (7/9)",1)
     tick(nil,"craft",{id="advanced_medkit"})
     order=state().order
     assert(order.required==10800 and not state().resources.essence_healing and not state().resources.herb)
@@ -1672,7 +1680,7 @@ local function testSurgeryFromWorkshop()
     new_world()
     local saved=state()
     saved.levels.medical=1
-    saved.resources={herb=3,essence_healing=20}
+    saved.resources={herb=3,essence_healing=2}
     local base=NHMedkits.item("medkit")
     base.remaining=1
     saved.warehouse={{id=saved.nextItemId,slot=1,item=base}}
@@ -1711,12 +1719,12 @@ local function testSurgeryFromWorkshop()
     local food=EntityLoad("mods/noita_hideout/files/effect_sugar_cube.xml",0,0)
     EntityAddChild(player,food)
     local buff=EntityAddComponent2(food,"GameEffectComponent",{effect="MOVEMENT_FASTER",frames=7200})
-    local status=tick(nil,nil,nil,true).surgery
+    local status=tick(nil,nil,nil,"right").surgery
     assert(status and status.total==180 and status.elapsed==0)
     assert(advance(100).surgery.elapsed==100)
     health.hp=0.9
     assert(not tick().surgery and EntityGetIsAlive(held) and health.mIsOnFire and buff.frames==7200)
-    assert(tick(nil,nil,nil,true).surgery.elapsed==0)
+    assert(tick(nil,nil,nil,"right").surgery.elapsed==0)
     assert(advance(179).surgery.elapsed==179 and health.hp==0.9)
     local kit=held
     assert(not tick().surgery and not EntityGetIsAlive(kit) and health.hp==8.9)
@@ -1724,3 +1732,121 @@ local function testSurgeryFromWorkshop()
 end
 testSurgeryFromWorkshop()
 print("Controller: craft, withdraw, interrupt and complete surgery through the normal game callbacks.")
+
+local function testInventoryRightClick()
+    settings,flags={},{}
+    new_world()
+    local saved=state()
+    local function stock(container,slot,kind,count,remaining)
+        local id=saved.nextItemId
+        saved.nextItemId=id+1
+        table.insert(saved[container],{slot=slot,id=id,item={kind=kind,count=count,remaining=remaining}})
+        return {container=container,slot=slot,storedId=id,kind=kind,count=count,remaining=remaining}
+    end
+    local bandage=stock("warehouse",1,"bandage",8)
+    local secure=stock("safe",1,"bandage",3)
+    local carried=stock("warehouse",2,"medkit",nil,2)
+    local kit=stock("warehouse",3,"field_surgery_kit",nil,1)
+    local grenade=stock("warehouse",4,"fire_grenade",8)
+    local movedKit=stock("warehouse",5,"field_surgery_kit",nil,1)
+    local function stored(ref)
+        local s=state()
+        local index=NHStore.slotIndex(s,ref.container,ref.slot,ref.kind)
+        return index and s[ref.container][index].item
+    end
+    local function right(ref)
+        tick()
+        tick(nil,"use_inventory",ref,"right")
+    end
+    local function withdraw(ref,xslot)
+        tick(nil,"secure_withdraw",{container=ref.container,kind=ref.kind,storedId=ref.storedId,safeSlot=ref.slot,
+            parent=quick,lane="tool",xslot=xslot,yslot=0})
+        for _,slot in ipairs(tick().native_slots) do
+            if slot.kind==ref.kind and slot.xslot==xslot then
+                slot.container="native"
+                return slot
+            end
+        end
+        error("Failed to withdraw "..ref.kind)
+    end
+    assert(NHStore.commit(saved))
+    boot()
+    local health=EntityAddComponent2(player,"DamageModelComponent",{hp=40,max_hp=40})
+    inventory_open=true
+    right(bandage)
+    assert(health.hp==40 and stored(bandage).count==8)
+    health.hp=1
+    fail_commit=true
+    right(bandage)
+    fail_commit=false
+    assert(health.hp==1 and stored(bandage).count==8)
+    advance(61)
+    right(bandage)
+    assert(health.hp==1.2 and stored(bandage).count==7)
+    right(bandage) -- The HUD still describes the eight-roll stack.
+    assert(health.hp==1.2 and stored(bandage).count==7)
+    right(secure)
+    assert(health.hp==1.4 and stored(secure).count==2)
+
+    local native=withdraw(carried,1)
+    local unused=EntityLoad("dummy.xml",227,-85)
+    EntityAddChild(quick,unused)
+    held=unused
+    health.hp=1
+    right(native)
+    local charges=EntityGetFirstComponentIncludingDisabled(native.entity,"ItemComponent")
+    assert(health.hp==1.4 and charges.uses_remaining==1 and held==unused)
+    ComponentSetValue2(charges,"inventory_slot",2,0)
+    right(native)
+    assert(health.hp==1.4 and charges.uses_remaining==1 and held==unused)
+
+    right(kit)
+    assert(tick().surgery and stored(kit).remaining==1)
+    EntitySetTransform(player,1000,-85)
+    assert(not tick().surgery and stored(kit).remaining==1 and health.hp==1.4)
+    EntitySetTransform(player,227,-85)
+    right(kit)
+    assert(advance(179).surgery.elapsed==179 and health.hp==1.4)
+    assert(not tick().surgery and not stored(kit) and health.hp==9.4 and held==unused)
+    right(movedKit)
+    assert(tick().surgery)
+    local movedNative=withdraw(movedKit,1)
+    assert(not tick().surgery and not stored(movedKit) and health.hp==9.4)
+    assert(EntityGetFirstComponentIncludingDisabled(movedNative.entity,"ItemComponent").uses_remaining==1)
+
+    local oldValue,oldLoad,oldShoot=ComponentGetValue2,EntityLoad,GameShootProjectile
+    local ax,ay,shots,shotEntity=-3,4,0,nil
+    function ComponentGetValue2(component,key)
+        if component==controls and key=="mAimingVectorNormalized" then return ax,ay end
+        return oldValue(component,key)
+    end
+    function EntityLoad(path,x,y)
+        local entity=oldLoad(path,x,y)
+        if path==NHThrowables.types.fire_grenade.projectile then
+            EntityAddComponent2(entity,"ProjectileComponent",{})
+            EntityAddComponent2(entity,"VelocityComponent",{})
+            shotEntity=entity
+        end
+        return entity
+    end
+    function GameShootProjectile(shooter,x,y,targetX,targetY,entity)
+        assert(shooter==player and entity==shotEntity)
+        assert(math.abs(targetX-x+108)<0.001 and math.abs(targetY-y-144)<0.001)
+        shots=shots+1
+    end
+    inventory_open=false
+    tick()
+    tick()
+    inventory_open=true
+    ax,ay=1,0
+    fail_commit=true
+    right(grenade)
+    fail_commit=false
+    assert(shotEntity and not EntityGetIsAlive(shotEntity) and shots==0 and stored(grenade).count==8)
+    advance(61)
+    right(grenade)
+    assert(shots==1 and stored(grenade).count==7 and held==unused)
+    ComponentGetValue2,EntityLoad,GameShootProjectile=oldValue,oldLoad,oldShoot
+end
+testInventoryRightClick()
+print("Controller: right-click uses the exact stored or carried item, respects payment, and retains world aim.")

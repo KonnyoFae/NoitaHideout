@@ -7,6 +7,7 @@ dofile("mods/noita_hideout/files/card_wallets.lua")
 NHInjectors=dofile("mods/noita_hideout/files/injectors.lua")
 NHMedkits=dofile("mods/noita_hideout/files/medkits.lua")
 NHSurgeryKits=dofile("mods/noita_hideout/files/surgery_kits.lua")
+NHThrowables=dofile("mods/noita_hideout/files/throwables.lua")
 dofile("mods/noita_hideout/files/farming.lua")
 dofile("mods/noita_hideout/files/essences.lua")
 dofile("mods/noita_hideout/files/pouches.lua")
@@ -191,25 +192,27 @@ local function validate(s)
     assert(type(s.materials)=="table" and type(s.docks)=="table","Invalid bulk storage")
     progression.validate(s,whole)
     NHFarm.validate(s,whole)
-    local function validateMedicalItem(item)
+    local function validateConsumable(item)
         if NHMedkits.types[item.kind] then
             assert(NHMedkits.validUses(item.kind,NHMedkits.remaining(item)) and (item.count==nil or item.count==1),"Invalid medkit.")
         elseif NHSurgeryKits.types[item.kind] then
             assert(item.remaining==NHSurgeryKits.types[item.kind].uses and (item.count==nil or item.count==1),"Invalid surgery kit.")
         elseif item.kind=="bandage" and item.count~=nil then
             assert(NHStore.validBandageCount(item.count),"Invalid bandage count.")
+        elseif NHThrowables.types[item.kind] then
+            assert(NHThrowables.validCount(NHThrowables.count(item)),"Invalid throwable count.")
         end
     end
     for _,rows in ipairs({s.safe,s.warehouse}) do
         for _,row in ipairs(rows) do
             if row.item.kind=="card_wallet" then assert(NHCardWallets.valid(row.item),"Invalid card wallet") end
-            validateMedicalItem(row.item)
+            validateConsumable(row.item)
         end
     end
     if s.transit then
         for _,release in pairs(s.transit.issued) do
             if release.row.item.kind=="card_wallet" then assert(NHCardWallets.valid(release.row.item),"Invalid issued card wallet") end
-            validateMedicalItem(release.row.item)
+            validateConsumable(release.row.item)
         end
     end
     for name,amount in pairs(s.materials) do
@@ -260,7 +263,7 @@ local function validate(s)
             and s.order.progress < s.order.required and type(s.order.output) == "table", "Invalid production order")
         local output=s.order.output
         if output.item then
-            validateMedicalItem(output.item)
+            validateConsumable(output.item)
             if output.item.kind=="dose" then
                 assert(validDose(output.item.remaining or NHStore.doseDurability,output.item.count or 1,output.item.subtype),"Invalid injector output")
             end
@@ -575,7 +578,6 @@ local function catalyticBatch(id,zh,en,ingredient,catalyst,product)
         materials={[product]=250},count=250}
 end
 
-local magicGrenade={kind="grenade",name="$nh_hideout_grenade",icon="mods/noita_hideout/files/items/grenade.png"}
 local function farmItem(kind)
     return {kind=kind,name="$nh_hideout_"..kind,icon="mods/noita_hideout/files/items/"..kind..".png"}
 end
@@ -642,8 +644,8 @@ NHStore.recipes={
     {id="field_medkit",category="medical",facility="medical",zh="小医疗包（绷带与草药）",en="Medkit (bandage and herbs)",durationFrames=medkit_frames,
         inputs={},resources={herb=2},storedIngredient="bandage",item=medkit,
         noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
-    NHMedkits.upgradeRecipe("tactical_medkit","medkit",4,105,60),
-    NHMedkits.upgradeRecipe("advanced_medkit","tactical_medkit",8,165,180),
+    NHMedkits.upgradeRecipe("tactical_medkit","medkit",4,2,60),
+    NHMedkits.upgradeRecipe("advanced_medkit","tactical_medkit",8,3,180),
     NHSurgeryKits.recipe("field_surgery_kit"),
     NHSurgeryKits.recipe("tactical_surgery_kit"),
     NHSurgeryKits.recipe("advanced_surgery_kit"),
@@ -651,11 +653,14 @@ NHStore.recipes={
     NHInjectors.recipe("lightning"),
     NHInjectors.recipe("frost"),
     NHInjectors.recipe("healing"),
-    {id="grenade",category="weapons",facility="grenade",zh="魔法手雷",en="Magic grenade",inputs={{name="sand",amount=100},{name="slime",amount=50}},
-        item=magicGrenade},
-    {id="grenade_essence",category="weapons",facility="grenade",zh="魔法手雷（高能精华）",en="Magic grenade (high-energy essence)",
-        inputs={},resources={essence_high_energy=30},item=magicGrenade,
-        noteZh="单次投掷，基础直击伤害 17.5，爆炸伤害 12.5。",noteEn="Single use. Base damage is 17.5 on impact and 12.5 from the explosion."},
+    NHThrowables.recipe("grenade",{{name="sand",amount=100},{name="slime",amount=50}}),
+    NHThrowables.recipe("grenade",nil,{essence_high_energy=6},"grenade_essence","魔法手雷（高能精华）","Magic grenade (high-energy essence)"),
+    NHThrowables.recipe("fire_grenade",nil,{essence_fire=6}),
+    NHThrowables.recipe("frost_grenade",nil,{essence_frost=6}),
+    NHThrowables.recipe("shock_grenade",nil,{essence_lightning=6}),
+    NHThrowables.recipe("sand_knife",{{name="sand",amount=80}}),
+    NHThrowables.recipe("metal_knife",{{name="metal_sand",amount=80,
+        alternatives={"metal_sand","steel_sand","copper","brass","silver"},labelZh="金属粉",labelEn="Metal powders"}}),
     {id="pouch",category="equipment",facility="injector",zh="空针剂包",en="Empty injector pouch",
         inputs={{name="slime",amount=50}},emptyContainers=1,item={kind="pouch"}},
     {id="card_wallet",category="equipment",facility="farmland",zh="空卡片夹",en="Empty card wallet",

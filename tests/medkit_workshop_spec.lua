@@ -9,8 +9,8 @@ dofile("mods/noita_hideout/files/potion.lua")
 local recipes={}
 for _,r in ipairs(NHStore.recipes) do recipes[r.id]=r end
 local tactical,advanced=recipes.tactical_medkit,recipes.advanced_medkit
-assert(tactical.storedIngredient=="medkit" and tactical.resources.herb==4 and tactical.resources.essence_healing==105)
-assert(advanced.storedIngredient=="tactical_medkit" and advanced.resources.herb==8 and advanced.resources.essence_healing==165)
+assert(tactical.storedIngredient=="medkit" and tactical.resources.herb==4 and tactical.resources.essence_healing==2)
+assert(advanced.storedIngredient=="tactical_medkit" and advanced.resources.herb==8 and advanced.resources.essence_healing==3)
 assert(tactical.item.remaining==9 and advanced.item.remaining==12)
 assert(NHStore.productionFrames(tactical)==60*60 and NHStore.productionFrames(advanced)==180*60)
 
@@ -58,7 +58,7 @@ oldest.item.remaining=1
 s.resources.herb=3
 assert(not NHStore.startOrder(s,tactical.id) and #s.warehouse==3 and s.resources.essence_healing==1000)
 s.resources.herb=50
-s.resources.essence_healing=104
+s.resources.essence_healing=1
 assert(not NHStore.startOrder(s,tactical.id) and #s.warehouse==3 and s.resources.herb==50)
 s.resources.essence_healing=1000
 for slot=1,NHStore.warehouseCapacity(s,"supplies") do
@@ -66,7 +66,7 @@ for slot=1,NHStore.warehouseCapacity(s,"supplies") do
 end
 assert(not NHStore.freeSlot(s,"warehouse",nil,"medkit"))
 assert(NHStore.startOrder(s,tactical.id) and not NHStore.startOrder(s,tactical.id))
-assert(s.order.output.slot==3 and s.resources.essence_healing==895 and s.resources.herb==46)
+assert(s.order.output.slot==3 and s.resources.essence_healing==998 and s.resources.herb==46)
 local first=deliver(3,3600)
 assert(first.kind=="tactical_medkit" and first.remaining==9 and s.safe[1].item.remaining==3)
 
@@ -76,7 +76,7 @@ first.remaining=1
 assert(NHStore.startOrder(s,advanced.id))
 local second=deliver(3,10800)
 assert(second.kind=="advanced_medkit" and second.remaining==12)
-assert(s.resources.herb==38 and s.resources.essence_healing==730)
+assert(s.resources.herb==38 and s.resources.essence_healing==995)
 assert(not NHStore.canStartBatch(s,advanced))
 
 second.remaining=0

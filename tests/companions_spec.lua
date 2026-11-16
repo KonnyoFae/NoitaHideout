@@ -200,6 +200,9 @@ rejectParent=true
 assert(not NHCompanions.use(player,held,"en") and not EntityGetIsAlive(spawned[#spawned]))
 rejectParent=false
 assert(adapter.capture(held).remaining==80 and EntityGetIsAlive(pet))
+local ok,err=NHCompanions.summon(player,"minotaur","en",function() return false,"Write failed." end)
+assert(not ok and err=="Write failed." and not EntityGetIsAlive(spawned[#spawned]))
+assert(EntityGetIsAlive(pet) and adapter.capture(held).remaining==80)
 assert(entities[pet].scaleX==0.5 and entities[pet].scaleY==0.5)
 assert(#EntityGetAllChildren(player,"noita_hideout_companion")==1)
 
@@ -274,3 +277,12 @@ assert(EntityGetIsAlive(vanilla) and EntityGetIsAlive(food))
 assert(NHCompanions.use(player,held,"en") and not EntityGetIsAlive(held))
 assert(not EntityGetIsAlive(replacement) and #EntityGetAllChildren(player,"noita_hideout_companion")==1)
 print("Summon rewards, card durability, replacement rollback, source-scoped auras, travel gifts and expiration passed.")
+
+local quick=create(0,0)
+entities[quick].parent=player
+function EntityGetName(id) return id==quick and "inventory_quick" or "" end
+local unequipped=assert(adapter.restore({kind="summon_card",species="dryad",remaining=80},0,0))
+open=true
+assert(not NHCompanions.use(player,unequipped,"en",true))
+entities[unequipped].parent=quick
+assert(NHCompanions.use(player,unequipped,"en",true) and adapter.capture(unequipped).remaining==79 and held~=unequipped)
