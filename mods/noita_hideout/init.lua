@@ -36,6 +36,7 @@ local function tr(zh, en)
 end
 
 local error_translations = {
+    ["Invalid bandage count."] = "绷带的剩余卷数无效。",
     ["Card wallet changed."] = "卡片夹已移动，请重新选择。",
     ["Card wallet slot unavailable."] = "卡片夹栏位已改变，或此格无法叠放该卡。",
     ["Invalid card wallet."] = "卡片夹记录无效。",
@@ -341,6 +342,7 @@ local function item_label(entry)
         local d=NHInjectors.get(item.subtype)
         return tr(d.zh,d.en)
     end
+    if item.kind=="bandage" then return translated(item.name) or tr("绷带","Bandage") end
     if item.kind == "spell" then
         local id=item.card.id
         local name=item.name and item.name:match("^%$action_") and translated(item.name)
@@ -362,7 +364,8 @@ local function stored_view(entry)
     return {id=entry.id,kind=item.kind,name=item_label(entry),potion=potion,
         icon=potion and NHPotion.inventoryIcon(potion) or (item.kind=="dose" and NHInjectors.get(item.subtype).icon)
             or item.icon or (item.sprite and item.sprite.image_file),
-        remaining=item.remaining,count=item.count,subtype=item.subtype,species=item.species,dockSlot=NHPotion.dockSlot(item)}
+        remaining=item.remaining,count=item.count or (item.kind=="bandage" and 1 or nil),
+        subtype=item.subtype,species=item.species,dockSlot=NHPotion.dockSlot(item)}
 end
 
 local function pouch_name(id)

@@ -25,7 +25,7 @@ function NHNative.registerTranslations()
         {"nh_hideout_medkit","Medkit","医疗包"},
         {"nh_hideout_medkit_desc","Three uses. Each use restores up to 10 HP.","可使用三次，每次最多恢复 10 点生命。"},
         {"nh_hideout_bandage","Bandage","绷带"},
-        {"nh_hideout_bandage_desc","Single use. Restores up to 5 HP.","单次使用，最多恢复 5 点生命。"},
+        {"nh_hideout_bandage_desc","Each roll restores up to 5 HP. The counter shows rolls left.","每卷最多恢复 5 点生命，数字为剩余卷数。"},
         {"nh_hideout_food_regen","Food regeneration","食物再生"},
         {"nh_hideout_food_regen_desc","Restores 1 HP every 4 seconds.","每 4 秒恢复 1 点生命。"},
         {"nh_hideout_grenade","Magic grenade","魔法手雷"},

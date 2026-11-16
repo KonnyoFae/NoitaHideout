@@ -24,7 +24,8 @@ NHStore.maxMaterialAmount = max_safe_integer
 NHStore.maxResourceAmount = max_safe_integer
 
 function NHStore.productionFrames(recipe)
-    return (recipe and recipe.durationFrames) or 2 * 60 * 60
+    local frames=(recipe and recipe.durationFrames) or 2 * 60 * 60
+    return math.min(frames, 3 * 60 * 60)
 end
 
 local function fresh(profile)
@@ -41,6 +42,11 @@ end
 
 local function whole(n)
     return type(n) == "number" and n >= 0 and n <= max_safe_integer and n == math.floor(n)
+end
+
+function NHStore.validBandageCount(n)
+    -- The physical item stores the rolls in ItemComponent.uses_remaining (int32).
+    return whole(n) and n>=1 and n<=2147483647
 end
 
 -- Mutate the same detached profile draft as the transfer or shop purchase.
@@ -183,14 +189,19 @@ local function validate(s)
     assert(type(s.materials)=="table" and type(s.docks)=="table","Invalid bulk storage")
     progression.validate(s,whole)
     NHFarm.validate(s,whole)
+    local function validateBandage(item)
+        if item.kind=="bandage" and item.count~=nil then assert(NHStore.validBandageCount(item.count),"Invalid bandage count.") end
+    end
     for _,rows in ipairs({s.safe,s.warehouse}) do
         for _,row in ipairs(rows) do
             if row.item.kind=="card_wallet" then assert(NHCardWallets.valid(row.item),"Invalid card wallet") end
+            validateBandage(row.item)
         end
     end
     if s.transit then
         for _,release in pairs(s.transit.issued) do
             if release.row.item.kind=="card_wallet" then assert(NHCardWallets.valid(release.row.item),"Invalid issued card wallet") end
+            validateBandage(release.row.item)
         end
     end
     for name,amount in pairs(s.materials) do
@@ -241,6 +252,7 @@ local function validate(s)
             and s.order.progress < s.order.required and type(s.order.output) == "table", "Invalid production order")
         local output=s.order.output
         if output.item then
+            validateBandage(output.item)
             if output.item.kind=="dose" then
                 assert(validDose(output.item.remaining or NHStore.doseDurability,output.item.count or 1,output.item.subtype),"Invalid injector output")
             end
@@ -560,6 +572,9 @@ local function farmItem(kind)
     return {kind=kind,name="$nh_hideout_"..kind,icon="mods/noita_hideout/files/items/"..kind..".png"}
 end
 local medkit={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"}
+local medkit_frames=5 * 60
+local bandage_bundle=farmItem("bandage")
+bandage_bundle.count=8
 
 -- Inputs and the paid order are committed together. Only loose stock is spendable.
 NHStore.recipes={
@@ -610,13 +625,13 @@ NHStore.recipes={
         inputs={{name="radioactive_liquid",amount=250},{name="blood_worm",amount=250},{name="fungi",amount=250}},
         materials={void_liquid=500},count=500,
         noteZh="原版列出两份液体产物，每批回收 500。",noteEn="The vanilla reaction yields two parts of liquid. This batch recovers 500."},
-    {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",
+    {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",durationFrames=medkit_frames,
         inputs={{name="water",amount=100},{name="blood",amount=50}},item=medkit,
         noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
-    {id="bandage",category="medical",facility="medical",zh="绷带",en="Bandage",
-        inputs={},resources={fiber=2,sugar=1},item=farmItem("bandage"),
-        noteZh="单次使用，最多恢复 5 生命。",noteEn="Single use. Restores up to 5 HP."},
-    {id="field_medkit",category="medical",facility="medical",zh="小医疗包（绷带与草药）",en="Medkit (bandage and herbs)",
+    {id="bandage",category="medical",facility="medical",zh="绷带",en="Bandage",durationFrames=3 * 60,
+        inputs={},resources={fiber=4,sugar=2},item=bandage_bundle,count=bandage_bundle.count,
+        noteZh="每用一卷最多恢复 5 生命。",noteEn="Each roll restores up to 5 HP."},
+    {id="field_medkit",category="medical",facility="medical",zh="小医疗包（绷带与草药）",en="Medkit (bandage and herbs)",durationFrames=medkit_frames,
         inputs={},resources={herb=2},storedIngredient="bandage",item=medkit,
         noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
     NHInjectors.recipe("fire"),
@@ -821,12 +836,16 @@ local function batchPayment(stock,inputs,held,freeSlots)
 end
 
 function NHStore.warehouseIngredientCount(state,kind)
-    local count,firstIndex,firstSlot=0,nil,nil
+    local count,firstIndex,firstSlot,smallest=0,nil,nil,nil
     for i,row in ipairs(state.warehouse) do
         if row.item.kind==kind then
-            count=count+1
+            local rolls=row.item.count or 1
+            count=count+rolls
             local slot=row.slot or i
-            if not firstSlot or slot<firstSlot then firstIndex,firstSlot=i,slot end
+            -- Finish the smallest bundle first so its last roll can free a product slot.
+            if not smallest or rolls<smallest or (rolls==smallest and slot<firstSlot) then
+                firstIndex,firstSlot,smallest=i,slot,rolls
+            end
         end
     end
     return count,firstIndex
@@ -863,8 +882,9 @@ function NHStore.canStartBatch(state,recipe)
             local count
             count,ingredientIndex=NHStore.warehouseIngredientCount(state,recipe.storedIngredient)
             if count==0 then return false,"Missing stored ingredient." end
-            if NHStore.category(recipe.storedIngredient)==NHStore.category(recipe.item.kind) then
-                slot=state.warehouse[ingredientIndex].slot or ingredientIndex
+            local row=state.warehouse[ingredientIndex]
+            if (row.item.count or 1)==1 and NHStore.category(recipe.storedIngredient)==NHStore.category(recipe.item.kind) then
+                slot=row.slot or ingredientIndex
             end
         end
         slot=slot or NHStore.freeSlot(state,"warehouse",nil,recipe.item.kind)
@@ -897,7 +917,11 @@ function NHStore.startOrder(state,id)
     end
     -- The paid order owns its item, including a spell's nested native card fields.
     local output={item=recipe.item and decode(encode(recipe.item)),slot=slot,materials=delivery}
-    if ingredientIndex then table.remove(state.warehouse,ingredientIndex) end
+    if ingredientIndex then
+        local item=state.warehouse[ingredientIndex].item
+        if (item.count or 1)>1 then item.count=item.count-1
+        else table.remove(state.warehouse,ingredientIndex) end
+    end
     deductStock(state.materials,payment)
     if recipe.resources then deductStock(state.resources,recipe.resources) end
     state.order={id=state.finished+1,recipe=recipe.id,progress=0,required=NHStore.productionFrames(recipe),output=output,catalysts=held}

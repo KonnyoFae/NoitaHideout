@@ -16,7 +16,7 @@ function EntityLoad(path,x,y)
     local kind=path:match("^mods/noita_hideout/files/items/(%w[%w_]*)%.xml$")
     if kind then
         e.tag="noita_hideout_"..kind
-        e.ItemComponent={uses_remaining=path==medpath and 3 or -1}
+        e.ItemComponent={uses_remaining=path==medpath and 3 or kind=="bandage" and 1 or -1}
     elseif path=="mods/noita_hideout/files/effect_bread.xml" then
         e.tag="noita_hideout_effect_bread"
         e.VariableStorageComponent={value_int=120}
@@ -69,6 +69,7 @@ function GameShootProjectile(owner,x,y,target_x,target_y,entity)
     last_shot={x=x,y=y,target_x=target_x,target_y=target_y,id=entity}
     -- The game returns no value.
 end
+dofile("mods/noita_hideout/files/store.lua")
 dofile("mods/noita_hideout/files/products.lua")
 local medical=adapters.medkit.adapter
 selected=assert(medical.restore({kind="medkit"},0,0))
@@ -136,10 +137,33 @@ local function select_product(kind)
     return selected
 end
 local bandage=select_product("bandage")
+local rolls=adapters.bandage.adapter
+assert(rolls.capture(bandage).count==1)
+entities[bandage].ItemComponent.uses_remaining=-1
+assert(rolls.capture(bandage).count==1,"an old physical bandage represents one roll")
 health.hp=health.max_hp
 assert(not NHProducts.use(player,bandage) and entities[bandage])
 health.hp=0.5
 assert(NHProducts.use(player,bandage) and math.abs(health.hp-0.7)<1e-8 and not entities[bandage])
+
+local bundle=assert(rolls.restore({kind="bandage",count=8},1,2))
+selected=bundle
+health.hp=health.max_hp
+assert(not NHProducts.use(player,bundle) and rolls.capture(bundle).count==8)
+health.hp,health.max_hp=1,10
+assert(NHProducts.use(player,bundle) and math.abs(health.hp-1.2)<1e-8)
+local partial=assert(rolls.capture(bundle))
+assert(partial.count==7 and entities[bundle].ItemComponent.uses_remaining==7)
+EntityKill(bundle)
+bundle=assert(rolls.restore(partial,3,4))
+selected=bundle
+for n=7,1,-1 do
+    assert(rolls.capture(bundle).count==n and NHProducts.use(player,bundle))
+end
+assert(not entities[bundle] and math.abs(health.hp-2.6)<1e-8)
+for _,bad in ipairs({0,-1,1.5,2147483648,"8",false}) do
+    assert(not rolls.restore({count=bad},0,0))
+end
 
 local bread=select_product("bread")
 failed_path="mods/noita_hideout/files/effect_bread.xml"

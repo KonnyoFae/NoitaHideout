@@ -186,7 +186,7 @@ local profile={safeCapacity=2,levels={},materials={water=500,sand=350,soil=150,s
 model.progression=NHStore.progressMenu(profile,"en")
 model.recipes={
     {id="stable",category="alchemy",alchemyMode="synthesis",name="Teleportatium",output=500,duration=120,ready=true,inputs={{name="Slime",available=300,amount=250}}},
-    {id="medical",category="medical",name="Medkit",output=1,duration=90,ready=true,inputs={{name="Slime",available=300,amount=100}}},
+    {id="medical",category="medical",name="Medkit",output=1,duration=5,ready=true,inputs={{name="Slime",available=300,amount=100}}},
     {id="injector",category="medical",name="Fire injector",output=1,duration=120,ready=false,reason="Need stock",inputs={}},
     {id="grenade",category="weapons",name="Magic grenade",output=1,duration=120,ready=false,unlocked=false,reason="Build the station",inputs={}},
     {id="pouch",category="equipment",name="Injector pouch",output=1,duration=120,ready=true,
@@ -589,7 +589,7 @@ assert(not render(model,214) and drawn["Need stock"])
 render(model,240)
 render(model,244)
 action,param=render(model,214)
-assert(action=="craft" and param.id=="medical")
+assert(action=="craft" and param.id=="medical" and drawn["0:05"])
 do
     local recipe={id="injector_essence",category="medical",name="Fire injector (fire essence)",output=1,duration=120,
         ready=false,reason="Not enough workshop resources.",inputs={{name="Fire essence",available=179,amount=180}}}
@@ -1342,3 +1342,38 @@ end
 testSpellRecipes("zh",320,180)
 testSpellRecipes("en",640,360)
 print("UI: spell family navigation, localized card identities, warehouse colors and crafting passed.")
+
+local function testBandageBatchDisplay()
+    width,height,model.lang=640,360,"zh"
+    model.capacity,model.perkCapacity,model.popup,model.near=2,0,false,true
+    local function bandages(id,count)
+        return {id=id,name="绷带",kind="bandage",icon="mods/noita_hideout/files/items/bandage.png",count=count}
+    end
+    model.secure_loot={bandages(1,5)}
+    model.warehouse.supplies={bandages(2,8),bandages(3)}
+    render(model,78)
+    render(model)
+    assert(drawn["×8"] and drawn["×5"] and not drawn["×1"])
+    for tile,title in pairs({[1001]="绷带 ×5",[1003]="绷带 ×8",[1004]="绷带"}) do
+        point(tiles[tile].x+1,tiles[tile].y+1)
+        assert(drawn[title])
+    end
+
+    model.recipes={
+        {id="bandage",name="绷带",category="medical",output=8,duration=3,ready=true,
+            inputs={{name="纤维",amount=4,available=4},{name="糖分",amount=2,available=2}}},
+        {id="field_medkit",name="小医疗包",category="medical",output=1,duration=5,ready=true,
+            inputs={{name="绷带",amount=1,available=9},{name="草药",amount=2,available=2}}}
+    }
+    pointer={x=0,y=0}
+    render(model,212)
+    render(model,251)
+    render(model,244)
+    render(model)
+    assert(drawn["绷带 ×8"] and drawn["0:03"] and drawn["4 / 4"] and drawn["2 / 2"])
+    render(model,240)
+    render(model,245)
+    render(model)
+    assert(drawn["小医疗包 ×1"] and drawn["0:05"] and drawn["9 / 1"])
+end
+testBandageBatchDisplay()

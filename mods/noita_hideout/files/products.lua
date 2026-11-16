@@ -1,8 +1,19 @@
 -- Physical workshop products use the same capture/restore journal as ordinary equipment.
 NHProducts={}
 local items="mods/noita_hideout/files/items/"
-local function valid_uses(n)
+local function valid_medkit_uses(n)
     return type(n)=="number" and n>=1 and n<=3 and n==math.floor(n)
+end
+local healing_items={
+    medkit={field="remaining",default=3,valid=valid_medkit_uses,heal=0.4,error="Invalid medkit."},
+    bandage={field="count",default=1,valid=NHStore.validBandageCount,heal=0.2,error="Invalid bandage count."},
+}
+local function healing_uses(entity,product)
+    local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
+    local uses=item and ComponentGetValue2(item,"uses_remaining")
+    -- Single rolls created before bundles used the native default of -1.
+    if uses==-1 and product==healing_items.bandage then uses=1 end
+    return item,uses
 end
 
 local foods=dofile("mods/noita_hideout/files/cooking.lua")
@@ -10,24 +21,30 @@ local products={"medkit","grenade","bandage"}
 for _,food in ipairs(foods) do products[#products+1]=food.id end
 for _,kind in ipairs(products) do
     local id=kind
+    local product=healing_items[id]
     NHTransfers.registerItem(id,function(entity) return EntityHasTag(entity,"noita_hideout_"..id) end,{
         capture=function(entity)
             local record={kind=id,name="$nh_hideout_"..id,icon=items..id..".png"}
-            if id=="medkit" then
-                local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
-                record.remaining=item and ComponentGetValue2(item,"uses_remaining")
-                if not valid_uses(record.remaining) then return nil,"Invalid medkit." end
+            if product then
+                local _,uses=healing_uses(entity,product)
+                if not product.valid(uses) then return nil,product.error end
+                record[product.field]=uses
             end
             return record
         end,
         restore=function(record,x,y)
-            if id=="medkit" and record.remaining~=nil and not valid_uses(record.remaining) then return nil,"Invalid medkit." end
+            local uses
+            if product then
+                uses=record[product.field]
+                if uses==nil then uses=product.default end
+                if not product.valid(uses) then return nil,product.error end
+            end
             local entity=EntityLoad(items..id..".xml",x,y)
             if not entity or entity==0 then return nil,"Item could not be created." end
-            if id=="medkit" then
+            if product then
                 local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
-                if not item then EntityKill(entity); return nil,"Invalid medkit." end
-                ComponentSetValue2(item,"uses_remaining",record.remaining or 3)
+                if not item then EntityKill(entity); return nil,product.error end
+                ComponentSetValue2(item,"uses_remaining",uses)
             end
             return entity
         end,
@@ -73,16 +90,13 @@ end
 
 function NHProducts.use(player,entity)
     if not entity or GameIsInventoryOpen() or NHNative.held(player)~=entity then return end
-    if EntityHasTag(entity,"noita_hideout_medkit") then
-        local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
-        local uses=item and ComponentGetValue2(item,"uses_remaining")
-        if not valid_uses(uses) or not heal(player,0.4) then return end
+    local product=EntityHasTag(entity,"noita_hideout_medkit") and healing_items.medkit
+        or EntityHasTag(entity,"noita_hideout_bandage") and healing_items.bandage
+    if product then
+        local item,uses=healing_uses(entity,product)
+        if not product.valid(uses) or not heal(player,product.heal) then return end
         if uses==1 then GameKillInventoryItem(player,entity)
         else ComponentSetValue2(item,"uses_remaining",uses-1) end
-        return true
-    elseif EntityHasTag(entity,"noita_hideout_bandage") then
-        if not heal(player,0.2) then return end
-        GameKillInventoryItem(player,entity)
         return true
     elseif EntityHasTag(entity,"noita_hideout_grenade") then
         local controls=EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")

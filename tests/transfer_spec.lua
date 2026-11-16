@@ -271,3 +271,25 @@ assert(NHCompanions.moveCard(cards,"safe",1,"warehouse",1,cards.safe[1].id))
 assert(NHCompanions.moveCard(cards,"warehouse",5,"warehouse",6,cards.warehouse[NHStore.slotIndex(cards,"warehouse",5,"summon_card")].id))
 assert(cards.warehouse[NHStore.slotIndex(cards,"warehouse",6,"summon_card")].item.remaining==79)
 print("Summon cards: single withdrawals, same-species merges, partial charges, failed writes, rewind and secure storage passed.")
+
+dofile("mods/noita_hideout/files/products.lua")
+function EntityLoad(path)
+    assert(path=="mods/noita_hideout/files/items/bandage.xml")
+    local id=make("noita_hideout_bandage",false)
+    entities[id].item={uses_remaining=1}
+    return id
+end
+local bundles=state()
+bundles.warehouse[1]={id=1,slot=1,item={kind="bandage",count=8}}
+bundles.nextItemId=2
+local ok,bundle=NHTransfers.withdraw(bundles,player,1,"warehouse")
+assert(ok and #bundles.warehouse==0 and entities[bundle].item.uses_remaining==8)
+pick(bundle)
+entities[bundle].item.uses_remaining=7
+assert(NHTransfers.deposit(bundles,player,"safe",bundle,1))
+assert(#bundles.safe==1 and bundles.safe[1].item.count==7 and not EntityGetIsAlive(bundle))
+ok,bundle=NHTransfers.withdraw(bundles,player,1,"safe")
+assert(ok and #bundles.safe==0 and entities[bundle].item.uses_remaining==7)
+pick(bundle)
+assert(NHTransfers.deposit(bundles,player,"warehouse",bundle,1) and bundles.warehouse[1].item.count==7)
+print("Bandages: whole bundles retain their roll count through the quickbar, secure case and warehouse.")

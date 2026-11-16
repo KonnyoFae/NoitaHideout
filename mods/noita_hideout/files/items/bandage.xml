@@ -2,7 +2,7 @@
     <Base file="mods/noita_hideout/files/items/base.xml">
         <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/bandage.png" />
         <SpriteComponent image_file="mods/noita_hideout/files/items/bandage.png" offset_x="6" offset_y="4" />
-        <ItemComponent item_name="$nh_hideout_bandage" ui_description="$nh_hideout_bandage_desc"
+        <ItemComponent item_name="$nh_hideout_bandage" uses_remaining="1" ui_description="$nh_hideout_bandage_desc"
             ui_sprite="mods/noita_hideout/files/items/bandage.png" />
         <UIInfoComponent name="$nh_hideout_bandage" />
         <AbilityComponent ui_name="$nh_hideout_bandage" />

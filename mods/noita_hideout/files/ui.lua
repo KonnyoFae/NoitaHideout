@@ -197,6 +197,9 @@ local function item_details(slot,model,tr)
         return {tr(d.zh,d.en),tr("耐久 ","Durability ")..(slot.remaining or model.maxUses).."/"..model.maxUses
             ..tr("   数量 ","   Count ")..(slot.count or 1),tr(d.zhEffect,d.enEffect)}
     end
+    if slot.kind=="bandage" and (slot.count or 1)>1 then
+        return {slot.name.." ×"..string.format("%.0f",slot.count)}
+    end
     return {slot.name or slot.kind}
 end
 
@@ -1285,11 +1288,16 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         if v.kind=="reserved" then GuiText(gui,v.x+5*scale,v.y+3*scale,"...",scale)
         elseif v.kind then sprite(v,2000+i,v.x+qw*scale/2,v.y+qh*scale/2,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and source.perkSlot==v.perkSlot and 0.35 or 1)
         end
-        if v.kind=="dose" or v.kind=="summon_card" then
+        local caption
+        if v.kind=="bandage" and (v.count or 1)>1 then
+            caption="×"..compact(v.count)
+        elseif v.kind=="dose" or v.kind=="summon_card" then
             local durability=v.kind=="summon_card" and NHCompanions.durability or model.maxUses
             local remaining=v.remaining or durability
             local quantity=(v.kind=="summon_card" and compact(v.count or 1)) or v.count
-            local caption=(v.count or 1)>1 and ("×"..quantity) or (remaining.."/"..durability)
+            caption=(v.count or 1)>1 and ("×"..quantity) or (remaining.."/"..durability)
+        end
+        if caption then
             GuiZSetForNextWidget(gui,-84)
             GuiText(gui,v.x,v.y+(v.key=="warehouse" and qh-7 or qh-1)*scale,caption,0.8*scale)
         end
