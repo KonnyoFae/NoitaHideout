@@ -23,6 +23,9 @@ local function save(s)
 end
 
 local function starter(s) return s.pouches[s.starterPouchId] end
+local function advance(s,run,progress,checkpoint)
+    return NHStore.advanceProduction(s,{run=run,orderId=s.order and s.order.id or false,progress=progress,checkpoint=checkpoint})
+end
 
 local state = load()
 assert(state.profile == 1 and state.revision == 0)
@@ -35,7 +38,7 @@ state = save(state)
 assert(starter(state).doses == 1)
 assert(NHStore.endRun(state, first))
 assert(not NHStore.endRun(state, first))
-assert(not NHStore.reward(state, first))
+assert(not advance(state,first,100,"mountain-1"))
 state = save(state)
 assert(state.closedThrough == first and starter(state).doses == 1)
 assert(#state.safe == 1 and state.safe[1].item.name == "Varpuluuta")
@@ -54,8 +57,8 @@ assert(not starter(state))
 state = save(state)
 
 local fourth = NHStore.newRun(state)
-assert(NHStore.reward(state, fourth))
-assert(not NHStore.reward(state, fourth))
+assert(advance(state,fourth,0,"mountain-1"))
+assert(not advance(state,fourth,0,"mountain-1"))
 assert(not NHStore.startOrder(state))
 local potion = {kind = "potion", materials = {
     magic_liquid_unstable_teleportation = 250, slime = 250, water = 20
@@ -67,18 +70,21 @@ state.materials={magic_liquid_unstable_teleportation=300,slime=250,water=20,magi
 assert(NHStore.startOrder(state))
 assert(state.materials.magic_liquid_unstable_teleportation==50 and state.materials.slime==nil)
 assert(potion.materials.slime==250 and not NHStore.startOrder(state))
-assert(not NHStore.reward(state, fourth))  -- Cannot spend a prior empty clear.
+assert(not advance(state,fourth,0,"mountain-1")) -- An empty arrival cannot fund a later order.
+assert(advance(state,fourth,20) and state.order.progress==20)
+assert(not advance(state,fourth,20))
 state = save(state)
 assert(state.order and state.finished == 0 and #state.warehouse == 1)
 local fifth = NHStore.newRun(state)
 assert(NHStore.endRun(state, fifth))
-assert(not NHStore.reward(state, fifth) and state.order)
+assert(not advance(state,fifth,state.order.required) and state.order.progress==20)
 local sixth = NHStore.newRun(state)
-assert(NHStore.reward(state, sixth))
+assert(advance(state,sixth,20,"mountain-1") and state.order.progress==20+NHStore.checkpointFrames)
+assert(advance(state,sixth,state.order.required))
 state = save(state)
 assert(state.finished == 1 and not state.order and #state.warehouse == 1)
 assert(state.materials.magic_liquid_teleportation == 512 and state.materials.water==20)
-assert(not NHStore.reward(state, sixth))
+assert(not advance(state,sixth,1))
 assert(state.warehouse[1].item.materials.water == 20)
 
 local stale = load()
@@ -98,13 +104,47 @@ separate.materials.slime=350
 assert(NHStore.startOrder(separate))
 assert(separate.materials[unstable]==80 and separate.materials.slime==100)
 assert(not NHStore.startOrder(separate))
-assert(NHStore.reward(separate,1) and #separate.warehouse==0)
+assert(advance(separate,1,separate.order.required) and #separate.warehouse==0)
 assert(separate.materials.magic_liquid_teleportation==500)
 separate = save(separate)
 selected = 1
 state = load()
 assert(state.runSerial == sixth and #state.warehouse == 1)
 assert(not NHStore.commit(separate))
+
+-- A checkpoint receipt, timer progress and delivery share one commit. Retry
+-- the same absolute target after a rejected write, reload, and once a new
+-- batch is running in the same world.
+state.materials[unstable],state.materials.slime=500,500
+assert(NHStore.startOrder(state))
+state=save(state)
+local first_tick={run=sixth,orderId=state.order.id,progress=60,checkpoint="mountain-2"}
+assert(NHStore.advanceProduction(state,first_tick))
+blocked_key,blocked_value="noita_hideout.p1_revision",state.revision+1
+assert(not NHStore.commit(state))
+blocked_key=nil
+state=load()
+assert(not state.checkpoints["mountain-2"] and state.order.progress==0)
+assert(NHStore.advanceProduction(state,first_tick))
+state=save(state)
+assert(state.order.progress==NHStore.checkpointFrames+60 and not NHStore.advanceProduction(state,first_tick))
+local delivery={run=sixth,orderId=state.order.id,progress=state.order.progress,checkpoint="mountain-3"}
+local before,stock=state.finished,state.materials.magic_liquid_teleportation
+local changed,finished=NHStore.advanceProduction(state,delivery)
+assert(changed and finished)
+blocked_key,blocked_value="noita_hideout.p1_revision",state.revision+1
+assert(not NHStore.commit(state))
+blocked_key=nil
+state=load()
+assert(state.order and not state.checkpoints["mountain-3"] and state.materials.magic_liquid_teleportation==stock)
+assert(NHStore.advanceProduction(state,delivery))
+state=save(state)
+assert(state.materials.magic_liquid_teleportation==stock+500 and state.finished==before+1)
+assert(NHStore.startOrder(state))
+assert(not NHStore.advanceProduction(state,delivery) and state.order.progress==0)
+assert(not advance(state,sixth,0,"mountain-3"))
+assert(advance(state,sixth,state.order.required) and state.finished==before+2)
+state=save(state)
 
 -- One corrupt redundant older copy is harmless. Losing the current committed
 -- revision must lock the store instead of reissuing the previous inventory.

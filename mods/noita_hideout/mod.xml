@@ -1,3 +1,3 @@
 <Mod name="Hideout Prototype | 藏身处测试版"
-     description="0.12.0 | Open your inventory near spawn to use the hideout. Craft empty injector pouches in the equipment workshop. Each pouch stores its own injectors. Reuse empty material containers for crafting, warehouse expansion and salvage."
+     description="0.13.0 | Open your inventory near spawn to use the hideout. Workshop orders run while you play. Reaching a new Holy Mountain speeds up your active order. Reverse alchemy returns materials to storage."
      request_no_api_restrictions="0" />

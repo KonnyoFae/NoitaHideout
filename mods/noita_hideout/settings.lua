@@ -5,8 +5,8 @@ mod_settings_version = 1
 mod_settings = {
     {
         id = "test_tools",
-        ui_name = "测试物资与模拟通关 / Playtest tools",
-        ui_description = "在出生点生成样品、重发针剂包或模拟本局唯一一次通关奖励。",
+        ui_name = "测试物资 / Test supplies",
+        ui_description = "在出生点生成测试魔杖和混合瓶，或重发起始测试针剂包。",
         value_default = true,
         scope = MOD_SETTING_SCOPE_RUNTIME,
     },

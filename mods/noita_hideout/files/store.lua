@@ -11,11 +11,16 @@ local cached_profile
 
 NHStore.pouchCapacity = 4
 NHStore.doseDurability = 3
+NHStore.checkpointFrames = 60 * 60
+
+function NHStore.productionFrames(recipe)
+    return (recipe and recipe.durationFrames) or 2 * 60 * 60
+end
 
 local function fresh(profile)
     local s={
         version = 1, profile = profile, revision = 0,
-        runSerial = 0, rewardedThrough = 0, closedThrough = 0,
+        runSerial = 0, closedThrough = 0, checkpoints = {},
         nextItemId = 1, materials = {}, docks = {}, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true,
         pouches = {},
         order = false, finished = 0, levels = {}, storageBase = {}, resources = {},
@@ -135,11 +140,15 @@ end
 
 local function validate(s)
     assert(type(s) == "table" and s.version == 1, "Unknown profile version")
-    for _, k in ipairs({"profile","revision","runSerial","rewardedThrough","closedThrough","nextItemId","finished"}) do
+    for _, k in ipairs({"profile","revision","runSerial","closedThrough","nextItemId","finished"}) do
         assert(whole(s[k]), "Invalid profile field: " .. k)
     end
-    assert(s.profile >= 1 and s.rewardedThrough <= s.runSerial and s.closedThrough <= s.runSerial
+    assert(s.profile >= 1 and s.closedThrough <= s.runSerial
         and s.nextItemId >= 1, "Invalid profile counters")
+    assert(type(s.checkpoints)=="table","Invalid Holy Mountain checkpoints")
+    for key,visited in pairs(s.checkpoints) do
+        assert(type(key)=="string" and key~="" and visited==true,"Invalid Holy Mountain checkpoint")
+    end
     assert(type(s.warehouse) == "table" and type(s.safe) == "table", "Invalid inventory")
     assert(type(s.materials)=="table" and type(s.docks)=="table","Invalid bulk storage")
     progression.validate(s,whole)
@@ -184,7 +193,7 @@ local function validate(s)
         assert(validDose(record.remaining or NHStore.doseDurability,1),"Invalid issued injector")
     end
     if s.order ~= false then
-        assert(type(s.order) == "table" and whole(s.order.progress) and whole(s.order.required)
+        assert(type(s.order) == "table" and s.order.id==s.finished+1 and whole(s.order.progress) and whole(s.order.required)
             and s.order.progress < s.order.required and type(s.order.output) == "table", "Invalid production order")
         local output=s.order.output
         if output.item then
@@ -295,6 +304,20 @@ local function unpack_slot(raw)
     local payload = raw:sub(last + 1)
     assert(expected == checksum(payload), "Snapshot checksum mismatch")
     local s = decode(payload)
+    if s.checkpoints==nil then
+        -- The previous format counted one world clear per order. Keep its already
+        -- paid output and reservation while converting that unit into gameplay frames.
+        if s.order then
+            local order=s.order
+            assert(whole(order.required) and whole(order.progress) and order.progress<order.required,"Invalid legacy order")
+            local duration=NHStore.productionFrames()
+            order.id=s.finished+1
+            order.progress=math.floor(duration*order.progress/order.required)
+            order.required=duration
+        end
+        s.checkpoints={}
+        s.rewardedThrough=nil
+    end
     s.materials,s.docks=s.materials or {},s.docks or {}
     NHPouches.adopt(s)
     -- Old warehouse records had only a list order. Give them stable grid positions.
@@ -394,6 +417,7 @@ end
 function NHStore.newRun(state)
     NHStore.endRun(state, state.runSerial)
     state.runSerial = state.runSerial + 1
+    state.checkpoints = {}
     state.transit = nil
     state.issuedDoses = nil
     return state.runSerial
@@ -445,7 +469,7 @@ NHStore.restock=NHPouches.restock
 -- Inputs and the paid order are committed together. Only loose stock is spendable.
 NHStore.recipes={
     {id="stable",category="alchemy",zh="稳定传送液",en="Teleportatium",inputs={{name="magic_liquid_unstable_teleportation",amount=250},{name="slime",amount=250}},
-        materials={magic_liquid_teleportation=500},count=500},
+        materials={magic_liquid_teleportation=500},count=500,reversible=true},
     {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",inputs={{name="water",amount=100},{name="blood",amount=50}},
         item={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"}},
     {id="injector",category="medical",facility="injector",zh="耐火激活剂",en="Fire injector",inputs={{name="water",amount=100},{name="lava",amount=25}},
@@ -457,6 +481,32 @@ NHStore.recipes={
 }
 NHStore.recipe=NHStore.recipes[1]
 
+-- A reversible material recipe spends the entire original yield and returns
+-- exactly one batch of its original ingredients. Items are never disassembled here.
+local function reverseRecipe(recipe)
+    assert(recipe.category=="alchemy" and not recipe.item and not recipe.emptyContainers
+        and type(recipe.materials)=="table" and next(recipe.materials) and #recipe.inputs>0,
+        "Only bulk alchemy recipes can be reversed")
+    local inputs={}
+    for name,amount in pairs(recipe.materials) do
+        inputs[#inputs+1]={name=name,amount=amount}
+    end
+    table.sort(inputs,function(a,b) return a.name<b.name end)
+    local materials,count={},0
+    for _,input in ipairs(recipe.inputs) do
+        materials[input.name]=(materials[input.name] or 0)+input.amount
+        count=count+input.amount
+    end
+    return {id="reverse_"..recipe.id,reverseOf=recipe.id,category=recipe.category,facility=recipe.facility,
+        zh="分解"..recipe.zh,en="Decompose "..recipe.en,inputs=inputs,materials=materials,count=count,
+        durationFrames=recipe.durationFrames}
+end
+
+for i=1,#NHStore.recipes do
+    local recipe=NHStore.recipes[i]
+    if recipe.reversible then table.insert(NHStore.recipes,reverseRecipe(recipe)) end
+end
+
 local function findRecipe(id)
     for _,recipe in ipairs(NHStore.recipes) do if recipe.id==id then return recipe end end
 end
@@ -467,8 +517,9 @@ function NHStore.canStartBatch(state,recipe)
     if state.order then return false,"Another order is active." end
     local payment={}
     for _,input in ipairs(recipe.inputs) do
-        if (state.materials[input.name] or 0)<input.amount then return false,"Not enough bulk ingredients." end
-        payment[input.name]=input.amount
+        local required=(payment[input.name] or 0)+input.amount
+        if (state.materials[input.name] or 0)<required then return false,"Not enough bulk ingredients." end
+        payment[input.name]=required
     end
     if recipe.emptyContainers and NHStore.emptyContainerCount(state)<recipe.emptyContainers then
         return false,"Not enough empty containers."
@@ -496,7 +547,7 @@ function NHStore.startOrder(state,id)
         local left=state.materials[input.name]-input.amount
         state.materials[input.name]=left>0 and left or nil
     end
-    state.order={recipe=recipe.id,progress=0,required=1,output=output}
+    state.order={id=state.finished+1,recipe=recipe.id,progress=0,required=NHStore.productionFrames(recipe),output=output}
     return true
 end
 
@@ -520,27 +571,36 @@ function NHStore.salvage(state,request)
     return true
 end
 
-function NHStore.reward(state, run_id)
-    local id = tonumber(run_id)
-    if not id or id ~= state.runSerial or id <= state.rewardedThrough or id <= state.closedThrough then
-        return false, "Run already settled or inactive."
+-- The caller submits the absolute progress for this order, so retrying a save
+-- cannot award the same elapsed frames again. The checkpoint receipt and the
+-- output are committed with the order in the same detached profile.
+function NHStore.advanceProduction(state,request)
+    local order=state.order
+    if request.run~=state.runSerial or request.run<=state.closedThrough
+        or request.orderId~=(order and order.id or false) then return false,false end
+    local key=request.checkpoint
+    local target=request.progress or 0
+    if not whole(target) or (key~=nil and (type(key)~="string" or key=="")) then return false,false end
+    local firstVisit=key~=nil and not state.checkpoints[key]
+    if firstVisit then state.checkpoints[key]=true end
+    if not order then return firstVisit,false end
+    local progress=math.max(target,order.progress)
+    if firstVisit then progress=progress+NHStore.checkpointFrames end
+    if progress==order.progress then return false,false end
+    if progress<order.required then
+        order.progress=progress
+        return true,false
     end
-    state.rewardedThrough = id
-    if state.order == false then return true, "Completion recorded. No active order." end
-    state.order.progress = state.order.progress + 1
-    if state.order.progress >= state.order.required then
-        local output=state.order.output
-        if output.item and output.item.kind=="pouch" then
-            NHPouches.create(state,"warehouse",output.slot,0)
-        elseif output.item then
-            table.insert(state.warehouse,{id=state.nextItemId,slot=output.slot,item=output.item})
-            state.nextItemId=state.nextItemId+1
-        else
-            for name,amount in pairs(output.materials) do state.materials[name]=(state.materials[name] or 0)+amount end
-        end
-        state.order = false
-        state.finished = state.finished + 1
-        return true, "Order finished. Output delivered to storage."
+    local output=order.output
+    if output.item and output.item.kind=="pouch" then
+        NHPouches.create(state,"warehouse",output.slot,0)
+    elseif output.item then
+        table.insert(state.warehouse,{id=state.nextItemId,slot=output.slot,item=output.item})
+        state.nextItemId=state.nextItemId+1
+    else
+        for name,amount in pairs(output.materials) do state.materials[name]=(state.materials[name] or 0)+amount end
     end
-    return true, "Order advanced."
+    state.order=false
+    state.finished=state.finished+1
+    return true,true
 end

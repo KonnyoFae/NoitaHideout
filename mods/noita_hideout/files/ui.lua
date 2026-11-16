@@ -171,6 +171,10 @@ local function warehouse_pager(x,y,width,scale,current,pages)
     return selected
 end
 
+local function time_text(seconds)
+    return string.format("%d:%02d",math.floor(seconds/60),seconds%60)
+end
+
 local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local left,width=layout.middle,layout.bench
     if not model.debug and tab=="samples" then tab="orders" end
@@ -200,6 +204,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     for _,item in ipairs(menu or {}) do
         if item.id==selected_entry then selected=item; break end
     end
+    local outputs=crafting and selected and selected.outputs
+    local show_outputs=outputs and (#outputs>1 or (#outputs==1 and outputs[1].name~=selected.name))
     local salvage
     if salvage_target and model.salvage_enabled then
         local category=model.warehouse[NHStore.category(salvage_target.kind)]
@@ -215,7 +221,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local body_height=62
     if salvage then body_height=77
     elseif crafting and selected then
-        body_height=80+12*#selected.inputs+(model.debug and 14 or 0)
+        body_height=68+12*#selected.inputs
+        if show_outputs then body_height=body_height+13+12*#outputs end
         if model.order_active and selected.unlocked==false then body_height=body_height+13 end
     elseif selected then body_height=80+12*#selected.costs
     elseif menu then
@@ -258,17 +265,23 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             return hover
         end
     end
-    -- Keep the amounts visible even if a long localized ingredient name needs a tooltip.
-    local function cost(y,name,have,need)
-        local amount=compact(have).." / "..compact(need)
-        local right=width-6-GuiGetTextDimensions(gui,amount,scale)/scale
+    -- Quantities and timers stay visible even when a long name needs a tooltip.
+    local function value_row(y,name,value,color,tip)
+        local right=width-6-GuiGetTextDimensions(gui,value,scale)/scale
         local txt,short=fit(name,(right-9)*scale,scale)
         tint(muted)
         GuiText(gui,left+6*scale,top+y*scale,txt,scale)
         if short then GuiTooltip(gui,name,"") end
-        tint(have>=need and green or gold)
-        GuiText(gui,left+right*scale,top+y*scale,amount,scale)
-        GuiTooltip(gui,name.."  "..have.." / "..need,"")
+        tint(color)
+        GuiText(gui,left+right*scale,top+y*scale,value,scale)
+        if tip then GuiTooltip(gui,tip,"") end
+    end
+    local function cost(y,name,have,need)
+        value_row(y,name,compact(have).." / "..compact(need),have>=need and green or gold,name.."  "..have.." / "..need)
+    end
+    local function order_status(y)
+        local remaining=time_text(model.order_remaining)
+        value_row(y,tr("生产中：","Making: ")..model.order_name,remaining,white,tr("剩余 ","Time left ")..remaining)
     end
     if salvage then
         label(body,tr("拆解","Dismantle"),gold)
@@ -281,16 +294,25 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         elseif button(261,6,body+65,tr("取消","Cancel")) then salvage_target=nil end
     elseif crafting and selected then
         if button(240,6,body,tr("< 返回配方","< Recipes")) then selected_entry=nil; return hover end
-        label(body+14,selected.name.." ×"..selected.output,available(selected) and green or white)
-        label(body+27,tr("物料  库存 / 所需","Materials  stock / cost"),muted)
-        local y=body+27
+        label(body+14,show_outputs and selected.name or selected.name.." ×"..selected.output,available(selected) and green or white)
+        value_row(body+27,tr("预计用时","Craft time"),time_text(selected.duration),white)
+        local y=body+40
+        label(y,tr("物料  库存 / 所需","Materials  stock / cost"),muted)
         for _,input in ipairs(selected.inputs) do
             y=y+12
             cost(y,input.name,input.available,input.amount)
         end
+        if show_outputs then
+            y=y+13
+            label(y,tr("每批产出","Batch output"),muted)
+            for _,result in ipairs(outputs) do
+                y=y+12
+                value_row(y,result.name,"×"..compact(result.amount),white,result.name.." ×"..result.amount)
+            end
+        end
         y=y+15
         if model.order_active then
-            label(y,tr("生产中：","Queued: ")..model.order_name,muted)
+            order_status(y)
             if selected.unlocked==false then
                 y=y+13
                 label(y,selected.reason,muted)
@@ -298,10 +320,6 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         elseif available(selected) then
             if button(214,6,y,tr("确认制造","Confirm craft"),green) then dispatch("craft",{id=selected.id}) end
         else label(y,selected.reason or tr("材料或空位不足","Need stock or space"),muted) end
-        label(y+13,model.reward_spent and tr("下次通关后入库","Delivered on next run's clear")
-            or tr("本局通关后入库","Delivered on this run's clear"),muted)
-        if model.debug and button(215,6,y+28,tr("模拟通关","Simulate clear"),gold,
-            tr("每局仅结算一次通关奖励。","Uses this run's one clear reward.")) then dispatch("simulate") end
     elseif selected then
         if button(240,6,body,tr("< 返回列表","< Projects")) then selected_entry=nil; return hover end
         label(body+14,selected.name,available(selected) and green or white)
@@ -331,7 +349,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         local current=math.min(list_pages[list_key] or 1,pages)
         local y=body
         if crafting and model.order_active then
-            label(y,tr("生产中：","Queued: ")..model.order_name,muted)
+            order_status(y)
             y=y+15
         end
         if crafting and #menu==0 then label(y,tr("暂无配方","No recipes yet"),muted) end

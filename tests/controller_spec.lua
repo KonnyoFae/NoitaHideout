@@ -53,6 +53,22 @@ function EntityGetInRadiusWithTag(x,y,r,tag)
     end
     return list
 end
+function EntityGetClosestWithTag(x,y,tag)
+    local closest,distance=0,math.huge
+    for _,id in ipairs(EntityGetWithTag(tag)) do
+        local dx,dy=entities[id].x-x,entities[id].y-y
+        local d=dx*dx+dy*dy
+        if d<distance then closest,distance=id,d end
+    end
+    return closest
+end
+function BiomeMapGetName(x,y)
+    for _,id in ipairs(EntityGetWithTag("workshop_aabb")) do
+        local area=entities[id]
+        if math.abs(x-area.x)<=120 and math.abs(y-area.y)<=120 then return area.biome end
+    end
+    return "$biome_coalmine"
+end
 function EntityGetAllChildren(parent)
     local list={}
     for id,e in pairs(entities) do if e.parent==parent then list[#list+1]=id end end
@@ -124,6 +140,11 @@ local function tick(key,action,arg,down)
     OnWorldPreUpdate()
     OnWorldPostUpdate()
     return model
+end
+-- Skip unchanged frames while retaining the real unpaused frame number.
+local function advance(frames)
+    frame=frame+frames-1
+    return tick()
 end
 local function state() return assert(NHStore.load()) end
 local function starter()
@@ -253,20 +274,26 @@ inventory_open=true
 tick()
 tick(nil,"order")
 assert(state().order and not next(state().materials))
+local just_started=tick()
+local initial_remaining,drag_revision=just_started.order_remaining,just_started.revision
+assert(initial_remaining>0)
+local advancing=advance(1200)
+assert(advancing.order_remaining==initial_remaining-20 and advancing.revision==drag_revision)
+assert(state().order.progress>0)
 ending=true
-OnPlayerDied()
-OnPlayerDied()
-assert(state().finished==1 and #state().warehouse==1 and state().materials.magic_liquid_teleportation==500 and starter().doses==2)
-new_world()
-settings["noita_hideout.test_tools"]=false
-inventory_open=true
 tick()
-tick(nil,"simulate")
-assert(state().rewardedThrough==2)
-settings["noita_hideout.test_tools"]=true
-tick(nil,"simulate")
-tick(nil,"simulate")
-assert(state().rewardedThrough==3 and state().finished==1)
+OnPlayerDied()
+OnPlayerDied()
+local interrupted=state()
+assert(interrupted.order and interrupted.order.progress>0 and interrupted.finished==0 and starter().doses==2)
+frame=frame+interrupted.order.required*2
+new_world()
+inventory_open=true
+local resumed=tick()
+assert(resumed.order_active and math.abs(resumed.order_remaining-advancing.order_remaining)<=1)
+advance(interrupted.order.required-interrupted.order.progress)
+tick()
+assert(not state().order and state().finished==1 and #state().warehouse==1 and state().materials.magic_liquid_teleportation==500)
 print("Controller: HUD case, inventory transfer, click gating, failed injection, consume, access, death and orders passed.")
 
 
@@ -424,9 +451,11 @@ assert(tick().warehouse_capacity.equipment==72 and tick().warehouse_capacity.sup
 
 -- Locked recipes remain readable in their own category; the backend rechecks access.
 local catalog=tick().recipes
-assert(#catalog==5)
+assert(#catalog==6)
 local alchemy=assert(has_project(catalog,"stable"))
 assert(alchemy.category=="alchemy" and alchemy.unlocked and not alchemy.ready and alchemy.reason)
+local reverse=assert(has_project(catalog,"reverse_stable"))
+assert(reverse.category=="alchemy" and reverse.unlocked and #reverse.inputs==1 and #reverse.outputs==2)
 local expected_category={medical="medical",injector="medical",grenade="weapons",pouch="equipment"}
 for _,id in ipairs({"medical","injector","grenade","pouch"}) do
     local locked=assert(has_project(catalog,id))
@@ -470,8 +499,7 @@ for n,expected in ipairs(products) do
     -- The reservation outlives a reload and can only be credited once.
     boot()
     assert(tick().warehouse.supplies[reserved].kind=="reserved")
-    ending=true
-    tick()
+    advance(queued.order.required)
     tick()
     local delivered=state()
     assert(not delivered.order and delivered.finished==n and #delivered.warehouse==n)
@@ -628,3 +656,91 @@ tick(nil,"move_pouch",return_to_stash)
 local returned=tick()
 assert(returned.warehouse.equipment[2].id==second_id and returned.pouchId==second_id and returned.cells[4].remaining==2)
 print("Controller: independent selected pouches, durability, stale drag cancellation and reload passed.")
+
+-- Reach actual workshop hitboxes. A boundary in another biome, a nearby
+-- workshop outside its hitbox, or an already-visited mountain grants nothing.
+settings,flags={},{}
+new_world()
+inventory_open=true
+tick()
+local mountain=function(x,y,biome)
+    local id=EntityLoad("workshop.xml",x,y)
+    EntityAddTag(id,"workshop_aabb")
+    entities[id].biome=biome
+    EntityAddComponent2(id,"HitboxComponent",{aabb_min_x=-80,aabb_min_y=-32,aabb_max_x=80,aabb_max_y=32})
+    return id
+end
+local function stand(x,y)
+    entities[player].x,entities[player].y=x,y
+    local view
+    for i=1,11 do view=tick() end
+    return view
+end
+local function receipts()
+    local n=0
+    for _ in pairs(state().checkpoints) do n=n+1 end
+    return n
+end
+local holy="$biome_holymountain"
+mountain(1000,2048,holy)
+mountain(1000,4096,holy)
+mountain(1000,6144,holy)
+mountain(1000,400,"$biome_coalmine")
+stand(1000,400)
+stand(1000,2048+70)
+assert(receipts()==0)
+stand(1020,2048)
+assert(receipts()==1 and not state().order)
+
+local supplied=state()
+supplied.materials={magic_liquid_teleportation=500}
+assert(NHStore.commit(supplied))
+entities[player].x,entities[player].y=227,-85
+boot()
+tick()
+tick(nil,"craft",{id="reverse_stable"})
+local normal=tick().order_remaining
+assert(normal==120 and state().order)
+local old_mountain=stand(1000,2048)
+assert(receipts()==1 and old_mountain.order_remaining>=normal-1)
+local accelerated=stand(1000,4096)
+assert(receipts()==2 and math.abs(accelerated.order_remaining-(normal-60))<=1)
+stand(1000,3600)
+local repeat_visit=stand(1000,4096)
+assert(receipts()==2 and math.abs(repeat_visit.order_remaining-accelerated.order_remaining)<=1)
+boot()
+local reloaded=stand(1000,4096)
+assert(receipts()==2 and math.abs(reloaded.order_remaining-repeat_visit.order_remaining)<=1)
+stand(1000,6144)
+local complete_batch=state()
+assert(receipts()==3 and not complete_batch.order and complete_batch.finished==1)
+assert(complete_batch.materials.magic_liquid_unstable_teleportation==250 and complete_batch.materials.slime==250)
+tick()
+assert(state().finished==1)
+
+-- No active player pauses elapsed time. A polymorphed player still explores
+-- the world, earns active time and can discover a new checkpoint.
+stand(227,-85)
+tick(nil,"craft",{id="stable"})
+local before_absence=tick().order_remaining
+entities[player].tags.player_unit=nil
+tick()
+advance(2*NHStore.productionFrames())
+tick()
+assert(state().order and state().finished==1)
+entities[player].tags.player_unit=true
+assert(tick().order_remaining==before_absence)
+local poly=EntityLoad("polymorph.xml",227,-85)
+EntityAddTag(poly,"polymorphed_player")
+entities[player].tags.player_unit=nil
+tick()
+advance(700)
+assert(state().order.progress>=700 and state().order.progress<800)
+mountain(1000,8192,holy)
+entities[poly].x,entities[poly].y=1000,8192
+for i=1,11 do tick() end
+assert(receipts()==4 and state().order.progress>=700+NHStore.checkpointFrames)
+EntityKill(poly)
+entities[player].tags.player_unit=true
+assert(tick().order_remaining<50 and state().finished==1)
+print("Controller: timers, suspension, polymorph, Holy Mountain hitboxes, checkpoint deduplication and reverse alchemy passed.")

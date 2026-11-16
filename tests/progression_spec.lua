@@ -69,7 +69,7 @@ assert(NHPotion.transferMaterial(s,req) and s.materials.water==12 and s.material
 s.order={output={item={kind="dose"},slot=5}}
 assert(not NHStore.freeSlot(s,"warehouse",5,"medkit") and NHStore.freeSlot(s,"warehouse",5,"pouch")==5)
 s.pouches[s.starterPouchId].location,s.pouches[s.starterPouchId].slot="warehouse",5
-s.order.progress,s.order.required=0,1
+s.order.id,s.order.progress,s.order.required=s.finished+1,0,NHStore.productionFrames()
 assert(NHStore.commit(s) and not NHStore.freeSlot(s,"warehouse",5,"pouch"))
 s.order={output={materials={product=20}}}
 for i=1,7 do s.materials["extra"..i]=1 end

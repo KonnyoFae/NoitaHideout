@@ -1,5 +1,6 @@
 local files = "mods/noita_hideout/files/"
 dofile_once(files .. "store.lua")
+dofile_once(files .. "workshop_clock.lua")
 dofile_once(files .. "wand.lua")
 dofile_once(files .. "potion.lua")
 dofile_once(files .. "transfers.lua")
@@ -23,6 +24,7 @@ local opened, mouse_release, case_open = false, false, nil
 local lang, status, last_error = "en", "", nil
 local model_cache, next_attempt = nil, 0
 local last_dose_frame = -1
+local next_room_check,pending_visit=0,nil
 
 local function tr(zh, en)
     return lang == "zh" and zh or en
@@ -105,10 +107,13 @@ local function invalidate()
     next_attempt = GameGetFrameNum() + 60
 end
 
-local function save(draft)
+local function save(draft,only_time)
+    local cached=only_time and model_cache
+    if cached and cached.profile_revision~=draft.revision then cached=nil end
     local ok, err = NHStore.commit(draft)
     if not ok then invalidate(); report(err); return false end
-    state, model_cache = draft, nil
+    if cached then cached.profile_revision=draft.revision end
+    state, model_cache = draft, cached or nil
     return true
 end
 
@@ -166,15 +171,21 @@ local function active_run()
     return state and run_id and state.closedThrough < run_id
 end
 
-local function commit_edit(edit, zh, en, arg)
-    -- Edit a detached snapshot; a failed write must not leave changed fields in the HUD.
+local function active_draft()
     local draft, err = NHStore.load()
-    if not draft then report(err); return false end
+    if not draft then report(err); return end
     if draft.profile ~= state.profile or draft.runSerial ~= run_id or draft.closedThrough >= run_id then
         invalidate()
         report(tr("远征档案已经改变。", "The active run has changed."))
-        return false
+        return
     end
+    return draft
+end
+
+local function commit_edit(edit, zh, en, arg)
+    -- Edit a detached snapshot; a failed write must not leave changed fields in the HUD.
+    local draft=active_draft()
+    if not draft then return false end
     local changed, reason = edit(draft, arg)
     if not changed then report(reason); return false end
     if not save(draft) then return false end
@@ -182,13 +193,36 @@ local function commit_edit(edit, zh, en, arg)
     return true
 end
 
-local function complete()
-    if not active_run() or state.rewardedThrough >= run_id then return end
-    local had_order = state.order ~= false
-    commit_edit(NHStore.reward,
-        had_order and "订单完成，成品已入库。" or "已记录本局通关，没有在制订单。",
-        had_order and "Order complete. Output delivered to storage." or "Run completion recorded. No active order.",
-        run_id)
+local function update_workshop(player,frame)
+    local order=state.order
+    local elapsed=NHClock.observe(state,frame)
+    if frame>=next_room_check and not pending_visit then
+        next_room_check=frame+10
+        local key=NHClock.mountainAt(player)
+        if key and not state.checkpoints[key] then pending_visit=key end
+    end
+    -- World globals carry sub-checkpoint progress through save/continue.
+    -- Avoid serializing the entire warehouse every frame or interrupting a drag.
+    if not pending_visit and (not order or (elapsed<order.required and elapsed-order.progress<600)) then return true end
+    local draft=active_draft()
+    if not draft then return false end
+    local changed,done=NHStore.advanceProduction(draft,{run=run_id,orderId=order and order.id or false,
+        progress=elapsed,checkpoint=pending_visit})
+    if changed then
+        if not save(draft,not done) then return false end
+        if done and pending_visit and elapsed<order.required then
+            feedback(tr("圣山加速完成了订单，成品已入库。","Holy Mountain boost completed the order. Output delivered."))
+        elseif done then feedback(tr("订单完成，成品已入库。","Order complete. Output delivered to storage."))
+        elseif pending_visit and order then
+            feedback(string.format(tr("首次抵达圣山，生产加速 %d 秒。","Holy Mountain reached. Production advanced by %d seconds."),
+                NHStore.checkpointFrames/60))
+        end
+    elseif draft.revision~=state.revision then
+        state,model_cache=draft,nil
+    end
+    pending_visit=nil
+    NHClock.observe(state,frame)
+    return true
 end
 
 local function find_stimulant(player)
@@ -257,8 +291,8 @@ local function pouch_name(id)
 end
 
 local function inventory_view()
-    if model_cache and model_cache.revision == state.revision then return model_cache end
-    local model = {revision = state.revision, secure_loot = {}, warehouse = {}}
+    if model_cache and model_cache.profile_revision == state.revision then return model_cache end
+    local model = {revision = state.revision, profile_revision=state.revision, secure_loot = {}, warehouse = {}}
     model.docks,model.materials={},{}
     for _,row in ipairs(state.docks) do
         local view=stored_view(row)
@@ -309,7 +343,8 @@ local function inventory_view()
     for _,recipe in ipairs(NHStore.recipes) do
         local ready,reason=NHStore.canStartBatch(state,recipe)
         local view={id=recipe.id,category=recipe.category,name=tr(recipe.zh,recipe.en),output=recipe.count or 1,
-            inputs={},ready=ready,unlocked=not recipe.facility or NHStore.level(state,recipe.facility)>0,
+            inputs={},outputs={},duration=math.ceil(NHStore.productionFrames(recipe)/60),
+            ready=ready,unlocked=not recipe.facility or NHStore.level(state,recipe.facility)>0,
             facility_name=facility_names[recipe.facility] or recipe.facility}
         if not view.unlocked then
             view.reason=tr("需要先建造","Build first: ")..view.facility_name
@@ -320,6 +355,10 @@ local function inventory_view()
             table.insert(view.inputs,{name=NHPotion.materialName(input.name),amount=input.amount,
                 available=state.materials[input.name] or 0})
         end
+        for name,amount in pairs(recipe.materials or {}) do
+            table.insert(view.outputs,{key=name,name=NHPotion.materialName(name),amount=amount})
+        end
+        table.sort(view.outputs,function(a,b) return a.key<b.key end)
         if recipe.emptyContainers then
             table.insert(view.inputs,{name=tr("仓库空容器","Empty containers"),amount=recipe.emptyContainers,
                 available=NHStore.emptyContainerCount(state)})
@@ -329,7 +368,6 @@ local function inventory_view()
     end
     model.pouchCapacity,model.maxUses=NHStore.pouchCapacity,NHStore.doseDurability
     model.order_active = state.order ~= false
-    model.reward_spent = state.rewardedThrough >= run_id
     model_cache = model
     return model
 end
@@ -451,13 +489,11 @@ local function workshop_action(player,action,index)
     elseif action=="salvage" and type(index)=="table" then
         commit_edit(NHStore.salvage,"拆解完成，碎片已入库。","Item dismantled. Scrap stored.",index)
     elseif action=="order" or (action=="craft" and index and index.id) then
-        commit_edit(NHStore.startOrder,"已从物料库扣料，订单已排入。","Ingredients consumed. Order queued.",index and index.id)
+        if commit_edit(NHStore.startOrder,"已扣除原料，开始生产。","Ingredients consumed. Production started.",index and index.id) then
+            NHClock.observe(state,GameGetFrameNum())
+        end
     elseif ModSettingGet("noita_hideout.test_tools") ~= false then
-        if action == "simulate" then
-            if state.rewardedThrough >= run_id then
-                report(tr("本局通关奖励已经领取。", "This run's clear reward has been used."))
-            else complete() end
-        elseif action == "restock" then
+        if action == "restock" then
             commit_edit(NHStore.restock, "测试针剂包已重发，内有两支。", "Test pouch reissued with two doses.")
         elseif action == "preview_items" then
             local x, y = EntityGetTransform(player)
@@ -643,6 +679,8 @@ local function suppress_item_input(player)
 end
 
 function OnWorldInitialized()
+    NHClock.reset()
+    next_room_check,pending_visit=0,nil
     state, run_id, home_x, home_y, player_id = nil, nil, nil, nil, nil
     opened, mouse_release, next_attempt, last_dose_frame = false, false, 0, -1
     case_open,popup = nil,nil
@@ -654,7 +692,10 @@ end
 function OnPlayerSpawned(player)
     player_id = player
     set_home(player, true)
-    if attach() and active_run() then NHPerks.update(state,player) end
+    if attach() and active_run() then
+        NHClock.observe(state,GameGetFrameNum())
+        NHPerks.update(state,player)
+    end
 end
 
 local function current_player()
@@ -681,13 +722,15 @@ end
 function OnWorldPostUpdate()
     local player = current_player()
     if player then set_home(player, false) end
-    if not run_id and not player then return end
+    local traveler=player or (EntityGetWithTag("polymorphed_player") or {})[1]
+    if not run_id and not traveler then return end
     if not attach() or not active_run() then return end
-    if state.rewardedThrough < run_id and GameHasFlagRun("ending_game_completed") then complete() end
-    if not player or not active_run() then opened, case_open = false, nil; return end
+    local frame = GameGetFrameNum()
+    if not traveler then NHClock.suspend(); opened,case_open=false,nil; return end
+    if not update_workshop(traveler,frame) then return end
+    if not player then opened,case_open=false,nil; return end
     local inventory_open = GameIsInventoryOpen()
     local used = NHNative.pressed(player, inventory_open or opened or mouse_release)
-    local frame = GameGetFrameNum()
     if frame % 60 == 0 then
         local ok, err = NHTransfers.reconcile(state, player)
         if ok then ok, err = NHDoses.reconcile(state, player) end
@@ -717,6 +760,9 @@ function OnWorldPostUpdate()
     end
     if not active_run() then return end
     local model = opened and inventory_view() or {}
+    if opened and state.order then
+        model.order_remaining=math.ceil((state.order.required-NHClock.observe(state,frame))/60)
+    end
     if opened and (case_open or popup) then model.native_slots = native_slots(player) end
     model.popup = popup ~= nil
     model.pouchId=popup and popup.id
@@ -740,6 +786,10 @@ function OnPlayerDied()
     if GlobalsGetValue(run_key, "") == "" then return end
     next_attempt = 0
     if not attach() or not active_run() then return end
-    if GameHasFlagRun("ending_game_completed") then complete() end
-    if active_run() then commit_edit(NHStore.endRun, nil, nil, run_id) end
+    local elapsed=NHClock.observe(state,GameGetFrameNum())
+    local order_id=state.order and state.order.id or false
+    commit_edit(function(draft)
+        NHStore.advanceProduction(draft,{run=run_id,orderId=order_id,progress=elapsed,checkpoint=pending_visit})
+        return NHStore.endRun(draft,run_id)
+    end)
 end
