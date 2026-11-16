@@ -84,6 +84,7 @@ local function adapter(kind)
     }
 end
 NHWand, NHPotion = adapter("wand"), adapter("potion")
+function NHPotion.isFlask(id) return EntityHasTag(id, "potion") end
 function NHPotion.discard(id, p)
     entities[id].safely_emptied = true
     if p then GameKillInventoryItem(p, id) else EntityKill(id) end

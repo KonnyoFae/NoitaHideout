@@ -28,6 +28,7 @@ end
 function EntityGetFirstComponentIncludingDisabled(e, t, tag)
     return EntityGetComponentIncludingDisabled(e, t, tag)[1]
 end
+function ComponentGetMembers(c) return comps[c].data end
 function ComponentGetTypeName(c) return comps[c].type end
 function ComponentGetIsEnabled(c) return true end
 function ComponentGetValue2(c, field)
@@ -152,3 +153,16 @@ ComponentSetValue2(comp, "remove_on_death", true)
 ComponentSetValue2(EntityGetFirstComponentIncludingDisabled(starter, "AbilityComponent"), "sprite_file", "data/items_gfx/handgun.xml")
 EntityRemoveComponent(starter, EntityGetFirstComponentIncludingDisabled(starter, "LuaComponent"))
 assert(assert(NHWand.capture(starter)).template == "data/entities/items/starting_wand_rng.xml")
+
+ents[starter].file = "??sav/player.xml"
+function ComponentGetTags(c) return comps[c].data._tags end
+function EntitySetComponentIsEnabled(_, c, value) comps[c].enabled = value end
+function ComponentGetIsEnabled(c) return comps[c].enabled ~= false end
+local history = EntityAddComponent2(starter, "VariableStorageComponent", {
+    name="$spell_lab_shugged_operation_read_from_wand", _tags="spell_lab_shugged_edit_panel_history",
+    value_bool=false, value_int=1, value_float=0, value_string="BOUNCY_ORB:,BOUNCY_ORB:,"
+})
+EntitySetComponentIsEnabled(starter, history, false)
+local record = assert(NHWand.capture(starter))
+assert(record.editor[1].values.value_string=="BOUNCY_ORB:,BOUNCY_ORB:," and not record.editor[1].enabled)
+assert(NHWand.restore(record, 0, 0))

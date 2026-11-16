@@ -4,7 +4,6 @@ dofile_once(files .. "wand.lua")
 dofile_once(files .. "potion.lua")
 dofile_once(files .. "transfers.lua")
 dofile_once(files .. "native_items.lua")
-dofile_once(files .. "case_item.lua")
 dofile_once(files .. "doses.lua")
 dofile_once(files .. "ui.lua")
 NHNative.registerTranslations()
@@ -17,7 +16,7 @@ end
 local run_key = "noita_hideout_run_v1"
 local home_x_key, home_y_key = "noita_hideout_origin_x", "noita_hideout_origin_y"
 local state, run_id, home_x, home_y, player_id
-local opened, mouse_release, case_entity = false, false, nil
+local opened, mouse_release, case_open = false, false, nil
 local lang, status, last_error = "en", "", nil
 local model_cache, next_attempt = nil, 0
 local last_dose_frame = -1
@@ -245,43 +244,6 @@ local function inventory_view()
     return model
 end
 
-local function carried_view(player, model)
-    local ids = NHTransfers.carried(player)
-    local key = table.concat(ids, ",")
-    if model.carried_key == key then return end
-    model.carried_key, model.carried = key, {}
-    for _, id in ipairs(ids) do
-        local kind = NHNative.kind(id) or NHTransfers.item_kind(id)
-        if kind == "wand" or kind == "potion" or kind == "dose" then
-            local c = EntityGetFirstComponentIncludingDisabled(id, "ItemComponent")
-            local name, icon
-            if c then
-                name = ComponentGetValue2(c, "item_name")
-                icon = ComponentGetValue2(c, "ui_sprite")
-            end
-            if kind == "wand" and c and not ComponentGetValue2(c, "always_use_item_name_in_ui") then
-                local ability = EntityGetFirstComponentIncludingDisabled(id, "AbilityComponent")
-                if ability then name = ComponentGetValue2(ability, "ui_name") end
-            end
-            if name and name ~= "" then name = GameTextGetTranslatedOrNot(name) end
-            if kind == "dose" then
-                name, icon = tr("耐火激活剂", "Fire immunity injector"), NHNative.icons.dose
-            elseif not name or name == "" then
-                name = kind == "wand" and tr("魔杖", "Wand") or tr("药瓶", "Flask")
-            end
-            if kind == "potion" then
-                local material = GetMaterialInventoryMainMaterial(id)
-                if material and material > 0 then
-                    local liquid = GameTextGetTranslatedOrNot(CellFactory_GetUIName(material))
-                    if liquid and liquid ~= "" then name = name .. " · " .. liquid end
-                end
-            end
-            if icon and not icon:match("%.png$") then icon = nil end
-            model.carried[#model.carried + 1] = {entity = id, kind = kind, name = name, icon = icon}
-        end
-    end
-end
-
 local function collect_item(player, id)
     -- Vanilla has separate sets of four wand and item slots. A full row leaves
     -- the delivery at the player's feet rather than displacing another item.
@@ -295,7 +257,7 @@ local function collect_item(player, id)
 end
 
 local function close_panel()
-    opened, case_entity, mouse_release = false, nil, true
+    opened, case_open, mouse_release = false, nil, true
 end
 
 local function transfer_error(err, item)
@@ -313,14 +275,12 @@ end
 local function dispatch(player, action, index)
     if action == "close" then close_panel(); return end
     if not opened or not active_run() then return end
-    if case_entity then
-        if not NHCase.accessible(state, player, case_entity) then close_panel(); return end
-        if action == "move" then
-            commit_edit(NHStore.movePouch, "针剂包已移动。", "Pouch moved.")
-            return
-        end
+    if case_open then
         local ok, result
-        if action == "take_dose" then
+        if action == "take_pouch" then
+            ok, result = NHDoses.takePouch(state, player)
+            if ok then collect_item(player, result) end
+        elseif action == "take_dose" then
             ok, result = NHDoses.withdraw(state, player)
             if ok then
                 local collected = collect_item(player, result)
@@ -328,10 +288,13 @@ local function dispatch(player, action, index)
                     or tr("针剂在脚边，可按拾取键拿起。", "Injector at your feet. Pick it up when ready."))
             end
         elseif action == "place" then
+            index = NHNative.held(player)
             if not index or not EntityGetIsAlive(index) then
                 report(tr("所选物品已移走。", "Selected item is no longer available.")); return
             end
-            if NHNative.kind(index) == "dose" then
+            if NHNative.kind(index) == "pouch" then
+                ok, result = NHDoses.storePouch(state, player, index)
+            elseif NHNative.kind(index) == "dose" and state.pouch.location == "safe" then
                 ok, result = NHDoses.deposit(state, player, index)
             else
                 ok, result = NHTransfers.deposit(state, player, "safe", index)
@@ -349,10 +312,7 @@ local function dispatch(player, action, index)
         return
     end
     if not near_home(player) then close_panel(); return end
-    if action == "recall_case" then
-        local ok, err = NHCase.recall(state, player, home_x, home_y)
-        if ok then feedback(tr("安全箱已送回出生点。", "Secure case returned to spawn.")) else report(err) end
-    elseif action == "deposit" or action == "withdraw" then
+    if action == "deposit" or action == "withdraw" then
         local deposit = action == "deposit"
         local ok, err
         if deposit then ok, err = NHTransfers.deposit(state, player, "warehouse")
@@ -393,7 +353,7 @@ end
 function OnWorldInitialized()
     state, run_id, home_x, home_y, player_id = nil, nil, nil, nil, nil
     opened, mouse_release, next_attempt, last_dose_frame = false, false, 0, -1
-    case_entity = nil
+    case_open = nil
     NHNative.resetInput()
     model_cache, status, last_error = nil, "", nil
     lang = GameTextGet("$current_language") == "简体中文" and "zh" or "en"
@@ -402,10 +362,7 @@ end
 function OnPlayerSpawned(player)
     player_id = player
     set_home(player, true)
-    if attach() and active_run() then
-        local ok, err = NHCase.ensure(state, player, home_x, home_y)
-        if not ok then report(err) end
-    end
+    attach()
 end
 
 local function current_player()
@@ -418,7 +375,7 @@ function OnWorldPreUpdate()
     if not opened and not mouse_release then return end
     local player = current_player()
     if not player or GameIsInventoryOpen() then
-        opened, case_entity, mouse_release = false, nil, false
+        opened, case_open, mouse_release = false, nil, false
         return
     end
     if not opened and not InputIsMouseButtonDown(1) and not InputIsMouseButtonDown(2) then
@@ -434,53 +391,49 @@ function OnWorldPostUpdate()
     if not run_id and not player then return end
     if not attach() or not active_run() then return end
     if state.rewardedThrough < run_id and GameHasFlagRun("ending_game_completed") then complete() end
-    if not player or not active_run() then opened, case_entity = false, nil; return end
+    if not player or not active_run() then opened, case_open = false, nil; return end
     local inventory_open = GameIsInventoryOpen()
     local used = NHNative.pressed(player, inventory_open or opened or mouse_release)
-    if inventory_open then opened, case_entity = false, nil; return end
+    if inventory_open then opened, case_open = false, nil; return end
     local frame = GameGetFrameNum()
-    if frame % 30 == 0 then
-        local ok, err = NHCase.ensure(state, player, home_x, home_y)
-        if not ok then report(err) end
-    end
     if frame % 60 == 0 then
         local ok, err = NHTransfers.reconcile(state, player)
         if ok then ok, err = NHDoses.reconcile(state, player) end
         if not ok then invalidate(); report(err); return end
     end
     local nearby = near_home(player)
-    local ground_case = NHCase.nearby(state, player)
     local was_open = opened
     if opened then
-        local out_of_reach = case_entity and not NHCase.accessible(state, player, case_entity)
-            or not case_entity and not nearby
-        if out_of_reach or InputIsKeyJustDown(11) or (case_entity and InputIsKeyJustDown(10)) then close_panel() end
+        local out_of_reach = not case_open and not nearby
+        if out_of_reach or InputIsKeyJustDown(11) or (case_open and InputIsKeyJustDown(10)) then close_panel() end
     elseif InputIsKeyJustDown(11) and nearby then -- H: spawn hideout
-        opened, case_entity = true, nil
-    elseif InputIsKeyJustDown(10) and ground_case then -- G: placed case
-        opened, case_entity = true, ground_case
+        opened, case_open = true, nil
+    elseif InputIsKeyJustDown(10) then
+        opened, case_open = true, true
     elseif used then
         local item = NHNative.held(player)
         local kind = NHNative.kind(item)
-        if kind == "case" and NHCase.accessible(state, player, item) then opened, case_entity = true, item
+        if kind == "pouch" and NHDoses.isPouch(state, item) then
+            local ok, result = NHDoses.withdraw(state, player)
+            if ok then collect_item(player, result) else transfer_error(result) end
         elseif kind == "dose" then use_dose(player, item) end
     end
     if not active_run() then return end
-    if not opened and not nearby and not ground_case then return end
     local model = opened and inventory_view() or {}
-    model.mode, model.ground_case = case_entity and "case" or "home", ground_case ~= nil
+    model.mode = case_open and "case" or "home"
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
-    if opened and case_entity then carried_view(player, model) end
+
     model.debug = opened and ModSettingGet("noita_hideout.test_tools") ~= false
     model.active = opened and find_stimulant(player) ~= nil
     NHUI.draw(model, function(action, index)
         -- The opening click belongs to the held case, not the button underneath it.
-        if was_open and opened then dispatch(player, action, index) end
+        if action == "open_case" and not opened then opened, case_open = true, true
+        elseif was_open and opened then dispatch(player, action, index) end
     end)
 end
 
 function OnPlayerDied()
-    opened, case_entity = false, nil
+    opened, case_open = false, nil
     if GlobalsGetValue(run_key, "") == "" then return end
     next_attempt = 0
     if not attach() or not active_run() then return end

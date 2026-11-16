@@ -38,7 +38,7 @@ state = save(state)
 assert(state.closedThrough == first and state.pouch.doses == 1)
 assert(#state.safe == 1 and state.safe[1].item.name == "Varpuluuta")
 local second = NHStore.newRun(state)
-assert(NHStore.movePouch(state))
+state.pouch.location = "bag"
 state = save(state)
 assert(state.pouch.location == "bag" and state.pouch.doses == 1)
 -- Starting a fresh world also settles an abandoned run when no death callback ran.
@@ -46,7 +46,8 @@ local third = NHStore.newRun(state)
 assert(not NHStore.endRun(state, second))
 assert(state.pouch.location == "lost" and state.pouch.doses == 0)
 assert(not NHStore.useDose(state))
-assert(NHStore.restock(state) and NHStore.movePouch(state))
+assert(NHStore.restock(state))
+state.pouch.location = "bag"
 assert(NHStore.endRun(state, third))
 assert(state.pouch.location == "lost")
 state = save(state)

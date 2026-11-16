@@ -1,4 +1,4 @@
--- Simulate the game callbacks with real store, physical case and syringe modules.
+-- Simulate the game callbacks with real store, HUD case and syringe modules.
 local settings, flags, world = {}, {}, {}
 local frame, keys, fire, fire_stamp, inventory_open = 1, {}, false, 0, false
 local opened_click, model, ending, fail_effect, fail_commit = nil, nil, false, false, false
@@ -126,15 +126,15 @@ local function new_world()
     boot()
 end
 boot()
-local box=assert(EntityGetWithTag("noita_hideout_case")[1])
+assert(#EntityGetWithTag("noita_hideout_case")==0)
 OnPlayerSpawned(player)
-assert(#EntityGetWithTag("noita_hideout_case")==1 and state().runSerial==1)
+assert(#EntityGetWithTag("noita_hideout_case")==0 and state().runSerial==1)
 tick()
 assert(tick(10,"take_dose").mode=="case" and state().pouch.doses==2) -- opening click cannot withdraw
 tick(nil,"take_dose")
 local dose=assert(EntityGetWithTag("noita_hideout_dose")[1])
 assert(state().pouch.doses==1 and EntityGetRootEntity(dose)==player)
-assert(tick().carried[1].entity==dose)
+held=dose
 tick(nil,"place",dose)
 assert(not EntityGetIsAlive(dose) and state().pouch.doses==2)
 tick(nil,"take_dose")
@@ -162,19 +162,28 @@ tick(nil,nil,nil,true)
 tick(nil,nil,nil,true)
 assert(not EntityGetIsAlive(dose) and #EntityGetWithTag("noita_hideout_stimulant")==1 and state().pouch.doses==1)
 boot()
-assert(state().runSerial==1 and state().pouch.doses==1 and EntityGetWithTag("noita_hideout_case")[1]==box)
--- A dropped case cannot be used from another room, even with a stale GUI action.
+assert(state().runSerial==1 and state().pouch.doses==1)
+-- The HUD opens away from spawn, and the pouch is a real quickbar entity.
 entities[player].x=500
 tick()
-assert(not tick(10,"take_dose"))
-assert(not tick(11,"restock"))
-assert(state().pouch.doses==1)
-GamePickUpInventoryItem(player,box)
-held=box
-tick()
-assert(tick(nil,nil,nil,true).mode=="case")
-tick(nil,"move")
+assert(tick(10).mode=="case")
+tick(nil,"take_pouch")
+local pouch=assert(EntityGetWithTag("noita_hideout_pouch")[1])
+assert(EntityGetRootEntity(pouch)==player and state().pouch.location=="bag")
+held=pouch
+tick(nil,"place")
+assert(not EntityGetIsAlive(pouch) and state().pouch.location=="safe")
+tick(nil,"take_pouch")
 assert(state().pouch.location=="bag")
+pouch=assert(EntityGetWithTag("noita_hideout_pouch")[1])
+tick(nil,"close")
+entities[pouch].parent=0
+held=0
+tick()
+GamePickUpInventoryItem(player,pouch)
+held=pouch
+tick(nil,nil,nil,true)
+assert(state().pouch.doses==0 and #EntityGetWithTag("noita_hideout_dose")==1)
 OnPlayerDied()
 assert(state().closedThrough==1 and state().pouch.location=="lost")
 new_world()
@@ -203,5 +212,5 @@ settings["noita_hideout.test_tools"]=true
 tick(nil,"simulate")
 tick(nil,"simulate")
 assert(state().rewardedThrough==3 and state().finished==1)
-print("Controller: tangible case, inventory transfer, click gating, failed injection, consume, access, death and orders passed.")
+print("Controller: HUD case, inventory transfer, click gating, failed injection, consume, access, death and orders passed.")
 

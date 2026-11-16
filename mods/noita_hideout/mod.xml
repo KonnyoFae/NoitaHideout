@@ -1,3 +1,3 @@
 <Mod name="Hideout Prototype | 藏身处测试版"
-     description="0.2.1 | Pick up and use the secure case or an injector. G opens a placed case. H opens the warehouse at spawn."
+     description="0.3.0 | G opens the secure inventory. Carry an injector pouch or protect it in the HUD. H opens the warehouse at spawn."
      request_no_api_restrictions="0" />

@@ -258,13 +258,6 @@ function NHStore.useDose(state)
     return true, "Used one dose."
 end
 
-function NHStore.movePouch(state)
-    local pouch = state.pouch
-    if pouch.location == "lost" then return false, "Pouch lost." end
-    pouch.location = pouch.location == "safe" and "bag" or "safe"
-    return true, "Pouch moved."
-end
-
 function NHStore.restock(state)
     state.pouch = {location = "safe", doses = 2}
     return true, "Two test doses placed in secure case."

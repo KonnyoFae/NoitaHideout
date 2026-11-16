@@ -144,6 +144,8 @@ local function source(entity, ability, item)
     if path:match("^%a:/") or path:match("^/") then
         path = path:match("/(mods/.+)$") or path:match("/(data/.+)$") or path
     end
+    -- Inventory entities can inherit the virtual filename of the loaded player.
+    if path:match("^%W*sav/player%.xml$") then path = "data/entities/player.xml" end
     if supported(path) then return path end
     local inline = path == "" or path == "data/entities/base_wand_pickup.xml" or path == "data/entities/player.xml"
         or path == "data/entities/player_base.xml" or path:match("^data/entities/animals/[%w_/-]+%.xml$")
@@ -225,6 +227,7 @@ local function check_script(c, path)
 end
 
 local function check_root(entity, path)
+    local editor
     for _, c in ipairs(EntityGetAllComponents(entity)) do
         local t = ComponentGetTypeName(c)
         if t == "LuaComponent" then
@@ -233,11 +236,19 @@ local function check_root(entity, path)
             assert(get(c, "cost") == 0, "Cannot store a wand with an outstanding shop price")
         elseif t == "VariableStorageComponent" then
             local name = get(c, "name")
-            assert(name == source_marker or name == transfer_marker, "Unsupported wand variable: " .. tostring(name))
+            if name:match("^spell_lab_shugged_edit_panel") or name:match("^%$spell_lab_shugged_operation_") then
+                local values = fields(c, {"name", "value_bool", "value_float", "value_int", "value_string"})
+                values._tags = ComponentGetTags(c) or ""
+                editor = editor or {}
+                editor[#editor + 1] = {values = values, enabled = ComponentGetIsEnabled(c)}
+            else
+                assert(name == source_marker or name == transfer_marker, "Unsupported wand variable: " .. tostring(name))
+            end
         else
             assert(root_types[t], "Unsupported wand component: " .. t)
         end
     end
+    return editor
 end
 
 local stock_pickups = {}
@@ -310,7 +321,7 @@ local function capture(entity)
     local ability, item = required(entity, "AbilityComponent"), required(entity, "ItemComponent")
     assert(get(ability, "use_gun_script"), "Hold a wand")
     local path = source(entity, ability, item)
-    check_root(entity, path)
+    local editor = check_root(entity, path)
     local sprite = required(entity, "SpriteComponent", "item")
     local hotspot = required(entity, "HotspotComponent", "shoot_pos")
     local tip_x, tip_y = get(hotspot, "offset")
@@ -334,7 +345,7 @@ local function capture(entity)
     assert(gun.deck_capacity ~= nil and cast.fire_rate_wait ~= nil, "Cannot read wand firing settings")
     local frame = GameGetFrameNum()
     local name = get(item, "always_use_item_name_in_ui") and get(item, "item_name") or get(ability, "ui_name")
-    return {kind = "wand", name = name, template = path, cards = cards, cleaner = cleaner, tags = wand_tags(entity),
+    return {kind = "wand", name = name, template = path, editor = editor, cards = cards, cleaner = cleaner, tags = wand_tags(entity),
         entity_name = EntityGetName(entity), ability = fields(ability, ability_fields),
         item = fields(item, item_fields), sprite = canonical_sprite(fields(sprite, sprite_fields)), tip = {tip_x, tip_y},
         gun_config = gun, gunaction_config = cast,
@@ -444,6 +455,10 @@ function NHWand.restore(data, x, y)
                 if eater then break end
             end
             apply(assert(eater, "Cleaner missing from wand template"), data.cleaner)
+        end
+        for _, record in ipairs(data.editor or {}) do
+            local c = assert(EntityAddComponent2(entity, "VariableStorageComponent", record.values))
+            EntitySetComponentIsEnabled(entity, c, record.enabled)
         end
         for _, card in ipairs(data.cards) do add_card(entity, card, x, y, true) end
         if marked_source(entity) ~= data.template then

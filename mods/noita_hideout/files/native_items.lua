@@ -1,17 +1,17 @@
 NHNative = {}
 
 local item_path = "mods/noita_hideout/files/items/"
-local tag = {case = "noita_hideout_case", dose = "noita_hideout_dose"}
-NHNative.icons = {case = item_path .. "case.png", dose = item_path .. "dose.png"}
+local tag = {pouch = "noita_hideout_pouch", dose = "noita_hideout_dose"}
+NHNative.icons = {pouch = item_path .. "pouch.png", dose = item_path .. "dose.png"}
 
 -- Noita picks translated item names for ground prompts, inventory slots and held abilities.
 function NHNative.registerTranslations()
     local path = "data/translations/common.csv"
     local original = ModTextFileGetContent(path)
-    if not original or original:find("\nnh_hideout_case,", 1, true) then return end
+    if not original or original:find("\nnh_hideout_pouch,", 1, true) then return end
     local labels = {
-        {"nh_hideout_case", "Secure case", "安全箱"},
-        {"nh_hideout_case_desc", "Hold and use to open. Drop or pick it up like any other item.", "手持时点击打开。可从物品栏拖到地面，再按拾取键拿起。"},
+        {"nh_hideout_pouch", "Injector pouch", "针剂包"},
+        {"nh_hideout_pouch_desc", "Use to take one injector. Store the pouch in the secure case.", "手持使用可取一支针剂。可将整包放回安全箱。"},
         {"nh_hideout_dose", "Fire immunity injector", "耐火激活剂"},
         {"nh_hideout_dose_desc", "Hold and use to inject. Grants fire immunity for one minute.", "手持时点击注射。获得约一分钟的火焰免疫。"},
     }
@@ -26,7 +26,7 @@ end
 
 function NHNative.kind(entity)
     if not entity or entity == 0 then return nil end
-    if EntityHasTag(entity, tag.case) then return "case" end
+    if EntityHasTag(entity, tag.pouch) then return "pouch" end
     if EntityHasTag(entity, tag.dose) then return "dose" end
 end
 

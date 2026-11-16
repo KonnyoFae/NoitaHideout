@@ -1,0 +1,10 @@
+<Entity name="$nh_hideout_pouch" tags="noita_hideout_pouch,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/pouch.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/pouch.png" offset_x="8" offset_y="6" />
+        <ItemComponent item_name="$nh_hideout_pouch" ui_description="$nh_hideout_pouch_desc"
+            ui_sprite="mods/noita_hideout/files/items/pouch.png" />
+        <UIInfoComponent name="$nh_hideout_pouch" />
+        <AbilityComponent ui_name="$nh_hideout_pouch" />
+    </Base>
+</Entity>

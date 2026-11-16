@@ -47,9 +47,51 @@ local function is_open_run(s)
     return s.runSerial > s.closedThrough
 end
 
+local pouch_tag = "noita_hideout_pouch_token"
+
+function NHDoses.isPouch(s, entity)
+    if s.pouch.location ~= "bag" or not s.pouch.token or NHNative.kind(entity) ~= "pouch" then return false end
+    local c = EntityGetFirstComponentIncludingDisabled(entity, "VariableStorageComponent", pouch_tag)
+    return c and ComponentGetValue2(c, "value_string") == s.pouch.token
+end
+
+function NHDoses.takePouch(s, player)
+    if not is_open_run(s) or s.pouch.location ~= "safe" then return nil, "Pouch unavailable." end
+    local x, y = EntityGetTransform(player)
+    local id, err = NHNative.spawn("pouch", x, y - 4)
+    if not id then return nil, err end
+    local changed = draft(s)
+    local token = table.concat({s.profile, s.runSerial, s.nextItemId}, "/")
+    changed.pouch.x, changed.pouch.y = x, y
+    local c = EntityAddComponent2(id, "VariableStorageComponent", {_tags=pouch_tag, name=pouch_tag, value_string=token})
+    if not c or ComponentGetValue2(c, "value_string") ~= token then
+        EntityKill(id)
+        return nil, "Could not mark the pouch."
+    end
+    changed.pouch.location, changed.pouch.token = "bag", token
+    changed.nextItemId = changed.nextItemId + 1
+    local ok, reason = commit(s, changed)
+    if not ok then EntityKill(id); return nil, reason end
+    GlobalsSetValue(receipt(token), "1")
+    return true, id
+end
+
+function NHDoses.storePouch(s, player, id)
+    if not is_open_run(s) or not NHDoses.isPouch(s, id) or EntityGetRootEntity(id) ~= player then
+        return nil, "Hold your injector pouch first."
+    end
+    local changed = draft(s)
+    changed.pouch = {location = "safe", doses = s.pouch.doses}
+    local ok, reason = commit(s, changed)
+    if not ok then return nil, reason end
+    dispose(player, id)
+    return true
+end
+
 function NHDoses.withdraw(s, player)
     if not is_open_run(s) then return nil, "Run already closed." end
     if s.pouch.location == "lost" or s.pouch.doses < 1 then return nil, "No dose available." end
+    if s.pouch.location == "bag" and not NHDoses.isPouch(s, NHNative.held(player)) then return nil, "Hold your injector pouch first." end
     local x, y = EntityGetTransform(player)
     y = y - 4
     local entity, err = NHNative.spawn("dose", x, y)
@@ -110,9 +152,19 @@ function NHDoses.reconcile(s, player)
     if not is_open_run(s) then return true end
     local issued = s.issuedDoses or {}
     local seen, visited = {}, {}
+    local pouch_seen = false
     local function inspect(entity)
-        if visited[entity] or not EntityGetIsAlive(entity) or NHNative.kind(entity) ~= "dose" then return end
+        if visited[entity] or not EntityGetIsAlive(entity) then return end
         visited[entity] = true
+        local kind = NHNative.kind(entity)
+        if kind == "pouch" then
+            if not pouch_seen and NHDoses.isPouch(s, entity) then
+                pouch_seen = true
+                GlobalsSetValue(receipt(s.pouch.token), "1")
+            else dispose(player, entity) end
+            return
+        end
+        if kind ~= "dose" then return end
         local token = token_of(entity)
         if token and issued[token] and not seen[token] then
             seen[token] = true
@@ -124,9 +176,18 @@ function NHDoses.reconcile(s, player)
     -- Prioritize a carried copy when a rolled-back world reintroduces a twin.
     for _, id in ipairs(GameGetAllInventoryItems(player) or {}) do inspect(id) end
     for _, id in ipairs(EntityGetWithTag(item_tag) or {}) do inspect(id) end
-    if not next(issued) then return true end
+    for _, id in ipairs(EntityGetWithTag("noita_hideout_pouch") or {}) do inspect(id) end
+    if not next(issued) and (s.pouch.location ~= "bag" or pouch_seen) then return true end
     local x, y = EntityGetTransform(player)
     local changed
+    local pouch = s.pouch
+    if pouch.location == "bag" and pouch.token and not pouch_seen and pouch.x and pouch.y
+        and GlobalsGetValue(receipt(pouch.token), "") ~= "1"
+        and math.abs(x-pouch.x) < 64 and math.abs(y-pouch.y) < 64
+        and DoesWorldExistAt(math.floor(pouch.x)-16, math.floor(pouch.y)-16, math.ceil(pouch.x)+16, math.ceil(pouch.y)+16) then
+        changed = draft(s)
+        changed.pouch = {location = "safe", doses = pouch.doses}
+    end
     for token, origin in pairs(issued) do
         -- An apparently missing item may have been legitimately used or unloaded.
         -- Refund only if the delivery receipt itself was rewound, and its origin

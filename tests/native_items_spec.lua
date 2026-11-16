@@ -1,5 +1,5 @@
 local frame, down, pressed_at = 10, false, -20
-local tags = {[123] = {noita_hideout_case = true}, [124] = {noita_hideout_dose = true}}
+local tags = {[123] = {noita_hideout_pouch = true}, [124] = {noita_hideout_dose = true}}
 local active, root = 123, 15
 local content = ",en,ru,pt-br,es-es,de,fr-fr,it,pl,zh-cn,jp,ko\nbase,Test"
 function GameGetFrameNum() return frame end
@@ -16,7 +16,7 @@ function ComponentGetValue2(_, key)
 end
 function ModTextFileGetContent() return content end
 function ModTextFileSetContent(_, value) content = value end
-function EntityLoad(path) return path:match("/case%.xml$") and 123 or 124 end
+function EntityLoad(path) return path:match("/pouch%.xml$") and 123 or 124 end
 dofile("mods/noita_hideout/files/native_items.lua")
 
 NHNative.registerTranslations()
@@ -24,9 +24,9 @@ local first_registration = content
 NHNative.registerTranslations()
 assert(content == first_registration)
 local cols = {}
-for cell in content:match("nh_hideout_case,([^\n]+)"):gmatch("[^,]+") do cols[#cols + 1] = cell end
-assert(#cols == 11 and cols[1] == "Secure case" and cols[9] == "安全箱")
-assert(NHNative.kind(NHNative.spawn("case",0,0)) == "case")
+for cell in content:match("nh_hideout_pouch,([^\n]+)"):gmatch("[^,]+") do cols[#cols + 1] = cell end
+assert(#cols == 11 and cols[1] == "Injector pouch" and cols[9] == "针剂包")
+assert(NHNative.kind(NHNative.spawn("pouch",0,0)) == "pouch")
 assert(NHNative.kind(NHNative.spawn("dose",0,0)) == "dose")
 assert(not NHNative.spawn("other",0,0))
 assert(NHNative.held(15) == 123)

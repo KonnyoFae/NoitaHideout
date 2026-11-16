@@ -95,3 +95,10 @@ assert(not NHPotion.capture(mimic) and not entities[mimic].killed)
 entities[sample].components.MaterialInventoryComponent.count_per_material_type[3] = 2.5
 assert(not NHPotion.capture(sample) and not entities[sample].killed)
 print("Potion round-trip, recipe quantities, unsupported flasks and failed spawn rollback passed")
+
+local water = EntityLoad("??sav/player.xml")
+function ComponentGetMembers(id) return comp(id) end
+entities[water].components.ItemComponent.ui_sprite="data/ui_gfx/items/potion.png"
+AddMaterialInventoryMaterial(water,"water",683)
+local flask=assert(NHPotion.capture(water))
+assert(assert(NHPotion.capture(assert(NHPotion.restore(flask,0,0)))).materials.water==683)

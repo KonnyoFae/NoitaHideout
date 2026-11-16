@@ -38,10 +38,10 @@ function GameGetAllInventoryItems(owner)
     return found
 end
 function EntityGetWithTag(tag)
-    assert(tag == "noita_hideout_dose")
+    assert(tag == "noita_hideout_dose" or tag == "noita_hideout_pouch")
     local found = {}
     for id, item in pairs(entities) do
-        if item.kind == "dose" and item.alive then found[#found + 1] = id end
+        if item.kind and tag == "noita_hideout_" .. item.kind and item.alive then found[#found + 1] = id end
     end
     return found
 end
