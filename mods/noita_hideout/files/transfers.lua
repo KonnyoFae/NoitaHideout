@@ -1,0 +1,250 @@
+-- The profile and world are saved by separate Noita systems. Each physical
+-- item gets a token before ownership changes. A world-side receipt survives
+-- normal use/destruction of a delivered item, so it cannot be reclaimed.
+NHTransfers = {}
+local tag = "noita_hideout_transfer_item"
+local marker_tag = "noita_hideout_transfer_id"
+
+local function copy(t)
+    local result = {}
+    for key, value in pairs(t or {}) do result[key] = value end
+    return result
+end
+
+local function journal(s)
+    local j = s.transit
+    if j and j.run == s.runSerial then return j end
+    return {run = s.runSerial, retired = {}, issued = {}}
+end
+
+local function draft(s)
+    local next_state, j = copy(s), journal(s)
+    next_state.warehouse, next_state.safe = copy(s.warehouse), copy(s.safe)
+    next_state.transit = {run = s.runSerial, retired = copy(j.retired), issued = copy(j.issued)}
+    return next_state
+end
+
+local function commit(s, changed)
+    local ok, err = NHStore.commit(changed)
+    if not ok then return nil, err end
+    s.revision, s.nextItemId = changed.revision, changed.nextItemId
+    s.warehouse, s.safe, s.transit = changed.warehouse, changed.safe, changed.transit
+    return true
+end
+
+local function container_name(value)
+    if value == nil or value == "warehouse" then return "warehouse" end
+    if value == "safe" then return "safe" end
+end
+
+local function marker(entity)
+    local c = EntityGetFirstComponentIncludingDisabled(entity, "VariableStorageComponent", marker_tag)
+    if c then return ComponentGetValue2(c, "value_string") end
+end
+
+local function stamp(entity, token)
+    local c = EntityGetFirstComponentIncludingDisabled(entity, "VariableStorageComponent", marker_tag)
+    if c then
+        ComponentSetValue2(c, "value_string", token)
+    else
+        c = EntityAddComponent2(entity, "VariableStorageComponent", {
+            _tags = marker_tag, name = marker_tag, value_string = token
+        })
+    end
+    if not c or marker(entity) ~= token then return nil end
+    EntityAddTag(entity, tag)
+    return EntityHasTag(entity, tag)
+end
+
+local function new_token(prefix, s, ticket, item_id, entity)
+    -- Frame/entity distinguish provisional marks from a previous rejected
+    -- commit that didn't consume an item number in the permanent profile.
+    return table.concat({prefix, s.profile, s.runSerial, ticket, item_id, GameGetFrameNum(), entity}, "/")
+end
+
+local function receipt(token)
+    return "noita_hideout.delivered." .. token
+end
+
+local function storage_ids(s)
+    local ids, sources = {}, {}
+    for _, rows in ipairs({s.warehouse, s.safe}) do
+        for _, row in ipairs(rows) do
+            ids[row.id] = true
+            if row.origin then sources[row.origin] = true end
+        end
+    end
+    return ids, sources
+end
+
+local function stored_release(s, token, ids)
+    local profile, item_id = token:match("^r/(%d+)/%d+/%d+/(%d+)/")
+    return tonumber(profile) == s.profile and ids[tonumber(item_id)]
+end
+
+local function dispose(entity, player)
+    local owner
+    if player and player ~= 0 and EntityGetRootEntity(entity) == player then owner = player end
+    if EntityHasTag(entity, "potion") then
+        NHPotion.discard(entity, owner)
+    elseif owner then
+        GameKillInventoryItem(owner, entity)
+    else
+        EntityKill(entity)
+    end
+end
+
+local function codec(kind)
+    if kind == "wand" then return NHWand end
+    if kind == "potion" then return NHPotion end
+end
+
+function NHTransfers.carried(player)
+    for _, child in ipairs(EntityGetAllChildren(player) or {}) do
+        if EntityGetName(child) == "inventory_quick" then
+            return EntityGetAllChildren(child) or {}
+        end
+    end
+    return {}
+end
+
+local function quick_item(player, entity)
+    if not entity or entity == 0 or not EntityGetIsAlive(entity) then return false end
+    local parent = EntityGetParent(entity)
+    return parent and parent ~= 0 and EntityGetParent(parent) == player
+        and EntityGetName(parent) == "inventory_quick"
+end
+
+function NHTransfers.deposit(s, player, container, selected)
+    local dest = container_name(container)
+    if not dest then return nil, "Unknown container." end
+    local inv = EntityGetFirstComponentIncludingDisabled(player, "Inventory2Component")
+    local item = selected or (inv and ComponentGetValue2(inv, "mActiveItem"))
+    if not quick_item(player, item) then
+        if selected then return nil, "The selected item is no longer in your quick inventory." end
+        return nil, "Hold a wand or flask first."
+    end
+    local source = marker(item)
+    if source then
+        local ids, origins = storage_ids(s)
+        if journal(s).retired[source] or origins[source] or stored_release(s, source, ids) then
+            dispose(item, player)
+            return nil, "The stored item was already transferred."
+        end
+    end
+    if dest == "safe" and #s.safe >= 1 then return nil, "Secure valuables slot is full." end
+
+    local kind = EntityHasTag(item, "wand") and "wand" or EntityHasTag(item, "potion") and "potion"
+    local adapter = codec(kind)
+    if not adapter then return nil, "Only supported wands and flasks can be deposited." end
+    local record, err = adapter.capture(item)
+    if not record then return nil, err end
+    local id = s.nextItemId
+    if not source or not EntityHasTag(item, tag) then
+        source = source or new_token("d", s, id, id, item)
+        if not stamp(item, source) then return nil, "Could not mark this item; it remains in your inventory." end
+    end
+
+    local changed = draft(s)
+    changed.nextItemId = id + 1
+    table.insert(changed[dest], {id = id, item = record, origin = source})
+    -- Keep retirement after a stored flask's contents are spent or the item
+    -- is withdrawn. A replayed source object must never become spendable.
+    changed.transit.retired[source] = true
+    changed.transit.issued[source] = nil
+    local ok, reason = commit(s, changed)
+    if not ok then return nil, reason end
+    dispose(item, player)
+    return true
+end
+
+function NHTransfers.withdraw(s, player, index, container)
+    local src = container_name(container)
+    if not src then return nil, "Unknown container." end
+    local row = s[src][index]
+    if not row then return nil, "Item is no longer in this container." end
+    local adapter = codec(row.item.kind)
+    if not adapter then return nil, "Stored item type is unsupported." end
+    local x, y = EntityGetTransform(player)
+    local entity, err = adapter.restore(row.item, x, y - 4)
+    if not entity or entity == 0 then return nil, err or "Could not restore this item." end
+    local ticket = s.nextItemId
+    local token = new_token("r", s, ticket, row.id, entity)
+    if not stamp(entity, token) then
+        dispose(entity, player)
+        return nil, "Could not mark the delivery; item remains in storage."
+    end
+
+    local changed = draft(s)
+    table.remove(changed[src], index)
+    changed.nextItemId = ticket + 1
+    changed.transit.issued[token] = {row = row, container = src, x = x, y = y - 4}
+    local ok, reason = commit(s, changed)
+    if not ok then
+        dispose(entity, player)
+        return nil, reason
+    end
+    GlobalsSetValue(receipt(token), "1")
+    return true, entity
+end
+
+function NHTransfers.reconcile(s, player)
+    -- The engine tag index limits the scan to loaded items touched by this
+    -- mod. Nothing examines or deletes unmarked lookalikes on an old save.
+    -- Prefer the player's extant copy if a rolled-back world reintroduces a
+    -- second instance; also cover held entities missing from the tag index.
+    local tracked, listed = {}, {}
+    for _, entity in ipairs(GameGetAllInventoryItems(player) or {}) do
+        if marker(entity) then
+            listed[entity] = true
+            table.insert(tracked, entity)
+        end
+    end
+    for _, entity in ipairs(EntityGetWithTag(tag) or {}) do
+        if not listed[entity] then table.insert(tracked, entity) end
+    end
+    local j = journal(s)
+    if #tracked == 0 and not next(j.issued) then return true end
+    local ids, origins = storage_ids(s)
+    local seen = {}
+    for _, entity in ipairs(tracked) do
+        if EntityGetIsAlive(entity) then
+            local token = marker(entity)
+            if token then
+                if j.retired[token] or origins[token] or stored_release(s, token, ids) then
+                    dispose(entity, player)
+                elseif j.issued[token] then
+                    if seen[token] then
+                        dispose(entity, player)
+                    else
+                        seen[token] = true
+                        if GlobalsGetValue(receipt(token), "") ~= "1" then GlobalsSetValue(receipt(token), "1") end
+                    end
+                end
+            end
+        end
+    end
+    local x, y = EntityGetTransform(player)
+    local changed
+    for token, release in pairs(j.issued) do
+        -- Reclaim only in the original loaded delivery area after a world
+        -- rewind. A receipt means picked up, spent, broken or carried away
+        -- are all ordinary world outcomes.
+        if not seen[token] and GlobalsGetValue(receipt(token), "") ~= "1"
+            and math.abs(x - release.x) < 64 and math.abs(y - release.y) < 64
+            and DoesWorldExistAt(math.floor(release.x) - 16, math.floor(release.y) - 16,
+                math.ceil(release.x) + 16, math.ceil(release.y) + 16) then
+            changed = changed or draft(s)
+            local dest = release.container
+            if dest == "safe" and #changed.safe >= 1 then dest = "warehouse" end
+            if not ids[release.row.id] then
+                table.insert(changed[dest], release.row)
+                ids[release.row.id] = true
+            end
+            changed.transit.retired[token] = true
+            changed.transit.issued[token] = nil
+        end
+    end
+    if changed then return commit(s, changed) end
+    return true
+end

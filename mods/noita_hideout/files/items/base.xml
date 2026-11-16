@@ -1,0 +1,16 @@
+<Entity>
+    <PhysicsBodyComponent _tags="enabled_in_world" uid="1" allow_sleep="1" angular_damping="0.7"
+        is_bullet="1" auto_clean="0" hax_fix_going_through_ground="1" on_death_leave_physics_body="0" />
+    <PhysicsImageShapeComponent body_id="1" centered="1" material="item_box2d" />
+    <PhysicsKeepInWorldComponent check_whole_aabb="1" predict_aabb="1" />
+    <PhysicsThrowableComponent max_throw_speed="120" throw_force_coeff="0.8" />
+    <VelocityComponent _tags="enabled_in_world" />
+    <SpriteComponent _tags="enabled_in_hand" _enabled="0" />
+    <ItemComponent _tags="enabled_in_world" is_pickable="1" is_equipable_forced="1"
+        preferred_inventory="QUICK" max_child_items="0" play_spinning_animation="0"
+        is_consumable="0" is_stackable="0" always_use_item_name_in_ui="1" />
+    <UIInfoComponent _tags="enabled_in_world" />
+    <AbilityComponent throw_as_item="0" click_to_use="0" use_gun_script="0">
+        <gun_config deck_capacity="0" />
+    </AbilityComponent>
+</Entity>

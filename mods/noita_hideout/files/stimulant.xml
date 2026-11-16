@@ -1,0 +1,7 @@
+<Entity name="noita_hideout_fire_dose" tags="noita_hideout_stimulant">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="PROTECTION_FIRE" frames="3600" exclusivity_group="0" />
+    <UIIconComponent name="$perk_protection_fire" description="$perkdesc_protection_fire"
+        icon_sprite_file="data/ui_gfx/perk_icons/protection_fire.png" is_perk="0"
+        display_in_hud="1" display_above_head="0" />
+</Entity>
