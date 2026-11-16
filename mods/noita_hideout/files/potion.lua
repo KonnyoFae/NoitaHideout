@@ -188,6 +188,10 @@ local short_names = {
     [unstable] = {"不稳定传送液", "Unstable teleportatium"},
     [stable] = {"稳定传送液", "Teleportatium"},
     slime = {"黏液", "Slime"},
+    gunpowder = {"普通火药", "Regular gunpowder"},
+    gunpowder_unstable = {"炼金火药", "Alchemical gunpowder"},
+    magic_liquid_hp_regeneration = {"生命基质", "Healthium"},
+    purifying_powder = {"净化粉末", "Purifying powder"},
 }
 
 function NHPotion.label(record, lang)
@@ -286,7 +290,11 @@ function NHPotion.contentsColor(record)
     end
 end
 
-function NHPotion.materialName(name)
+function NHPotion.materialName(name,lang)
+    -- The two workshop ingredients share the same vanilla display name.
+    if lang and (name=="gunpowder" or name=="gunpowder_unstable") then
+        return short_names[name][lang=="zh" and 1 or 2]
+    end
     local id=CellFactory_GetType(name)
     if id and id>=0 then
         local label=CellFactory_GetUIName(id)

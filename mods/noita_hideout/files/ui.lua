@@ -127,7 +127,7 @@ local function item_details(slot,model,tr)
         for name in pairs(record.materials) do names[#names+1]=name end
         table.sort(names)
         for _,name in ipairs(names) do
-            lines[#lines+1]=NHPotion.materialName(name).."  "..string.format("%.0f",record.materials[name])
+            lines[#lines+1]=NHPotion.materialName(name,model.lang).."  "..string.format("%.0f",record.materials[name])
         end
         return lines
     end
@@ -354,18 +354,19 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         end
     end
     -- Quantities and timers stay visible even when a long name needs a tooltip.
-    local function value_row(y,name,value,color,tip)
+    local function value_row(y,name,value,color,tip,detail)
         local right=width-6-GuiGetTextDimensions(gui,value,scale)/scale
         local txt,short=fit(name,(right-9)*scale,scale)
         tint(muted)
         GuiText(gui,left+6*scale,top+y*scale,txt,scale)
-        if short then GuiTooltip(gui,name,"") end
+        if short or detail then GuiTooltip(gui,name,detail or "") end
         tint(color)
         GuiText(gui,left+right*scale,top+y*scale,value,scale)
-        if tip then GuiTooltip(gui,tip,"") end
+        if tip then GuiTooltip(gui,tip,detail or "") end
     end
-    local function cost(y,name,have,need)
-        value_row(y,name,compact(have).." / "..compact(need),have>=need and green or gold,name.."  "..have.." / "..need)
+    local function cost(y,name,have,need,detail)
+        value_row(y,name,compact(have).." / "..compact(need),have>=need and green or gold,
+            string.format("%s  %.0f / %.0f",name,have,need),detail)
     end
     local function order_status(y)
         local remaining=time_text(model.order_remaining)
@@ -397,7 +398,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         label(y,tr("物料  库存 / 所需","Materials  stock / cost"),muted)
         for _,input in ipairs(selected.inputs) do
             y=y+12
-            cost(y,input.name,input.available,input.amount)
+            cost(y,input.name,input.available,input.amount,input.detail)
         end
         if show_outputs then
             y=y+13

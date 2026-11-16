@@ -1,3 +1,3 @@
 <Mod name="Hideout Prototype | 藏身处测试版"
-     description="0.16.0 | Open your inventory near spawn to visit the hideout shop. Buy materials and supplies with your piggy bank savings and collect them from storage."
+     description="0.17.0 | Open your inventory near spawn to use the hideout. Separate stored gunpowder into Healthium and Purifying Powder in the alchemy workshop."
      request_no_api_restrictions="0" />

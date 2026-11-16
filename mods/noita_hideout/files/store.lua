@@ -555,6 +555,14 @@ for i=1,#NHStore.recipes do
     if recipe.reversible then table.insert(NHStore.recipes,reverseRecipe(recipe)) end
 end
 
+-- One-way workshop separation. Consume unstable powder first so that ordinary
+-- gunpowder stays available for the grenade station.
+table.insert(NHStore.recipes,{
+    id="separate_gunpowder",category="alchemy",alchemyMode="decomposition",zh="分解火药",en="Separate gunpowder",
+    inputs={{name="gunpowder",alternatives={"gunpowder_unstable","gunpowder"},amount=500}},
+    materials={magic_liquid_hp_regeneration=250,purifying_powder=250},count=500,
+})
+
 local function findRecipe(id)
     for _,recipe in ipairs(NHStore.recipes) do if recipe.id==id then return recipe end end
 end
@@ -630,15 +638,38 @@ function NHStore.buyGood(state,request)
     return true
 end
 
+local function ingredientSources(input)
+    return input.alternatives or {input.name}
+end
+
+function NHStore.ingredientStock(state,input)
+    local total=0
+    for _,name in ipairs(ingredientSources(input)) do
+        total=total+math.min(state.materials[name] or 0,max_safe_integer-total)
+    end
+    return total
+end
+
+local function allocateIngredient(stock,sources,needed,payment)
+    for _,name in ipairs(sources) do
+        local allocated=payment[name] or 0
+        local take=math.min(needed,(stock[name] or 0)-allocated)
+        if take>0 then payment[name]=allocated+take end
+        needed=needed-take
+        if needed==0 then return true end
+    end
+    return false
+end
+
 function NHStore.canStartBatch(state,recipe)
     recipe=recipe or NHStore.recipe
     if recipe.facility and NHStore.level(state,recipe.facility)==0 then return false,"Facility is locked." end
     if state.order then return false,"Another order is active." end
     local payment={}
     for _,input in ipairs(recipe.inputs) do
-        local required=(payment[input.name] or 0)+input.amount
-        if (state.materials[input.name] or 0)<required then return false,"Not enough bulk ingredients." end
-        payment[input.name]=required
+        if not allocateIngredient(state.materials,ingredientSources(input),input.amount,payment) then
+            return false,"Not enough bulk ingredients."
+        end
     end
     if recipe.emptyContainers and NHStore.emptyContainerCount(state)<recipe.emptyContainers then
         return false,"Not enough empty containers."
@@ -646,25 +677,36 @@ function NHStore.canStartBatch(state,recipe)
     if recipe.item then
         local slot=NHStore.freeSlot(state,"warehouse",nil,recipe.item.kind)
         if not slot then return false,"Product storage is full." end
-        return true,slot
+        return true,slot,payment
     end
-    if not NHStore.canStockMaterials(state,recipe.materials,payment) then return false,"Material storage is full." end
-    return true
+    for name,amount in pairs(recipe.materials) do
+        if (state.materials[name] or 0)-(payment[name] or 0)>max_safe_integer-amount then return false,"Material storage is full." end
+    end
+    if NHStore.canStockMaterials(state,recipe.materials,payment) then return true,nil,payment end
+    local input=recipe.inputs[1]
+    if #recipe.inputs==1 and input.alternatives and #input.alternatives==2 then
+        -- Emptying the other source first can free the missing output slot.
+        local first,second=unpack(input.alternatives)
+        local swapped={}
+        if allocateIngredient(state.materials,{second,first},input.amount,swapped)
+            and NHStore.canStockMaterials(state,recipe.materials,swapped) then return true,nil,swapped end
+    end
+    return false,"Material storage is full."
 end
 
 function NHStore.startOrder(state,id)
     local recipe=findRecipe(id or "stable")
     if not recipe then return false,"Unknown recipe." end
-    local ready,slot=NHStore.canStartBatch(state,recipe)
+    local ready,slot,payment=NHStore.canStartBatch(state,recipe)
     if not ready then return false,slot end
     if recipe.emptyContainers then
         local ok,reason=NHStore.spendEmptyContainers(state,recipe.emptyContainers)
         if not ok then return false,reason end
     end
     local output={item=recipe.item,slot=slot,materials=recipe.materials}
-    for _,input in ipairs(recipe.inputs) do
-        local left=state.materials[input.name]-input.amount
-        state.materials[input.name]=left>0 and left or nil
+    for name,amount in pairs(payment) do
+        local left=state.materials[name]-amount
+        state.materials[name]=left>0 and left or nil
     end
     state.order={id=state.finished+1,recipe=recipe.id,progress=0,required=NHStore.productionFrames(recipe),output=output}
     return true

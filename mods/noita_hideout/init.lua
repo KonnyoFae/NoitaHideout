@@ -324,7 +324,7 @@ local function inventory_view()
         model.docks[row.slot]=view
     end
     for name,amount in pairs(state.materials) do
-        model.materials[#model.materials+1]={key=name,name=NHPotion.materialName(name),amount=amount,slot=NHPotion.materialSlot(name)}
+        model.materials[#model.materials+1]={key=name,name=NHPotion.materialName(name,lang),amount=amount,slot=NHPotion.materialSlot(name)}
     end
     table.sort(model.materials,function(a,b) return a.key<b.key end)
     local function warehouse_slot(kind,slot,view)
@@ -373,7 +373,7 @@ local function inventory_view()
     for _,project in ipairs(model.progression.expansion) do facility_names[project.id]=project.name end
     model.recipes={}
     for _,recipe in ipairs(NHStore.recipes) do
-        local ready,reason=NHStore.canStartBatch(state,recipe)
+        local ready,reason,payment=NHStore.canStartBatch(state,recipe)
         local view={id=recipe.id,category=recipe.category,alchemyMode=recipe.alchemyMode,
             name=tr(recipe.zh,recipe.en),output=recipe.count or 1,
             inputs={},outputs={},duration=math.ceil(NHStore.productionFrames(recipe)/60),
@@ -385,8 +385,20 @@ local function inventory_view()
             view.reason=(lang=="zh" and error_translations[reason]) or reason
         end
         for _,input in ipairs(recipe.inputs) do
-            table.insert(view.inputs,{name=NHPotion.materialName(input.name),amount=input.amount,
-                available=state.materials[input.name] or 0})
+            local name=NHPotion.materialName(input.name,lang)
+            local detail
+            if input.alternatives then
+                name=NHPotion.materialName(input.name)..tr("（合计）"," (total)")
+                local lines={payment and tr("库存 / 本批扣料","Stock / used this batch")
+                    or tr("可混用，按优先顺序列出","Combined stock, in preferred order")}
+                for _,key in ipairs(input.alternatives) do
+                    local amount=string.format("%.0f",state.materials[key] or 0)
+                    if payment then amount=amount..string.format(" / %.0f",payment[key] or 0) end
+                    lines[#lines+1]=NHPotion.materialName(key,lang).."  "..amount
+                end
+                detail=table.concat(lines,"\n")
+            end
+            table.insert(view.inputs,{name=name,amount=input.amount,detail=detail,available=NHStore.ingredientStock(state,input)})
         end
         for name,amount in pairs(recipe.materials or {}) do
             table.insert(view.outputs,{key=name,name=NHPotion.materialName(name),amount=amount})

@@ -455,12 +455,12 @@ assert(#catalog==#NHStore.recipes)
 for _,recipe in ipairs(NHStore.recipes) do
     local entry=assert(has_project(catalog,recipe.id),recipe.id)
     if recipe.category=="alchemy" then
-        local mode=recipe.reverseOf and "decomposition" or "synthesis"
-        assert(entry.category=="alchemy" and entry.alchemyMode==mode,recipe.id)
+        assert(entry.category=="alchemy" and entry.alchemyMode==recipe.alchemyMode,recipe.id)
         assert(entry.duration==math.ceil(NHStore.productionFrames(recipe)/60))
         assert(#entry.inputs==#recipe.inputs and #entry.outputs>0)
         for i,input in ipairs(recipe.inputs) do
-            assert(entry.inputs[i].name==NHPotion.materialName(input.name) and entry.inputs[i].amount==input.amount)
+            local name=input.alternatives and NHPotion.materialName(input.name).." (total)" or NHPotion.materialName(input.name,"en")
+            assert(entry.inputs[i].name==name and entry.inputs[i].amount==input.amount)
         end
         local shown={}
         for _,output in ipairs(entry.outputs) do shown[output.key]=output.amount end
@@ -1008,3 +1008,29 @@ local function testShop()
 end
 testShop()
 print("Controller: shop previews, range, deposits, commit failure, stale funds and reload passed.")
+
+local function testPowderSeparation()
+    settings,flags={},{}
+    new_world()
+    local profile=state()
+    profile.materials={gunpowder_unstable=200,gunpowder=320}
+    assert(NHStore.commit(profile))
+    function CellFactory_GetAllLiquids() return {"magic_liquid_hp_regeneration"} end
+    function CellFactory_GetAllSands() return {"purifying_powder","gunpowder","gunpowder_unstable"} end
+    boot()
+    inventory_open=true
+    local view=tick()
+    local split=assert(has_project(view.recipes,"separate_gunpowder"))
+    assert(split.alchemyMode=="decomposition" and split.ready and split.inputs[1].available==520)
+    assert(split.inputs[1].detail:find("Alchemical gunpowder  200 / 200\nRegular gunpowder  320 / 300",1,true))
+    assert(view.materials[1].name=="Regular gunpowder" and view.materials[2].name=="Alchemical gunpowder")
+    tick(nil,"craft",{id=split.id})
+    assert(state().materials.gunpowder==20 and not state().materials.gunpowder_unstable)
+    advance(NHStore.productionFrames())
+    local stock={}
+    for _,material in ipairs(tick().materials) do stock[material.key]=material end
+    assert(stock.magic_liquid_hp_regeneration.amount==250 and stock.magic_liquid_hp_regeneration.slot==1)
+    assert(stock.purifying_powder.amount==250 and stock.purifying_powder.slot==2)
+end
+testPowderSeparation()
+print("Controller: combined gunpowder stock, separated inputs and liquid/powder delivery passed.")

@@ -96,16 +96,25 @@ local function completeBatch(recipe)
 end
 
 local synthesis,decomposition={},{}
+local powderSeparation
 local ids={}
 for _,recipe in ipairs(NHStore.recipes) do
     assert(not ids[recipe.id],"Duplicate recipe: "..recipe.id)
     ids[recipe.id]=true
     if recipe.category=="alchemy" then
+        assert(not recipe.materials.magic_liquid_hp_regeneration_unstable,recipe.id)
+        for _,input in ipairs(recipe.inputs) do assert(input.name~="magic_liquid_hp_regeneration_unstable",recipe.id) end
         if recipe.reverseOf then
             assert(not decomposition[recipe.reverseOf],recipe.id)
             decomposition[recipe.reverseOf]=recipe
-        else
+        elseif recipe.reversible then
             synthesis[recipe.id]=recipe
+        elseif recipe.id=="separate_gunpowder" then
+            powderSeparation=recipe
+        end
+        if recipe.alchemyMode=="synthesis" and (recipe.materials.gunpowder or recipe.materials.gunpowder_unstable) then
+            local costs=inputAmounts(recipe)
+            assert(not (costs.magic_liquid_hp_regeneration and costs.purifying_powder),recipe.id)
         end
     end
 end
@@ -159,3 +168,64 @@ for id,recipe in pairs(synthesis) do
 end
 for id in pairs(decomposition) do assert(synthesis[id],"Orphan reverse for "..id) end
 print(("Reverse alchemy: %d recipe pairs paid from stock, reserved capacity, reloaded and round-tripped exactly."):format(pairsTested))
+
+local split=assert(powderSeparation,"Missing one-way powder separation")
+assert(split.alchemyMode=="decomposition" and not split.reversible and not split.reverseOf)
+assert(not ids["reverse_"..split.id] and #split.inputs==1 and split.inputs[1].amount==500)
+local yield={magic_liquid_hp_regeneration=250,purifying_powder=250}
+sameStock(split.materials,yield,split.id)
+
+for _,name in ipairs({"gunpowder","gunpowder_unstable"}) do
+    s.materials={[name]=500}
+    completeBatch(split)
+end
+
+-- Visually similar explosives are not substitutes for the final missing unit.
+local short={gunpowder=298,gunpowder_unstable=201,gunpowder_explosive=500,gunpowder_tnt=500,gunpowder_unstable_big=500}
+s.materials={}
+for name,amount in pairs(short) do s.materials[name]=amount end
+assert(NHStore.ingredientStock(s,split.inputs[1])==499)
+assert(not NHStore.canStartBatch(s,split) and not NHStore.startOrder(s,split.id))
+sameStock(s.materials,short,split.id)
+
+s.materials={gunpowder_unstable=185,gunpowder=389,gunpowder_tnt=32}
+assert(NHStore.ingredientStock(s,split.inputs[1])==574)
+assert(NHStore.startOrder(s,split.id))
+sameStock(s.materials,{gunpowder=74,gunpowder_tnt=32},split.id)
+persist()
+sameStock(s.order.output.materials,yield,split.id)
+local before=s.finished
+finish()
+sameStock(s.materials,{gunpowder=74,gunpowder_tnt=32,magic_liquid_hp_regeneration=250,purifying_powder=250},split.id)
+assert(s.finished==before+1)
+
+-- In a full warehouse, keeping even one grain of the ordinary powder leaves
+-- only one slot free. Spending the last grain frees the second product slot.
+local fillers=NHStore.warehouseCapacity(s,"materials")-2
+s.materials={gunpowder=301,gunpowder_unstable=200}
+for i=1,fillers do s.materials["filler_"..i]=1 end
+local ok,reason=NHStore.startOrder(s,split.id)
+assert(not ok and reason=="Material storage is full." and not s.order)
+assert(s.materials.gunpowder==301 and s.materials.gunpowder_unstable==200)
+s.materials.gunpowder=300
+assert(NHStore.canStartBatch(s,split) and NHStore.startOrder(s,split.id))
+assert(not s.materials.gunpowder and not s.materials.gunpowder_unstable)
+assert(not NHStore.canStockMaterials(s,{foreign=1}) and NHStore.canStockMaterials(s,yield))
+persist()
+finish()
+assert(s.materials.magic_liquid_hp_regeneration==250 and s.materials.purifying_powder==250)
+for i=1,fillers do assert(s.materials["filler_"..i]==1) end
+
+-- An existing Healthium stack needs no new slot. Burn through the ordinary
+-- powder instead when the preferred powder stack is too large to empty.
+s.materials={gunpowder=500,gunpowder_unstable=600,magic_liquid_hp_regeneration=17}
+for i=1,fillers-1 do s.materials["filler_"..i]=1 end
+assert(NHStore.canStartBatch(s,split) and NHStore.startOrder(s,split.id))
+assert(not s.materials.gunpowder and s.materials.gunpowder_unstable==600)
+assert(not NHStore.canStockMaterials(s,{foreign=1}))
+persist()
+finish()
+assert(s.materials.magic_liquid_hp_regeneration==267 and s.materials.purifying_powder==250)
+assert(not s.materials.gunpowder and s.materials.gunpowder_unstable==600)
+for i=1,fillers-1 do assert(s.materials["filler_"..i]==1) end
+print("One-way powder separation: both powder types, mixed payment, excluded explosives, capacity and single delivery passed.")

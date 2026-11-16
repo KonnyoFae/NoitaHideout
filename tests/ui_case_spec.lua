@@ -26,7 +26,7 @@ function GuiImage(_,id,x,y,sprite)
     image_colors[id],next_color=next_color,{}
     if sprite=="data/ui_gfx/inventory/quick_inventory_box.png" then tiles[id]={x=x,y=y} end
 end
-function GuiTooltip(_,title) tips[title]=true end
+function GuiTooltip(_,title,body) tips[title]=body or "" end
 function GuiGetImageDimensions() return 20,20 end
 function MagicNumbersGetValue(k) return k=="UI_FULL_INVENTORY_OFFSET_X" and "170" or "20" end
 function GuiGetTextDimensions(_, value, scale)
@@ -407,6 +407,20 @@ render(model,240)
 render(model)
 assert(drawn["炼成"] and drawn["分解"])
 model.lang="en"
+
+local powderInfo="Stock / used this batch\nAlchemical gunpowder  200 / 200\nRegular gunpowder  320 / 300"
+model.recipes[#model.recipes+1]={id="separate_gunpowder",category="alchemy",alchemyMode="decomposition",
+    name="Separate gunpowder",duration=120,ready=true,output=500,
+    inputs={{name="Gunpowder (total)",available=520,amount=500,detail=powderInfo}},
+    outputs={{name="Healthium",amount=250},{name="Purifying powder",amount=250}}}
+render(model,245)
+render(model)
+assert(drawn["520 / 500"] and tips["Gunpowder (total)"]==powderInfo)
+assert(tips["Healthium ×250"] and tips["Purifying powder ×250"])
+action,param=render(model,214)
+assert(action=="craft" and param.id=="separate_gunpowder")
+render(model,240)
+table.remove(model.recipes)
 
 -- Both alchemy lists page independently, including when production is active.
 for _,mode in ipairs({"synthesis","decomposition"}) do
