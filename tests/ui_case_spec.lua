@@ -319,12 +319,34 @@ local first_tile=tiles[1004]
 point(first_tile.x+1,first_tile.y+1)
 assert(drawn["Flask  20/50"] and drawn["water  12"])
 
--- The bank has no inventory cells or pager. Presets move the exact amount;
--- "all" is a separate one-click action in either direction.
-model.walletGold,model.bankGold=234,120345
-render(model,81)
+-- Drag across a category label, then release on the destination page's first slot.
+local function dragFlaskAcrossTab(tab)
+    local source=tiles[1004]
+    point(source.x+2,source.y+2,"press")
+    local b=buttons[tab]
+    pointer={x=b.x+GuiGetTextDimensions(nil,b.name,b.scale)-0.5,y=b.y+2,down=true}
+    render(model)
+    render(model)
+    assert(buttons[tab].color[1]==1,"hovering a category with a flask switches to it")
+    local target=tiles[1004]
+    local command,arg=point(target.x+2,target.y+2,"release")
+    assert(command=="move_dock" and arg.entity==123 and arg.safeSlot==1)
+end
+model.warehouse.containers[1].dockSlot=1
+model.docks[1]=nil
+dragFlaskAcrossTab(80)
+model.docks[1],model.warehouse.containers[1]=model.warehouse.containers[1],nil
 render(model)
-assert(drawn.Wallet and drawn.Savings and drawn["234"] and drawn["120345"] and not panels[299])
+dragFlaskAcrossTab(77)
+model.warehouse.containers[1]=model.docks[1]
+render(model)
+
+-- The bank can be used alongside the current warehouse page.
+model.walletGold,model.bankGold=234,120345
+render(model,224)
+render(model)
+assert(drawn.Wallet and drawn.Savings and drawn["234"] and drawn["120345"] and panels[299] and not buttons[81])
+assert(tiles[1004].x==first_tile.x,"opening the bank should keep warehouse items accessible")
 assert(not render(model,272))
 cmd,arg=render(model,274)
 assert(cmd=="bank_transfer" and arg.direction=="deposit" and arg.amount==100)
@@ -358,16 +380,16 @@ for _,lang in ipairs({"zh","en"}) do
     for _,sw in ipairs({320,427,640}) do
         width=sw
         render(model)
-        local panel=panels[70]
+        local panel=panels[210]
         local function inside(id)
-            local b=assert(buttons[id])
-            assert(b.x>=panel.x and b.x+GuiGetTextDimensions(nil,b.name)<=panel.x+panel.w and b.y+9<panel.y+panel.h)
+            local b=reveal(model,id)
+            assert(b.x>=panel.x and b.x+GuiGetTextDimensions(nil,b.name,b.scale)<=panel.x+panel.w+0.01 and b.y+9*b.scale<panel.y+panel.h)
             return b
         end
         for i=270,277 do inside(i) end
         for i=274,275 do
             local a,b=inside(i),inside(i+2)
-            assert(a.x+GuiGetTextDimensions(nil,a.name)<b.x)
+            assert(a.x+GuiGetTextDimensions(nil,a.name,a.scale)<b.x)
         end
         assert(drawn[lang=="zh" and "存钱罐" or "Piggy bank"])
     end
@@ -379,7 +401,7 @@ point(case_flask.x+1,case_flask.y+1,"press")
 pointer={x=bank_button.x+1,y=bank_button.y+1,released=true}
 assert(not render(model,276),"dragging an item over a money button cannot transfer gold")
 pointer.released=false
-render(model,77)
+render(model,212)
 render(model)
 assert(drawn["[1]"] and not buttons[274])
 render(model,71)
@@ -779,25 +801,72 @@ do
     assert(command=="salvage" and request.mode=="essence" and request.id==32)
     model.essences={}
     for i,key in ipairs(NHEssences.order) do
-        model.essences[i]={name=NHEssences.types[key].en,amount=i==1 and 1234000 or 0}
+        local amount=i==1 and 1234000 or (i==#NHEssences.order and NHStore.maxResourceAmount or 0)
+        model.essences[i]={key=key,name=NHEssences.types[key].en,amount=amount}
+    end
+    local function checkGrid(lang,stacked)
+        local cells={}
+        local draw=GuiText
+        function GuiText(g,x,y,title,s)
+            local w,h=GuiGetTextDimensions(g,title,s)
+            cells[#cells+1]={title=title,x=x,y=y,w=w,h=h,color=next_color}
+            draw(g,x,y,title,s)
+        end
+        render(model)
+        GuiText=draw
+        local first,prior
+        local colors={}
+        for i,entry in ipairs(model.essences) do
+            local kind=NHEssences.types[entry.key]
+            local color=kind.color
+            local label=i==1 and "1.2M" or (i==#NHEssences.order and "9007.1T" or "0")
+            local cell
+            for j,name in ipairs(cells) do
+                local value=cells[j+1]
+                if value and value.title==label and name.color[1]==color[1] and name.color[2]==color[2]
+                    and name.color[3]==color[3] then
+                    local short=entry.name:gsub("精华$",""):gsub(" essence$","")
+                    assert(name.title==short or (lang=="en" and name.title==kind.shortEn))
+                    assert(value.color[1]==color[1] and value.color[2]==color[2] and value.color[3]==color[3])
+                    if stacked then assert(value.x==name.x and value.y>=name.y+name.h-0.01)
+                    else assert(value.x>=name.x+name.w and value.y==name.y) end
+                    cell={x=name.x,y=name.y,right=math.max(name.x+name.w,value.x+value.w),
+                        bottom=value.y+value.h,value=value}
+                    break
+                end
+            end
+            assert(cell,"missing essence: "..entry.name)
+            assert(cell.x>=panels[70].x and cell.right<panels[70].x+panels[70].w and cell.bottom<=panels[299].y+0.01)
+            local signature=table.concat(color,"/")
+            assert(not colors[signature],"two essence types share a color")
+            colors[signature]=true
+            if i==1 then first=cell
+            elseif (i-1)%4==0 then assert(cell.x==first.x and cell.y>=prior.bottom-0.01)
+            else assert(cell.y==prior.y and cell.x>prior.right-0.01) end
+            prior=cell
+        end
+        point(first.value.x+1,first.value.y+1)
+        assert(drawn[model.essences[1].name.."  1234000"])
     end
     local sw,sh=width,height
     width=640
     render(model,82)
-    render(model)
-    assert(drawn.Healing and drawn["1.2M"] and drawn["0"] and drawn["[1]"])
+    checkGrid("en",false)
+    assert(drawn["[1]"] and not drawn["[2]"])
+    -- Further types use the existing warehouse pager.
+    for i=18,21 do model.essences[i]={name="Extra "..i.." essence",amount=i} end
     render(model,301)
     render(model)
-    assert(drawn.Enhancement and drawn["[2]"] and not drawn.Healing)
-    width,height,model.lang=320,180,"zh"
+    assert(drawn["Extra 21"] and drawn["[2]"] and not drawn.Healing)
+    for i=21,18,-1 do model.essences[i]=nil end
+    width,height=320,180
+    checkGrid("en",true)
+    model.lang="zh"
     for i,key in ipairs(NHEssences.order) do model.essences[i].name=NHEssences.types[key].zh end
-    render(model)
-    assert(drawn["强化"] and panels[70].y>=0 and buttons[300].y<height)
-    render(model,300)
-    render(model)
-    assert(drawn["酸液"] and drawn["1.2M"])
-    point(panels[70].x+9,buttons[83].y+18)
-    assert(drawn["治疗精华  1234000"])
+    checkGrid("zh",true)
+    assert(drawn["强化"] and drawn["酸液"] and panels[70].y>=0 and buttons[300].y<height)
+    width=640
+    checkGrid("zh",false)
     width,height,model.lang=sw,sh,"en"
 end
 model.warehouse.containers[2]={kind="potion",id=162,name="Empty flask",salvage_yield=1,salvage_name="Container scrap",salvage_stock=7}
@@ -900,6 +969,7 @@ local function checkStockColumns(lang,stock,rate)
     for _,entry in ipairs(cells) do
         if entry.y==qty.y and entry.x<qty.x then
             assert(entry.right<qty.x,"product name overlaps the stock quantity")
+            assert(entry.value~="..." and entry.value~="","the stock row must identify its product")
             return
         end
     end
@@ -944,7 +1014,7 @@ local function testFarmPanel(lang)
     assert(NHFarm.sync(stock,7200))
     model.farm=NHFarm.view(stock,lang,7200)
     render(model)
-    assert(not buttons[415] and drawn["3:00"] and green_button(432) and buttons[436].y<height)
+    assert(not buttons[415] and drawn["3:00"] and green_button(432) and reveal(model,436).y<height)
     model.farm.plots[1].blocked=true
     render(model)
     local full=lang=="zh" and "农产库存已满" or "Crop storage full"
@@ -963,6 +1033,18 @@ local function testFarmPanel(lang)
     checkStockColumns(lang,"12.3k","0")
     assert(drawn[lang=="zh" and "每分钟" or "Per min"])
     assert(panels[210].y>=0)
+
+    width,height=320,180
+    stock.resources.fiber=NHStore.maxResourceAmount
+    model.farm=NHFarm.view(stock,lang,7200)
+    local measure=GuiGetTextDimensions
+    function GuiGetTextDimensions(g,value,scale)
+        local w,h=measure(g,value,scale)
+        return w*1.125,h
+    end
+    checkStockColumns(lang,"9007.1T","0")
+    assert(drawn[lang=="zh" and "产物" or "Item"])
+    GuiGetTextDimensions=measure
 end
 testFarmPanel("en")
 testFarmPanel("zh")
@@ -982,7 +1064,7 @@ local function testLivestockPanel(lang)
     render(model,444)
     render(model)
     assert(buttons[258] and drawn["120"] and drawn["3:00"] and drawn["2:00"] and drawn["2 / 1"])
-    assert(panels[210].y>=0 and buttons[258].y<height)
+    assert(panels[210].y>=0 and reveal(model,258).y<height)
     local action,request=render(model,258)
     assert(action=="shop_buy" and request.id=="chick" and request.pen==1)
     NHLivestock.deliver(stock,"chick",1,0)
@@ -1094,7 +1176,7 @@ local function testFixedWorkshop()
     for i=1,18 do inputs[i]={name="Ingredient "..i,amount=1,available=3} end
     model.recipes={{id="long_recipe",category="medical",name="Long recipe",duration=120,
         output=1,ready=true,inputs=inputs}}
-    local tabs={212,218,219,220,221,223,213}
+    local tabs={212,218,219,220,224,221,223,213}
     for _,lang in ipairs({"en","zh"}) do
         model.lang=lang
         for _,size in ipairs({{320,180},{427,240},{640,360}}) do
@@ -1147,3 +1229,34 @@ local function testFixedWorkshop()
 end
 testFixedWorkshop()
 print("UI: fixed warehouse and hideout bounds, stationary tabs, independent folding and scrollable confirmations passed.")
+
+local function testWarehouseTabs()
+    local ids={75,76,77,78,79,80,82,83}
+    local names={zh={"魔杖","法术","容器","消耗品","装备","物料","精华","藏品"},
+        en={"Wands","Spells","Containers","Supplies","Equipment","Materials","Essences","Collection"}}
+    for lang,titles in pairs(names) do
+        model.lang=lang
+        for _,size in ipairs({{320,180},{427,240},{640,360}}) do
+            width,height=size[1],size[2]
+            for _,selected in ipairs(ids) do
+                render(model,selected)
+                render(model)
+                local panel=panels[70]
+                assert(panel.x+panel.w<panels[210].x and panels[210].x+panels[210].w<panels[10].x)
+                local right=panel.x
+                local seen={}
+                for i,id in ipairs(ids) do
+                    local b=assert(buttons[id])
+                    assert(b.y==buttons[75].y and b.x>right,"warehouse tabs must have separate buttons on one row")
+                    assert(not seen[b.name] and (b.name==titles[i] or tips[titles[i]]),"short titles must be unique and explainable")
+                    seen[b.name]=true
+                    right=b.x+GuiGetTextDimensions(nil,b.name,b.scale)
+                    assert(right<panel.x+panel.w)
+                    assert((b.color[1]==1)==(id==selected))
+                end
+            end
+        end
+    end
+end
+testWarehouseTabs()
+print("UI: single-row warehouse navigation, localized labels and bottle dragging across tabs passed.")

@@ -6,10 +6,16 @@ local warehouse_tab, folded = "wand", false
 local warehouse_pages = {}
 local bank_amount=1
 local bank_amounts={1,10,100,1000}
+local warehouse_tabs_y=22
 local warehouse_tabs = {
-    {"wand","魔杖","Wands"}, {"spell","法术","Spells"}, {"containers","容器","Containers"},
-    {"supplies","消耗品","Supplies"}, {"equipment","装备","Equipment"}, {"materials","物料","Materials"},
-    {"bank","存钱罐","Piggy bank"}, {"essences","精华","Essences"}, {"collection","藏品","Collection"},
+    {id=75,key="wand",zh="魔杖",en="Wands",shortZh="杖",shortEn="Wand"},
+    {id=76,key="spell",zh="法术",en="Spells",shortZh="术",shortEn="Spell"},
+    {id=77,key="containers",zh="容器",en="Containers",shortEn="Cont."},
+    {id=78,key="supplies",zh="消耗品",en="Supplies",shortZh="消耗",shortEn="Sup."},
+    {id=79,key="equipment",zh="装备",en="Equipment",shortEn="Gear"},
+    {id=80,key="materials",zh="物料",en="Materials",shortEn="Mats"},
+    {id=82,key="essences",zh="精华",en="Essences",shortEn="Ess."},
+    {id=83,key="collection",zh="藏品",en="Collection",shortEn="Cards"},
 }
 local workshop_folded=false
 local list_pages={}
@@ -25,6 +31,7 @@ local work_tabs={
     {key="expansion",id=218,zh="扩建",en="Build"},
     {key="upgrade",id=219,zh="升级",en="Upgrades"},
     {key="shop",id=220,zh="商店",en="Shop"},
+    {key="bank",id=224,zh="存钱罐",en="Piggy bank"},
     {key="farm",id=221,zh="种植",en="Farm"},
     {key="livestock",id=223,zh="畜牧",en="Livestock"},
     {key="samples",id=213,zh="测试物资",en="Supplies"},
@@ -208,16 +215,34 @@ local function home_layout(sw,scale,tile_width)
 end
 
 local function stash_tabs(width,scale,tr)
-    local x,y=8,22
     local tabs={}
+    local available=width-8
+    local label_room=available-(#warehouse_tabs-1)*2
+    local total=0
     for i,t in ipairs(warehouse_tabs) do
-        local name=tr(t[2],t[3])
+        local name=tr(t.zh,t.en)
         local w=GuiGetTextDimensions(gui,name,scale)/scale
-        if x>8 and x+w>width-6 then x,y=8,y+13 end
-        tabs[i]={x=x,y=y,name=name}
-        x=x+w+8
+        tabs[i]={name=name,full=name,w=w}
+        total=total+w
     end
-    return tabs,y+15
+    -- Use recognizable short labels before shrinking text on narrow displays.
+    if total*0.85>label_room then
+        total=0
+        for i,t in ipairs(warehouse_tabs) do
+            local pos=tabs[i]
+            pos.name=tr(t.shortZh or t.zh,t.shortEn or t.en)
+            pos.w=GuiGetTextDimensions(gui,pos.name,scale)/scale
+            total=total+pos.w
+        end
+    end
+    local factor=math.min(1,label_room/total)
+    local spacing=math.min(8,(available-total*factor)/(#tabs-1))
+    local x=4
+    for _,pos in ipairs(tabs) do
+        pos.x,pos.scale,pos.w=x,scale*factor,pos.w*factor
+        x=x+pos.w+spacing
+    end
+    return tabs,warehouse_tabs_y+15
 end
 
 -- Keep the ends of a long page strip reachable and center the nearby numbers.
@@ -250,67 +275,105 @@ local function time_text(seconds)
     return string.format("%d:%02d",math.floor(seconds/60),seconds%60)
 end
 
-local function draw_bank(model,left,top,width,scale,tr,dispatch)
-    local x=left+8*scale
-    local right=left+(width-8)*scale
-    local function balance(y,title,value,infinite)
-        local amount=infinite and "∞" or (value and string.format("%.0f",value) or "—")
-        local amount_x=right-GuiGetTextDimensions(gui,amount,scale)
-        local shown,short=fit(title,amount_x-x-3*scale,scale)
-        tint(muted)
-        GuiText(gui,x,top+y*scale,shown,scale)
-        if short then GuiTooltip(gui,title,"") end
-        tint(gold)
-        GuiText(gui,amount_x,top+y*scale,amount,scale)
-        if infinite then GuiTooltip(gui,tr("无限金币钱包不支持存取","Transfers unavailable with infinite gold"),"")
-        elseif value==nil then GuiTooltip(gui,tr("当前钱包不可用","Wallet unavailable"),"") end
+local function bank_balances(model,width,scale,tr)
+    local rows={{title=tr("随身金币","Wallet"),value=model.walletGold,infinite=model.walletInfinite},
+        {title=tr("存款","Savings"),value=model.bankGold}}
+    local y=0
+    local room=(width-8)*scale
+    for _,r in ipairs(rows) do
+        r.amount=r.infinite and "∞" or (r.value and string.format("%.0f",r.value) or "—")
+        r.y=y
+        local w=GuiGetTextDimensions(gui,r.amount,scale)
+        if GuiGetTextDimensions(gui,r.title,scale)+3*scale+w>room then y=y+11 end
+        r.value_y=y
+        r.value_scale=scale*math.min(1,room/w)
+        y=y+13
     end
-    balance(0,tr("随身金币","Wallet"),model.walletGold,model.walletInfinite)
-    balance(13,tr("存款","Savings"),model.bankGold)
+    return rows,y
+end
+
+local function draw_bank(model,left,top,width,scale,tr,dispatch,rows,controls_y)
+    local x=left+4*scale
+    local right=left+(width-4)*scale
+    for _,r in ipairs(rows) do
+        tint(muted)
+        GuiText(gui,x,top+r.y*scale,r.title,scale)
+        tint(gold)
+        GuiText(gui,right-GuiGetTextDimensions(gui,r.amount,r.value_scale),top+r.value_y*scale,r.amount,r.value_scale)
+        if r.infinite then GuiTooltip(gui,tr("无限金币钱包不支持存取","Transfers unavailable with infinite gold"),"")
+        elseif r.value==nil then GuiTooltip(gui,tr("当前钱包不可用","Wallet unavailable"),"") end
+    end
+    local controls=top+controls_y*scale
     tint(muted)
-    GuiText(gui,x,top+30*scale,tr("存取金额","Transfer amount"),scale)
-    local cell=(right-x)/#bank_amounts
+    GuiText(gui,x,controls+4*scale,tr("存取金额","Transfer amount"),scale)
+    local titles,total={},0
     for i,n in ipairs(bank_amounts) do
-        local selected=n==bank_amount
-        local title=selected and ("["..n.."]") or tostring(n)
-        tint(selected and gold or white)
-        local center=x+(i-0.5)*cell
-        if GuiButton(gui,269+i,center-GuiGetTextDimensions(gui,title,scale)/2,top+43*scale,title,scale) and not drag then
+        titles[i]=n==bank_amount and ("["..n.."]") or tostring(n)
+        total=total+GuiGetTextDimensions(gui,titles[i],scale)
+    end
+    local gaps=#bank_amounts-1
+    local factor=math.min(1,(right-x-2*scale*gaps)/total)
+    local gap=(right-x-total*factor)/gaps
+    local bx=x
+    for i,n in ipairs(bank_amounts) do
+        tint(n==bank_amount and gold or white)
+        if GuiButton(gui,269+i,bx,controls+17*scale,titles[i],scale*factor) and not drag then
             bank_amount=n
         end
+        bx=bx+GuiGetTextDimensions(gui,titles[i],scale*factor)+gap
     end
-    local function action(id,y,title,direction,amount,source,destination)
+    local function action(id,y,title,direction,amount,source,destination,other_title)
         local n=amount=="all" and (source or 0) or amount
         local enabled=not model.walletInfinite and source and destination and n>0 and source>=n
             and n<=NHStore.maxGold-destination
-        local bx=amount=="all" and right-GuiGetTextDimensions(gui,title,scale) or x
+        local shown=title
+        if other_title and GuiGetTextDimensions(gui,title,scale)+GuiGetTextDimensions(gui,other_title,scale)+3*scale>right-x then
+            shown=tr("全部","All")
+        end
+        local bx=amount=="all" and right-GuiGetTextDimensions(gui,shown,scale) or x
         tint(enabled and green or muted)
-        if GuiButton(gui,id,bx,top+y*scale,title,scale) and enabled and not drag then
+        if GuiButton(gui,id,bx,controls+y*scale,shown,scale) and enabled and not drag then
             dispatch("bank_transfer",{direction=direction,amount=amount})
         end
+        if shown~=title then GuiTooltip(gui,title,"") end
     end
-    action(274,61,tr("存入","Deposit"),"deposit",bank_amount,model.walletGold,model.bankGold)
-    action(276,61,tr("全部存入","Deposit all"),"deposit","all",model.walletGold,model.bankGold)
-    action(275,77,tr("取出","Withdraw"),"withdraw",bank_amount,model.bankGold,model.walletGold)
-    action(277,77,tr("全部取出","Withdraw all"),"withdraw","all",model.bankGold,model.walletGold)
+    local deposit,withdraw=tr("存入","Deposit"),tr("取出","Withdraw")
+    action(274,35,deposit,"deposit",bank_amount,model.walletGold,model.bankGold)
+    action(276,35,tr("全部存入","Deposit all"),"deposit","all",model.walletGold,model.bankGold,deposit)
+    action(275,51,withdraw,"withdraw",bank_amount,model.bankGold,model.walletGold)
+    action(277,51,tr("全部取出","Withdraw all"),"withdraw","all",model.bankGold,model.walletGold,withdraw)
 end
 
+local essence_columns,essence_rows=4,5
 local function draw_essences(entries,start,limit,left,top,width,scale,mx,my)
-    local column_width=(width-16)/2
+    local column_width=(width-8)/essence_columns
+    local cell_width=(column_width-3)*scale
+    local stacked=column_width<50
+    local pitch=stacked and 18 or 14
+    local line_height=(stacked and 9 or 13)*scale
     local tip
     for i=1,math.min(limit,#entries-start+1) do
         local entry=entries[start+i-1]
-        local x=left+(8+(i-1)%2*column_width)*scale
-        local y=top+(2+math.floor((i-1)/2)*13)*scale
-        local right=x+(column_width-4)*scale
+        local kind=NHEssences.types[entry.key]
+        local x=left+(4+(i-1)%essence_columns*column_width)*scale
+        local y=top+(2+math.floor((i-1)/essence_columns)*pitch)*scale
         local value=compact(entry.amount)
-        local value_x=right-GuiGetTextDimensions(gui,value,scale)
+        local full_width,full_height=GuiGetTextDimensions(gui,value)
+        local value_scale=math.min(scale,(stacked and cell_width or cell_width*0.55)/full_width,line_height/full_height)
+        local value_width=GuiGetTextDimensions(gui,value,value_scale)
+        local name_space=stacked and cell_width or cell_width-value_width-2*scale
         local name=entry.name:gsub("精华$",""):gsub(" [Ee]ssence$","")
-        tint(entry.amount>0 and white or muted)
-        GuiText(gui,x,y,fit(name,value_x-x-3*scale,scale),scale)
-        tint(entry.amount>0 and green or muted)
-        GuiText(gui,value_x,y,value,scale)
-        if mx>=x and mx<right and my>=y and my<y+12*scale then
+        if kind and entry.name==kind.en and GuiGetTextDimensions(gui,name,scale)>name_space then
+            name=kind.shortEn
+        end
+        local name_width,name_height=GuiGetTextDimensions(gui,name)
+        local name_scale=math.min(scale,name_space/math.max(1,name_width),line_height/name_height)
+        local color=kind and kind.color or white
+        tint(color)
+        GuiText(gui,x,y,name,name_scale)
+        tint(color)
+        GuiText(gui,stacked and x or x+cell_width-value_width,y+(stacked and 9*scale or 0),value,value_scale)
+        if mx>=x and mx<x+column_width*scale and my>=y and my<y+pitch*scale then
             tip={entry.name.."  "..string.format("%.0f",entry.amount)}
         end
     end
@@ -396,23 +459,24 @@ local function draw_livestock(farm,y,tr,button,label,value_row)
     end
 end
 
+local function position_work_tabs(tabs,y,width,scale,tr,debug)
+    local x,positions=6,{}
+    for _,t in ipairs(tabs) do
+        if t.key~="samples" or debug then
+            local name=tr(t.zh,t.en)
+            local w=GuiGetTextDimensions(gui,name,scale)/scale
+            if x>6 and x+w>width-5 then x,y=6,y+13 end
+            positions[#positions+1]={id=t.id,key=t.key,name=name,x=x,y=y}
+            x=x+w+7
+        end
+    end
+    return positions,y+16
+end
+
 local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local left,width=layout.middle,layout.bench
     if not model.debug and tab=="samples" then tab="orders" end
-    local function position_tabs(tabs,y)
-        local x,positions=6,{}
-        for _,t in ipairs(tabs) do
-            if t.key~="samples" or model.debug then
-                local name=tr(t.zh,t.en)
-                local w=GuiGetTextDimensions(gui,name,scale)/scale
-                if x>6 and x+w>width-5 then x,y=6,y+13 end
-                positions[#positions+1]={id=t.id,key=t.key,name=name,x=x,y=y}
-                x=x+w+7
-            end
-        end
-        return positions,y+16
-    end
-    local nav,body=position_tabs(work_tabs,18)
+    local nav,body=layout.workTabs,layout.navEnd
     local nav_end=body
     local crafting=tab=="orders"
     local alchemy=crafting and recipe_category=="alchemy"
@@ -454,26 +518,32 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             or (salvage_target.mode=="essence" and not salvage.essence) then salvage_target,salvage=nil,nil end
     end
     local per_card=salvage and salvage_target.mode=="essence" and salvage.essence.per_card
-    local category_nav,alchemy_nav
-    if crafting and not selected and not salvage then
-        category_nav,body=position_tabs(recipe_tabs,body)
-        if alchemy then alchemy_nav,body=position_tabs(alchemy_tabs,body) end
-    elseif shopping and not selected and not salvage then
-        category_nav,body=position_tabs(shop_tabs,body)
-    elseif farming and not salvage then
-        category_nav,body=position_tabs(farm_tabs,body)
-    elseif ranching and not salvage then
-        category_nav,body=position_tabs(livestock_tabs,body)
+    local category_tabs
+    if not salvage then
+        if crafting and not selected then category_tabs=recipe_tabs
+        elseif shopping and not selected then category_tabs=shop_tabs
+        elseif farming then category_tabs=farm_tabs
+        elseif ranching then category_tabs=livestock_tabs end
     end
+    local category_nav,alchemy_nav
+    local function position_subtabs()
+        category_nav,body=position_work_tabs(category_tabs,nav_end,width,scale,tr)
+        if alchemy then alchemy_nav,body=position_work_tabs(alchemy_tabs,body,width,scale,tr) end
+    end
+    if category_tabs then position_subtabs() end
     local function available(item)
         if crafting then return item.ready and item.unlocked~=false and not model.order_active end
         if shopping then return item.ready end
         return item.canBuy
     end
     local body_height=62
+    local balances,transfer_y
     if tab=="samples" and not salvage then body_height=82
     elseif salvage then
         body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)+(per_card and 13 or 0)
+    elseif tab=="bank" then
+        balances,transfer_y=bank_balances(model,width,scale,tr)
+        body_height=transfer_y+65
     elseif ranching then
         if livestock_page=="produce" then body_height=13*(1+#model.farm.produce)+5
         elseif selected_pen and model.farm.pens[selected_pen] then body_height=84
@@ -552,7 +622,10 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         end
         return hover
     end
-    if scroll and scroll_y==nav_end then begin_scroll() end
+    if scroll and scroll_y==nav_end then
+        begin_scroll()
+        if category_tabs then position_subtabs() end
+    end
     for _,t in ipairs(category_nav or {}) do
         local current=ranching and livestock_page or farming and farm_page or (shopping and shop_category or recipe_category)
         if button(t.id,t.x,t.y,t.name,t.key==current and gold or muted) then
@@ -597,8 +670,11 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         end
         local name_x=left+4*scale
         local rate_right=left+(width-3)*scale
-        local stock_right=rate_right-rate_w-3*scale
-        local name_w=stock_right-stock_w-3*scale-name_x
+        -- A scrollbar and large balances can otherwise squeeze every crop name down to "...".
+        local min_name=GuiGetTextDimensions(gui,tr("草...","W..."),scale)
+        local number_factor=math.min(1,(rate_right-name_x-6*scale-min_name)/(stock_w+rate_w))
+        local stock_right=rate_right-rate_w*number_factor-3*scale
+        local name_w=stock_right-stock_w*number_factor-3*scale-name_x
         for i,r in ipairs(rows) do
             local row_y=top+(y+(i-1)*13)*scale
             local entry=r.entry
@@ -608,10 +684,10 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             GuiText(gui,name_x,row_y,fit(r.name,name_w,scale),scale)
             if detail then GuiTooltip(gui,r.name,detail) end
             tint(entry and entry.stock>0 and white or muted)
-            GuiText(gui,stock_right-r.stockWidth,row_y,r.stock,scale)
+            GuiText(gui,stock_right-r.stockWidth*number_factor,row_y,r.stock,scale*number_factor)
             if detail then GuiTooltip(gui,r.name,detail) end
             tint(entry and entry.perMinute>0 and green or muted)
-            GuiText(gui,rate_right-r.rateWidth,row_y,r.rate,scale)
+            GuiText(gui,rate_right-r.rateWidth*number_factor,row_y,r.rate,scale*number_factor)
             if detail then GuiTooltip(gui,r.name,detail)
             else GuiTooltip(gui,tr("每分钟产量","Output per minute"),tr("按当前完整生产周期计算","Average over a full production cycle")) end
         end
@@ -676,6 +752,9 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             end
         else label(y+26,tr("库存已满","Storage full"),muted) end
         if button(261,6,y+38,tr("取消","Cancel")) then salvage_target=nil end
+    elseif tab=="bank" then
+        if in_scroll then balances,transfer_y=bank_balances(model,width,scale,tr) end
+        draw_bank(model,left,top+body*scale,width,scale,tr,dispatch,balances,transfer_y)
     elseif ranching then
         if livestock_page=="produce" then stock_table(model.farm.produce,body)
         else draw_livestock(model.farm,body,tr,button,label,value_row) end
@@ -937,32 +1016,28 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         if not folded then
             for i,t in ipairs(warehouse_tabs) do
                 local pos=tabs[i]
-                tint(t[1]==warehouse_tab and gold or muted)
-                local bx,by=left+pos.x*scale,top+pos.y*scale
-                local clicked=GuiButton(gui,74+i,bx,by,pos.name,scale)
+                tint(t.key==warehouse_tab and gold or muted)
+                local bx,by=left+pos.x*scale,top+warehouse_tabs_y*scale
+                local clicked=GuiButton(gui,t.id,bx,by,pos.name,pos.scale)
+                if pos.name~=pos.full and not drag then GuiTooltip(gui,pos.full,"") end
                 -- A stored bottle can cross between both pages without visiting the quick bar.
                 local cross=drag and drag.source.kind=="potion" and
-                    ((drag.source.key=="warehouse" and t[1]=="materials") or (drag.source.key=="docks" and t[1]=="containers"))
-                local over=cross and mx>=bx and mx<bx+GuiGetTextDimensions(gui,pos.name,scale) and my>=by and my<by+10*scale
-                if (clicked and not drag or over) and warehouse_tab~=t[1] then
-                    warehouse_tab,loading=t[1],nil
+                    ((drag.source.key=="warehouse" and t.key=="materials") or (drag.source.key=="docks" and t.key=="containers"))
+                local over=cross and mx>=bx and mx<bx+pos.w*scale and my>=by and my<by+10*scale
+                if (clicked and not drag or over) and warehouse_tab~=t.key then
+                    warehouse_tab,loading=t.key,nil
                     return
                 end
             end
             local bulk=warehouse_tab=="materials"
             local essences=warehouse_tab=="essences"
-            local per_page=essences and 12 or (bulk and material_rows*2 or cols*math.floor(content_height/qh))
+            local per_page=essences and essence_columns*essence_rows or (bulk and material_rows*2 or cols*math.floor(content_height/qh))
             local capacity=essences and #model.essences or model.warehouse_capacity[warehouse_tab]
-            local page_no
-            if warehouse_tab=="bank" then
-                draw_bank(model,left,top+grid_y*scale,width,scale,tr,dispatch)
-            else
-                local pages=math.max(1,math.ceil((bulk and #model.materials or capacity)/per_page))
-                local current=warehouse_pages[warehouse_tab] or 1
-                page_no=warehouse_pager(left+4*scale,top+(height-17)*scale,width-8,scale,current,pages)
-                if current~=page_no then loading=nil end
-                warehouse_pages[warehouse_tab]=page_no
-            end
+            local pages=math.max(1,math.ceil((bulk and #model.materials or capacity)/per_page))
+            local current=warehouse_pages[warehouse_tab] or 1
+            local page_no=warehouse_pager(left+4*scale,top+(height-17)*scale,width-8,scale,current,pages)
+            if current~=page_no then loading=nil end
+            warehouse_pages[warehouse_tab]=page_no
             if essences then
                 stock_tip=draw_essences(model.essences,(page_no-1)*per_page+1,per_page,left,top+grid_y*scale,width,scale,mx,my)
             elseif bulk then
@@ -1035,7 +1110,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                     end
                 end
                 if not held_target then loading=nil end
-            elseif page_no then
+            else
                 local rows=model.warehouse[warehouse_tab] or {}
                 for i=0,math.min(per_page,capacity-(page_no-1)*per_page)-1 do
                     local n=(page_no-1)*per_page+i+1
@@ -1267,16 +1342,20 @@ function NHUI.draw(model, dispatch)
     if at_home then
         local qw,qh=GuiGetImageDimensions(gui,tile)
         local content_height=qh+30+material_rows*11
-        layout=home_layout(sw,s,qw)
-        layout.tabs,layout.gridY=stash_tabs(layout.stash,s,tr)
-        local fit_scale=(sh-10)/(layout.gridY+content_height+18)
+        local function measure_home(scale)
+            local panels=home_layout(sw,scale,qw)
+            panels.tabs,panels.gridY=stash_tabs(panels.stash,scale,tr)
+            panels.workTabs,panels.navEnd=position_work_tabs(work_tabs,18,panels.bench,scale,tr,model.debug)
+            panels.contentHeight=content_height
+            panels.panelHeight=math.max(panels.gridY,panels.navEnd)+content_height+18
+            return panels
+        end
+        layout=measure_home(s)
+        local fit_scale=(sh-10)/layout.panelHeight
         if fit_scale<s then
             s=fit_scale
-            layout=home_layout(sw,s,qw)
-            layout.tabs,layout.gridY=stash_tabs(layout.stash,s,tr)
+            layout=measure_home(s)
         end
-        layout.contentHeight=content_height
-        layout.panelHeight=layout.gridY+content_height+18
         pw=layout.secure
     end
     local ox,oy=sw-pw*s-5,sh-ph*s-5

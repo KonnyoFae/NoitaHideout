@@ -25,23 +25,23 @@ for id, profile in pairs(NHEssences.healingProfiles) do
     NHEssences.values[id] = profile.amount
 end
 
-local function define(key, zh, en, actions)
+local function define(key, zh, en, shortEn, color, actions)
     table.insert(NHEssences.order, key)
-    NHEssences.types[key] = {zh = zh, en = en}
+    NHEssences.types[key] = {zh = zh, en = en, shortEn = shortEn, color = color}
     for _, action in ipairs(actions) do
         NHEssences.byAction[action] = key
     end
 end
 
-define("essence_healing", "治疗精华", "Healing essence", {
+define("essence_healing", "治疗精华", "Healing essence", "Heal", {0.49,0.95,0.69}, {
     "HEAL_BULLET", "ANTIHEAL", "REGENERATION_FIELD",
 })
 
-define("essence_acid", "酸液精华", "Acid essence", {
+define("essence_acid", "酸液精华", "Acid essence", "Acid", {0.77,0.96,0.30}, {
     "ACIDSHOT", "CLOUD_ACID",
 })
 
-define("essence_high_energy", "高能精华", "High-energy essence", {
+define("essence_high_energy", "高能精华", "High-energy essence", "Energy", {1.00,0.72,0.30}, {
     "BOMB", "DYNAMITE", "ROCKET", "ROCKET_TIER_2", "ROCKET_TIER_3", "MISSILE", "GRENADE",
     "GRENADE_TRIGGER", "GRENADE_TIER_2", "GRENADE_TIER_3", "GRENADE_ANTI", "GRENADE_LARGE",
     "MINE", "MINE_DEATH_TRIGGER", "PIPE_BOMB", "PIPE_BOMB_DEATH_TRIGGER", "EXPLODING_DEER",
@@ -51,24 +51,24 @@ define("essence_high_energy", "高能精华", "High-energy essence", {
     "PURPLE_EXPLOSION_FIELD", "METEOR_RAIN",
 })
 
-define("essence_fire", "火焰精华", "Fire essence", {
+define("essence_fire", "火焰精华", "Fire essence", "Fire", {1.00,0.48,0.32}, {
     "FLAMETHROWER", "FIREBOMB", "DARKFLAME", "FIREBALL", "METEOR", "FIRE_BLAST",
 })
 
-define("essence_lightning", "雷电精华", "Lightning essence", {
+define("essence_lightning", "雷电精华", "Lightning essence", "Shock", {1.00,0.94,0.48}, {
     "LIGHTNING", "BALL_LIGHTNING", "THUNDERBALL", "THUNDER_BLAST", "ELECTROCUTION_FIELD",
     "PROJECTILE_THUNDER_FIELD", "CLOUD_THUNDER",
 })
 
-define("essence_frost", "冰冻精华", "Frost essence", {
+define("essence_frost", "冰冻精华", "Frost essence", "Frost", {0.54,0.89,1.00}, {
     "ICEBALL", "FREEZING_GAZE", "FREEZE_FIELD",
 })
 
-define("essence_toxin", "毒素精华", "Toxin essence", {
+define("essence_toxin", "毒素精华", "Toxin essence", "Toxin", {0.52,0.78,0.35}, {
     "SLIMEBALL", "MIST_RADIOACTIVE", "POISON_BLAST",
 })
 
-define("essence_bolt", "魔弹精华", "Magic bolt essence", {
+define("essence_bolt", "魔弹精华", "Magic bolt essence", "Bolt", {0.51,0.69,1.00}, {
     "LIGHT_BULLET", "LIGHT_BULLET_TRIGGER", "LIGHT_BULLET_TRIGGER_2", "LIGHT_BULLET_TIMER",
     "BULLET", "BULLET_TRIGGER", "BULLET_TIMER", "HEAVY_BULLET", "HEAVY_BULLET_TRIGGER",
     "HEAVY_BULLET_TIMER", "SLOW_BULLET", "SLOW_BULLET_TRIGGER", "SLOW_BULLET_TIMER", "SPITTER",
@@ -78,48 +78,48 @@ define("essence_bolt", "魔弹精华", "Magic bolt essence", {
     "EXPANDING_ORB", "INFESTATION",
 })
 
-define("essence_cutting", "切削精华", "Cutting essence", {
+define("essence_cutting", "切削精华", "Cutting essence", "Cut", {0.80,0.85,0.92}, {
     "DISC_BULLET", "DISC_BULLET_BIG", "DISC_BULLET_BIGGER", "ARROW", "LANCE", "CHAINSAW",
     "DIGGER", "POWERDIGGER", "LUMINOUS_DRILL", "LASER_LUMINOUS_DRILL", "LASER_EMITTER_CUTTER",
     "CRUMBLING_EARTH",
 })
 
-define("essence_beam", "光束精华", "Beam essence", {
+define("essence_beam", "光束精华", "Beam essence", "Beam", {1.00,0.57,0.81}, {
     "LASER", "MEGALASER", "LASER_EMITTER", "LASER_EMITTER_FOUR",
 })
 
-define("essence_force", "力场精华", "Force field essence", {
+define("essence_force", "力场精华", "Force field essence", "Force", {0.38,0.86,0.78}, {
     "AIR_BULLET", "HOOK", "MAGIC_SHIELD", "BIG_MAGIC_SHIELD", "WALL_HORIZONTAL",
     "WALL_VERTICAL", "WALL_SQUARE", "SHIELD_FIELD",
 })
 
-define("essence_displacement", "位移精华", "Displacement essence", {
+define("essence_displacement", "位移精华", "Displacement essence", "Shift", {0.81,0.66,1.00}, {
     "TELEPORT_PROJECTILE", "TELEPORT_PROJECTILE_SHORT", "TELEPORT_PROJECTILE_STATIC",
     "SWAPPER_PROJECTILE", "TELEPORT_PROJECTILE_CLOSER", "TELEPORTATION_FIELD",
 })
 
-define("essence_gravity", "引力精华", "Gravity essence", {
+define("essence_gravity", "引力精华", "Gravity essence", "Grav", {0.63,0.59,0.96}, {
     "BLACK_HOLE", "BLACK_HOLE_DEATH_TRIGGER", "WHITE_HOLE", "BLACK_HOLE_BIG", "WHITE_HOLE_BIG",
     "BLACK_HOLE_GIGA", "WHITE_HOLE_GIGA", "PROJECTILE_GRAVITY_FIELD", "VACUUM_ENTITIES",
     "VACUUM_POWDER", "VACUUM_LIQUID",
 })
 
-define("essence_summoning", "召唤精华", "Summoning essence", {
+define("essence_summoning", "召唤精华", "Summoning essence", "Summon", {0.86,0.67,0.48}, {
     "FISH", "WORM_SHOT", "PEBBLE", "TENTACLE", "TENTACLE_TIMER", "TENTACLE_PORTAL",
     "SUMMON_EGG", "SPORE_POD", "SWARM_FLY", "SWARM_FIREBUG", "SWARM_WASP", "FRIEND_FLY",
     "WORM_RAIN",
 })
 
-define("essence_creation", "造物精华", "Creation essence", {
+define("essence_creation", "造物精华", "Creation essence", "Create", {0.96,0.89,0.73}, {
     "SUMMON_ROCK", "GLUE_SHOT", "MIST_ALCOHOL", "MIST_SLIME", "MIST_BLOOD", "ALCOHOL_BLAST",
     "CLOUD_WATER", "CLOUD_OIL", "CLOUD_BLOOD",
 })
 
-define("essence_polymorph", "变形精华", "Polymorph essence", {
+define("essence_polymorph", "变形精华", "Polymorph essence", "Morph", {0.92,0.53,0.97}, {
     "POLYMORPH_FIELD", "CHAOS_POLYMORPH_FIELD", "MASS_POLYMORPH",
     "PROJECTILE_TRANSMUTATION_FIELD",
 })
 
-define("essence_enhancement", "强化精华", "Enhancement essence", {
+define("essence_enhancement", "强化精华", "Enhancement essence", "Boost", {1.00,0.59,0.60}, {
     "BERSERK_FIELD", "LEVITATION_FIELD",
 })
