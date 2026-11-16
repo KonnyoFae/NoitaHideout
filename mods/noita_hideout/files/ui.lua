@@ -37,6 +37,12 @@ end
 
 local drag, last_case_frame
 local page = 1
+local material_page,loading=1,nil
+local material_rows=3
+local function storage_key(key)
+    if key=="valuable" then return "safe" end
+    if key=="warehouse" or key=="docks" then return key end
+end
 local full_tile = "data/ui_gfx/inventory/full_inventory_box.png"
 local tile = "data/ui_gfx/inventory/quick_inventory_box.png"
 local icons = {
@@ -48,7 +54,7 @@ local icons = {
 local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
     local frame = GameGetFrameNum()
     local fresh = last_case_frame ~= frame - 1
-    if fresh then drag,page = nil,1 end
+    if fresh then drag,page,loading = nil,1,nil end
     last_case_frame = frame
     local wx, wy = DEBUG_GetMouseWorld()
     local cx, cy, cw, ch = GameGetCameraBounds()
@@ -75,7 +81,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
             local n = (page-1)*3+i
             local v = model.secure_loot[n] or {}
             slot(i-1,25,"valuable",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id)
-            slots[#slots].safeSlot=n
+            slots[#slots].safeSlot,slots[#slots].dockSlot=n,v.dockSlot
             slots[#slots].remaining,slots[#slots].count=v.remaining,v.count
         end
     end
@@ -119,6 +125,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         end
         local grid_y=ty+15
         local height=folded and 20 or grid_y+2*qh+4
+        if not folded and warehouse_tab=="materials" then height=grid_y+2*qh+16+material_rows*13 end
         local bottom=above and (oy+(model.popup and popupY or 0)*scale) or sh
         local top=bottom-(height+5)*scale
         warehouse_hover=mx>=left and mx<left+width*scale and my>=top and my<top+height*scale
@@ -131,20 +138,98 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         GuiImageNinePiece(gui,70,left,top,width*scale,height*scale,1)
         tint(gold)
         if GuiButton(gui,71,left+6*scale,top+3*scale,(folded and "[+] " or "[-] ")..tr("仓库","Stash"),scale) and not drag then
-            folded=not folded
+            folded,loading=not folded,nil
             return
         end
         if not folded then
             for i,t in ipairs(warehouse_tabs) do
                 local pos=tabs[i]
                 tint(t[1]==warehouse_tab and gold or muted)
-                if GuiButton(gui,74+i,left+pos.x*scale,top+pos.y*scale,pos.name,scale) and not drag then
-                    warehouse_tab,warehouse_page=t[1],1
+                local bx,by=left+pos.x*scale,top+pos.y*scale
+                local clicked=GuiButton(gui,74+i,bx,by,pos.name,scale)
+                -- A stored bottle can cross between both pages without visiting the quick bar.
+                local cross=drag and drag.source.kind=="potion" and
+                    ((drag.source.key=="warehouse" and t[1]=="materials") or (drag.source.key=="docks" and t[1]=="containers"))
+                local over=cross and mx>=bx and mx<bx+GuiGetTextDimensions(gui,pos.name,scale) and my>=by and my<by+10*scale
+                if (clicked and not drag or over) and warehouse_tab~=t[1] then
+                    warehouse_tab,warehouse_page,loading=t[1],1,nil
+                    return
                 end
             end
             if warehouse_tab=="materials" then
-                tint(muted)
-                GuiText(gui,left+8*scale,top+grid_y*scale,tr("散装物料库存尚未开放","Bulk material storage is planned"),scale)
+                local docks,materials=model.docks,model.materials
+                for n=1,2 do
+                    local dock=docks[n] or {}
+                    local y=grid_y+(n-1)*qh
+                    local title=n==1 and tr("药瓶","Flask") or tr("粉末袋","Powder pouch")
+                    slot(0,y,"docks",dock.kind,dock.name or title,dock.icon,dock.id,left,top)
+                    slots[#slots].safeSlot=n
+                    local x=left+(qw+11)*scale
+                    local caption,trimmed=fit(title,(width-qw-(dock.id and 63 or 16))*scale,scale)
+                    GuiText(gui,x,top+y*scale,caption,scale)
+                    if trimmed then GuiTooltip(gui,title,"") end
+                    if dock.id then
+                        GuiText(gui,x,top+(y+9)*scale,dock.used.."/"..dock.capacity,0.85*scale)
+                        tint(dock.used>0 and gold or muted)
+                        if GuiButton(gui,180+n,left+(width-49)*scale,top+(y+4)*scale,tr("全部卸入","Unload all"),scale)
+                            and not drag and dock.used>0 then
+                            dispatch("material_transfer",{container="docks",slot=n,storedId=dock.id,unload=true})
+                            return
+                        end
+                    end
+                end
+                local y=grid_y+2*qh+2
+                local pages=math.max(1,math.ceil(#materials/material_rows))
+                material_page=math.min(material_page,pages)
+                GuiText(gui,left+8*scale,top+y*scale,tr("库存","Stock"),scale)
+                if pages>1 then
+                    if GuiButton(gui,184,left+(width-64)*scale,top+y*scale,"<",scale) then material_page=math.max(1,material_page-1) end
+                    GuiText(gui,left+(width-51)*scale,top+y*scale,material_page.."/"..pages,scale)
+                    if GuiButton(gui,185,left+(width-16)*scale,top+y*scale,">",scale) then material_page=math.min(pages,material_page+1) end
+                end
+                if #materials==0 then
+                    tint(muted)
+                    GuiText(gui,left+8*scale,top+(y+13)*scale,tr("库存为空","Empty"),scale)
+                end
+                local held_target
+                for i=1,material_rows do
+                    local mat=materials[(material_page-1)*material_rows+i]
+                    if mat then
+                        local row_y=top+(y+13*i)*scale
+                        local dock=docks[mat.slot]
+                        local enabled=dock and dock.used<dock.capacity
+                        local amount=tostring(mat.amount)
+                        local count_x=left+(width-43)*scale-GuiGetTextDimensions(gui,amount,scale)
+                        local name,trimmed=fit(mat.name,count_x-left-11*scale,scale)
+                        GuiText(gui,left+8*scale,row_y,name,scale)
+                        if trimmed then GuiTooltip(gui,mat.name,"") end
+                        GuiText(gui,count_x,row_y,amount,scale)
+                        local bx=left+(width-36)*scale
+                        tint(enabled and gold or muted)
+                        GuiButton(gui,186+i,bx,row_y,tr("装入","Load"),scale)
+                        local hover=mx>=bx and mx<left+(width-3)*scale and my>=row_y and my<row_y+12*scale
+                        if hover then
+                            local tip=enabled and tr("点按 1 单位，按住加速","Click for 1 unit; hold to load faster")
+                                or (not mat.slot and tr("无匹配容器","No compatible container")
+                                or (dock and tr("容器已满","Container full") or tr("请先放入对应容器","Dock a compatible container first")))
+                            GuiTooltip(gui,tip,"")
+                        end
+                        if enabled and hover and not drag and not fresh then
+                            if InputIsMouseButtonJustDown(1) then
+                                loading={name=mat.key,id=dock.id,start=frame}
+                            end
+                            if loading and loading.name==mat.key and loading.id==dock.id and InputIsMouseButtonDown(1) then
+                                held_target=true
+                                local elapsed=frame-loading.start
+                                if elapsed==0 or (elapsed>=24 and (elapsed-24)%6==0) then
+                                    local batch=elapsed==0 and 1 or math.min(100,5*2^math.floor((elapsed-24)/24))
+                                    dispatch("material_transfer",{container="docks",slot=mat.slot,storedId=dock.id,material=mat.key,amount=batch})
+                                end
+                            end
+                        end
+                    end
+                end
+                if not held_target then loading=nil end
             else
                 local rows=model.warehouse[warehouse_tab] or {}
                 local pages=1+math.floor((model.warehouse_last[warehouse_tab] or 0)/per_page)
@@ -159,11 +244,14 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
                     local v=rows[n] or {}
                     slot(i%cols,grid_y+math.floor(i/cols)*qh,"warehouse",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id,left,top)
                     local target=slots[#slots]
-                    target.safeSlot,target.remaining,target.count=n,v.remaining,v.count
+                    target.safeSlot,target.remaining,target.count,target.dockSlot=n,v.remaining,v.count,v.dockSlot
                 end
             end
         end
-    elseif drag and drag.source.key=="warehouse" then drag=nil end
+    else
+        loading=nil
+        if drag and (drag.source.key=="warehouse" or drag.source.key=="docks") then drag=nil end
+    end
 
     local native_x = tonumber(MagicNumbersGetValue("UI_BARS_POS_X"))
     local native_y = tonumber(MagicNumbersGetValue("UI_BARS_POS_Y"))
@@ -203,6 +291,13 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         if source.kind=="pouch" and from_store and source.key==target.key and not target.kind then
             return "move_pouch",source,target.safeSlot
         end
+        if target.key=="docks" and not target.kind and source.kind=="potion" and source.dockSlot==target.safeSlot then
+            if source.key=="native" then return "place",source,target.safeSlot end
+            if from_store then return "move_dock",source,target.safeSlot end
+        end
+        if source.key=="docks" and to_store and not target.kind and (target.key=="valuable" or warehouse_tab=="containers") then
+            return "move_dock",source,target.safeSlot
+        end
         local canStack = source.kind=="dose" and target.kind=="dose"
             and (source.remaining or model.maxUses)==model.maxUses and (target.remaining or model.maxUses)==model.maxUses
         if from_store and source.kind=="dose" and source.key==target.key
@@ -232,7 +327,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
             local lane=source.kind=="spell" and "spell" or (source.kind=="wand" and "wand" or "tool")
             if target.lane~=lane then return end
             if source.kind=="pouch" then return "take_pouch",target,source.safeSlot end
-            if from_store then return "secure_withdraw",target,source.safeSlot,source.entity end
+            if from_store or source.key=="docks" then return "secure_withdraw",target,source.safeSlot,source.entity end
             if source.key=="dose" then return "take_dose",target end
         end
     end
@@ -276,7 +371,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         if action then
             local request = {parent=arg.parent,lane=arg.lane,xslot=arg.xslot,yslot=arg.yslot,
                 entity=arg.entity,safeSlot=safeSlot,storedId=storedId,from=arg.safeSlot,kind=source.kind,
-                container=(source.key=="warehouse" or hovered.key=="warehouse") and "warehouse" or "safe",
+                source=storage_key(source.key),destination=storage_key(hovered.key),
+                container=(source.key=="docks" or hovered.key=="docks") and "docks" or storage_key(source.key) or storage_key(hovered.key) or "safe",
                 sourceCell=source.cell,targetCell=hovered and hovered.cell,
                 intoContainer=hovered and hovered.key=="dose"}
             dispatch(action,request)

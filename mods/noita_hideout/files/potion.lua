@@ -216,6 +216,63 @@ local function refresh_name(record)
     return record
 end
 
+function NHPotion.dockSlot(record)
+    if record.kind=="potion" then return record.variant=="powder_stash" and 2 or 1 end
+end
+
+function NHPotion.fillLevel(record)
+    local used=0
+    for _,n in pairs(record.materials) do used=used+n end
+    local cap=record.capacity or 1000
+    if record.max_capacity and record.max_capacity>=0 then cap=math.min(cap,record.max_capacity) end
+    return used,math.max(0,math.floor(cap))
+end
+
+local material_slots
+function NHPotion.materialSlot(name)
+    if not material_slots then
+        material_slots={}
+        for _,liquid in ipairs(CellFactory_GetAllLiquids(true,true)) do material_slots[liquid]=1 end
+        for _,powder in ipairs(CellFactory_GetAllSands(true,true)) do material_slots[powder]=2 end
+    end
+    return material_slots[name]
+end
+
+function NHPotion.materialName(name)
+    local id=CellFactory_GetType(name)
+    if id and id>=0 then
+        local label=CellFactory_GetUIName(id)
+        if label and label~="" then return GameTextGetTranslatedOrNot(label) end
+    end
+    return name
+end
+
+-- Both sides belong to a detached profile draft and are committed together.
+function NHPotion.transferMaterial(state,request)
+    local index=NHStore.slotIndex(state,"docks",request.slot)
+    local row=index and state.docks[index]
+    if not row or row.id~=request.storedId then return false,"Inventory slot changed." end
+    local item,stock=row.item,state.materials
+    if request.unload then
+        if not next(item.materials) then return false,"Container is empty." end
+        for name,amount in pairs(item.materials) do
+            stock[name]=(stock[name] or 0)+amount
+        end
+        item.materials={}
+    else
+        local name,n=request.material,request.amount
+        if not whole_units(n) or n<1 or NHPotion.materialSlot(name)~=row.slot then return false,"Incompatible material." end
+        local used,cap=NHPotion.fillLevel(item)
+        n=math.min(n,stock[name] or 0,cap-used)
+        if n<=0 then return false,"No stock or free capacity." end
+        item.materials[name]=(item.materials[name] or 0)+n
+        stock[name]=stock[name]-n
+        if stock[name]==0 then stock[name]=nil end
+    end
+    refresh_name(item)
+    return true
+end
+
 local function capture(entity)
     assert(entity and entity ~= 0, "Missing flask")
     local c = flask_components(entity)

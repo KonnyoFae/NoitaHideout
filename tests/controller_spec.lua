@@ -310,3 +310,36 @@ tick(nil,"open_container",{safeSlot=1,container="warehouse"})
 assert(tick().popup)
 entities[player].x=1000
 assert(not tick().popup)
+
+-- Move an existing crafted flask from the stash, unload and refill it, then
+-- return the same container with its new exact contents to a warehouse cell.
+function CellFactory_GetAllLiquids() return {"magic_liquid_teleportation"} end
+function CellFactory_GetAllSands() return {"sand"} end
+function CellFactory_GetType(name) return name=="magic_liquid_teleportation" and 7 or -1 end
+function CellFactory_GetUIName() return "$mat_teleport" end
+entities[player].x=227
+local product
+for _,r in ipairs(state().warehouse) do if r.item.materials and r.item.materials.magic_liquid_teleportation then product=r end end
+assert(product)
+local dock_move={container="docks",source="warehouse",destination="docks",from=product.slot,safeSlot=2,entity=product.id}
+tick(nil,"move_dock",dock_move)
+assert(#state().docks==0)
+dock_move.safeSlot=1
+tick(nil,"move_dock",dock_move)
+assert(tick().docks[1].used==500)
+local req={container="docks",slot=1,storedId=product.id,unload=true}
+entities[player].x=1200
+tick(nil,"material_transfer",req)
+assert(not next(state().materials))
+entities[player].x=227
+tick(nil,"material_transfer",req)
+local hud=tick()
+assert(hud.docks[1].used==0 and hud.materials[1].amount==500 and hud.materials[1].slot==1)
+req.unload,req.material,req.amount=false,hud.materials[1].key,1
+tick(nil,"material_transfer",req)
+assert(tick().docks[1].used==1)
+dock_move.source,dock_move.destination,dock_move.from,dock_move.safeSlot="docks","warehouse",1,product.slot
+tick(nil,"move_dock",dock_move)
+local final=state()
+local stored=final.warehouse[assert(NHStore.slotIndex(final,"warehouse",product.slot,"potion"))]
+assert(#final.docks==0 and stored.id==product.id and stored.item.materials[req.material]==1 and final.materials[req.material]==499)

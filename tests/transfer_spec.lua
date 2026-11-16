@@ -199,3 +199,18 @@ local index=assert(NHStore.slotIndex(s,"warehouse",1,"ration"))
 assert(NHStore.category("ration")=="supplies" and s.warehouse[index].item.quantity==500)
 local ok,restored=NHTransfers.withdraw(s,player,index,"warehouse")
 assert(ok and NHTransfers.item_kind(restored)=="ration")
+
+function NHPotion.dockSlot(item) return item.variant=="powder_stash" and 2 or 1 end
+local working=state()
+local flask=make("potion",true)
+assert(not NHTransfers.deposit(working,player,"docks",flask,2) and EntityGetIsAlive(flask))
+assert(NHTransfers.deposit(working,player,"docks",flask,1))
+assert(not NHTransfers.withdraw(working,player,1,"docks",function() return false end))
+assert(#working.docks==1 and not EntityGetIsAlive(flask))
+local ok,issued=NHTransfers.withdraw(working,player,1,"docks")
+assert(ok and #working.docks==0)
+local newer=make("potion",true)
+assert(NHTransfers.deposit(working,player,"docks",newer,1))
+entities[issued].alive,globals=false,{}
+assert(NHTransfers.reconcile(working,player))
+assert(#working.docks==1 and #working.warehouse==1 and working.docks[1].id~=working.warehouse[1].id)

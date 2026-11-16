@@ -29,6 +29,10 @@ end
 local error_translations = {
     ["Hold a wand or flask first."] = "请先拾取并切换到手中的魔杖或药瓶。",
     ["This item has no storage adapter."] = "仓库尚未适配这件物品。",
+    ["Wrong loading slot."] = "请将药瓶和粉末袋放入各自的装卸格。",
+    ["Incompatible material."] = "这个容器无法装载该物料。",
+    ["Container is empty."] = "容器已经为空。",
+    ["No stock or free capacity."] = "库存已用尽或容器已满。",
     ["Inventory slot changed."] = "目标栏位已变动。",
     ["Slot unavailable."] = "目标格无法接收这件物品。",
     ["Item is no longer in this container."] = "物品已移出该容器。",
@@ -226,12 +230,22 @@ end
 local function stored_view(entry)
     local item=entry.item
     return {id=entry.id,kind=item.kind,name=item_label(entry),icon=item.icon or (item.sprite and item.sprite.image_file),
-        remaining=item.remaining,count=item.count}
+        remaining=item.remaining,count=item.count,dockSlot=NHPotion.dockSlot(item)}
 end
 
 local function inventory_view()
     if model_cache and model_cache.revision == state.revision then return model_cache end
     local model = {revision = state.revision, loot = {}, secure_loot = {}, warehouse = {}, warehouse_last = {}, recipe_indices = {}}
+    model.docks,model.materials={},{}
+    for _,row in ipairs(state.docks) do
+        local view=stored_view(row)
+        view.used,view.capacity=NHPotion.fillLevel(row.item)
+        model.docks[row.slot]=view
+    end
+    for name,amount in pairs(state.materials) do
+        model.materials[#model.materials+1]={key=name,name=NHPotion.materialName(name),amount=amount,slot=NHPotion.materialSlot(name)}
+    end
+    table.sort(model.materials,function(a,b) return a.key<b.key end)
     local function warehouse_slot(kind,slot,view)
         local category=NHStore.category(kind)
         model.warehouse[category]=model.warehouse[category] or {}
@@ -304,6 +318,9 @@ local function native_slots(player)
                             slot.entity,slot.kind = id,kind
                             if kind=="dose" then slot.remaining=NHDoses.remaining(state,id) end
                             slot.icon = ComponentGetValue2(item,"ui_sprite")
+                            if kind=="potion" then
+                                slot.dockSlot=(EntityHasTag(id,"powder_stash") or slot.icon=="data/ui_gfx/items/material_pouch.png") and 2 or 1
+                            end
                         end
                     end
                 end
@@ -382,8 +399,30 @@ local function dispatch(player, action, index)
         end
         if type(index)~="table" then return end
         local container=index.container or "safe"
-        if container~="safe" and container~="warehouse" then return end
-        if container=="warehouse" and not (case_open and GameIsInventoryOpen() and near_home(player)) then return end
+        if container~="safe" and container~="warehouse" and container~="docks" then return end
+        if container~="safe" and not (case_open and GameIsInventoryOpen() and near_home(player)) then return end
+        if container=="docks" then
+            if action=="material_transfer" then
+                commit_edit(NHPotion.transferMaterial,nil,nil,index)
+                return
+            elseif action=="move_dock" then
+                local from,to=index.source,index.destination
+                if not ((from=="docks" and (to=="safe" or to=="warehouse"))
+                    or (to=="docks" and (from=="safe" or from=="warehouse"))) then return end
+                commit_edit(function(draft)
+                    local i=NHStore.slotIndex(draft,from,index.from,"potion")
+                    local row=i and draft[from][i]
+                    if not row or row.id~=index.entity or row.item.kind~="potion"
+                        or not NHStore.freeSlot(draft,to,index.safeSlot,"potion") then return false,"Inventory slot changed." end
+                    if to=="docks" and NHPotion.dockSlot(row.item)~=index.safeSlot then return false,"Wrong loading slot." end
+                    table.remove(draft[from],i)
+                    row.slot=index.safeSlot
+                    table.insert(draft[to],row)
+                    return true
+                end)
+                return
+            elseif action~="cancel_native" and not ((action=="place" or action=="secure_withdraw") and index.kind=="potion") then return end
+        end
         if action=="open_container" then
             local owner
             if index.safeSlot and state.pouch.location==container and state.pouch.slot==index.safeSlot then owner={slot=index.safeSlot,container=container}
@@ -441,7 +480,8 @@ local function dispatch(player, action, index)
             if ComponentGetValue2(inv,"mThrowItem")==id then ComponentSetValue2(inv,"mThrowItem",0) end
             if action=="cancel_native" then return end
             local kind = NHNative.kind(id)
-            if kind=="pouch" and index.safeSlot then ok,result=NHDoses.storePouch(state,player,id,index.safeSlot,container)
+            if container=="docks" then ok,result=NHTransfers.deposit(state,player,container,id,index.safeSlot)
+            elseif kind=="pouch" and index.safeSlot then ok,result=NHDoses.storePouch(state,player,id,index.safeSlot,container)
             elseif kind=="dose" then
                 if not index.safeSlot and not (index.intoContainer and popup_accessible(player)) then return end
                 ok,result=NHDoses.deposit(state,player,id,index.safeSlot,index.targetCell,container)

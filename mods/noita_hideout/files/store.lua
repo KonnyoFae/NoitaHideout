@@ -18,7 +18,7 @@ local function fresh(profile)
     return {
         version = 1, profile = profile, revision = 0,
         runSerial = 0, rewardedThrough = 0, closedThrough = 0,
-        nextItemId = 1, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true,
+        nextItemId = 1, materials = {}, docks = {}, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true,
         pouch = {location = "safe", slot = 2, doses = 2, cells = initial_doses(2)},
         order = false, finished = 0,
     }
@@ -66,6 +66,10 @@ end
 
 function NHStore.slotIndex(s,container,slot,kind)
     if container=="safe" then return NHStore.safeIndex(s,slot) end
+    if container=="docks" then
+        for i,row in ipairs(s.docks or {}) do if row.slot==slot then return i end end
+        return
+    end
     local category=NHStore.category(kind)
     for index,row in ipairs(s.warehouse) do
         if NHStore.category(row.item.kind)==category and (row.slot or index)==slot then return index end
@@ -74,6 +78,10 @@ end
 
 function NHStore.freeSlot(s,container,preferred,kind)
     if container=="safe" then return NHStore.freeSafeSlot(s,preferred) end
+    if container=="docks" then
+        if kind=="potion" and (preferred==1 or preferred==2) and not NHStore.slotIndex(s,"docks",preferred) then return preferred end
+        return
+    end
     local occupied={}
     local category=NHStore.category(kind)
     if category=="supplies" and s.pouch and s.pouch.location=="warehouse" then occupied[s.pouch.slot]=true end
@@ -125,6 +133,15 @@ local function validate(s)
     assert(s.profile >= 1 and s.rewardedThrough <= s.runSerial and s.closedThrough <= s.runSerial
         and s.nextItemId >= 1, "Invalid profile counters")
     assert(type(s.warehouse) == "table" and type(s.safe) == "table", "Invalid inventory")
+    assert(type(s.materials)=="table" and type(s.docks)=="table","Invalid bulk storage")
+    for name,amount in pairs(s.materials) do
+        assert(type(name)=="string" and name~="" and whole(amount) and amount>0,"Invalid material stock")
+    end
+    local occupied={}
+    for _,row in ipairs(s.docks) do
+        assert((row.slot==1 or row.slot==2) and row.slot==NHPotion.dockSlot(row.item) and not occupied[row.slot],"Invalid docked container")
+        occupied[row.slot]=true
+    end
     local capacity, seen = NHStore.safeCapacity(s), {}
     assert(whole(capacity) and capacity>=1, "Invalid secure inventory capacity")
     for _,row in ipairs(s.safe) do
@@ -268,6 +285,7 @@ local function unpack_slot(raw)
     local payload = raw:sub(last + 1)
     assert(expected == checksum(payload), "Snapshot checksum mismatch")
     local s = decode(payload)
+    s.materials,s.docks=s.materials or {},s.docks or {}
     -- Old warehouse records had only a list order. Give them stable grid positions.
     local used={wand={},spell={},containers={},supplies={}}
     if s.pouch.location=="warehouse" then used.supplies[s.pouch.slot]=true end

@@ -183,3 +183,36 @@ old=save(old)
 assert(old.safeCapacity==4 and old.safe[3].slot==3)
 old.pouch.location="bag"
 assert(NHStore.freeSafeSlot(old,4)==4)
+
+function CellFactory_GetAllLiquids() return {"water","slime"} end
+function CellFactory_GetAllSands() return {"sand"} end
+selected=5
+profiles[5]={}
+local bulk=load()
+bulk.docks={
+    {slot=1,id=1,item={kind="potion",capacity=12,max_capacity=10,materials={water=9,slime=4}}},
+    {slot=2,id=2,item={kind="potion",variant="powder_stash",capacity=5,materials={sand=8}}},
+}
+bulk.nextItemId=3
+bulk=save(bulk)
+local function move(slot,material,count)
+    return NHPotion.transferMaterial(bulk,{slot=slot,storedId=slot,material=material,amount=count,unload=not material})
+end
+assert(move(1) and move(2))
+assert(bulk.materials.water==9 and bulk.materials.slime==4 and bulk.materials.sand==8)
+assert(not move(2) and not move(1,"sand",1) and not move(2,"water",1))
+assert(not NHPotion.transferMaterial(bulk,{slot=1,storedId=17,unload=true}))
+assert(move(1,"water",1) and bulk.docks[1].item.materials.water==1)
+assert(move(1,"slime",50) and not bulk.materials.slime)
+assert(move(1,"water",50) and bulk.materials.water==3 and not move(1,"water",1))
+assert(move(2,"sand",50) and bulk.docks[2].item.materials.sand==5 and bulk.materials.sand==3)
+bulk=save(bulk)
+assert(move(1))
+blocked_key,blocked_value,fail_after="noita_hideout.p"..bulk.profile.."_revision",bulk.revision+1,false
+assert(not NHStore.commit(bulk))
+bulk=load()
+assert(bulk.materials.water==3 and bulk.docks[1].item.materials.water==6)
+blocked_key=nil
+assert(move(1) and move(2))
+bulk=save(bulk)
+assert(bulk.materials.water==9 and bulk.materials.slime==4 and bulk.materials.sand==8)

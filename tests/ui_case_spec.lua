@@ -31,7 +31,9 @@ function GuiGetTextDimensions(_, value, scale)
     return w * (scale or 1), 9 * (scale or 1)
 end
 function GuiText(_, _, _, value) drawn[value] = true end
-function GuiButton(_, id, _, _, value)
+local buttons={}
+function GuiButton(_, id, x, y, value)
+    buttons[id]={x=x,y=y}
     drawn[value] = true
     return id == click
 end
@@ -121,7 +123,7 @@ model.open=true
 assert(not point(148,28,"release"))
 print("Native inventory drag, spell row, exact slot, upgrade pages and close cancellation passed.")
 
--- Left warehouse, native tile pitch, automatic filing and read-only materials tab.
+-- Left warehouse, native tile pitch, automatic filing and materials tab.
 model.near,model.warehouse,model.warehouse_last=true,{},{}
 render(model)
 local origin=tiles[104]
@@ -143,11 +145,46 @@ render(model,73)
 point(198,28,"press")
 cmd,arg=point(origin.x+1,origin.y+1,"release")
 assert(cmd=="place" and arg.safeSlot==21)
+model.docks,model.materials={},{}
 render(model,79)
-assert(drawn["Bulk material storage is planned"])
-point(198,28,"press")
-cmd,arg=point(origin.x+1,origin.y+1,"release")
+render(model)
+assert(drawn.Flask and drawn["Powder pouch"] and drawn.Empty)
+local flask,powder=tiles[104],tiles[105]
+assert(powder.y-flask.y==20 and powder.x==flask.x)
+local native_flask=native("tool",5,1,51,"potion")
+native_flask.dockSlot=1
+table.insert(model.native_slots,native_flask)
+point(125,28,"press")
+cmd,arg=point(powder.x+2,powder.y+2,"release")
 assert(cmd=="cancel_native")
+point(125,28,"press")
+cmd,arg=point(flask.x+2,flask.y+2,"release")
+assert(cmd=="place" and arg.container=="docks" and arg.safeSlot==1)
+model.docks[1]={kind="potion",id=123,name="Mixed flask",used=20,capacity=50}
+model.materials={{key="water",name="Water",amount=100,slot=1}}
+cmd,arg=render(model,181)
+assert(cmd=="material_transfer" and arg.unload and arg.storedId==123)
+render(model)
+local load_button=buttons[187]
+cmd,arg=point(load_button.x+1,load_button.y+1,"press")
+assert(cmd=="material_transfer" and arg.amount==1 and arg.material=="water")
+assert(not point(load_button.x+1,load_button.y+1,"release"))
+cmd,arg=point(load_button.x+1,load_button.y+1,"press")
+pointer.pressed=false
+for elapsed=1,48 do
+    cmd,arg=render(model)
+    if elapsed==24 then assert(cmd=="material_transfer" and arg.amount==5)
+    elseif elapsed==48 then assert(cmd=="material_transfer" and arg.amount==10)
+    elseif elapsed<24 then assert(not cmd) end
+end
+pointer.x=0
+assert(not render(model))
+pointer.x=load_button.x+1
+for i=1,24 do assert(not render(model)) end
+point(0,0,"release")
+point(flask.x+2,flask.y+2,"press")
+cmd,arg=point(148,28,"release")
+assert(cmd=="secure_withdraw" and arg.container=="docks" and arg.storedId==123)
 render(model,71)
 render(model)
 assert(drawn["[+] Stash"] and not drawn.Materials)

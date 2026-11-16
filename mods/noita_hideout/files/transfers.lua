@@ -20,6 +20,7 @@ end
 local function draft(s)
     local next_state, j = copy(s), journal(s)
     next_state.warehouse, next_state.safe = copy(s.warehouse), copy(s.safe)
+    next_state.docks = copy(s.docks)
     next_state.transit = {run = s.runSerial, retired = copy(j.retired), issued = copy(j.issued)}
     return next_state
 end
@@ -28,13 +29,14 @@ local function commit(s, changed)
     local ok, err = NHStore.commit(changed)
     if not ok then return nil, err end
     s.revision, s.nextItemId = changed.revision, changed.nextItemId
+    s.docks = changed.docks
     s.warehouse, s.safe, s.transit = changed.warehouse, changed.safe, changed.transit
     return true
 end
 
 local function container_name(value)
     if value == nil or value == "warehouse" then return "warehouse" end
-    if value == "safe" then return "safe" end
+    if value == "safe" or value=="docks" then return value end
 end
 
 local function marker(entity)
@@ -68,7 +70,7 @@ end
 
 local function storage_ids(s)
     local ids, sources = {}, {}
-    for _, rows in ipairs({s.warehouse, s.safe}) do
+    for _, rows in ipairs({s.warehouse, s.safe, s.docks}) do
         for _, row in ipairs(rows) do
             ids[row.id] = true
             if row.origin then sources[row.origin] = true end
@@ -195,6 +197,7 @@ function NHTransfers.deposit(s, player, container, selected, preferred)
     local record, err = adapter.capture(item)
     if not record then return nil, err end
     if record.kind~=kind then return nil,"Invalid item record." end
+    if dest=="docks" and NHPotion.dockSlot(record)~=slot then return nil,"Wrong loading slot." end
     local id = s.nextItemId
     if not source or not EntityHasTag(item, tag) then
         source = source or new_token("d", s, id, id, item)
@@ -300,6 +303,9 @@ function NHTransfers.reconcile(s, player)
             if dest == "safe" then
                 row.slot = NHStore.freeSafeSlot(changed,row.slot or 1) or NHStore.freeSafeSlot(changed)
                 if not row.slot then dest = "warehouse" end
+            end
+            if dest=="docks" and not NHStore.freeSlot(changed,dest,row.slot,row.item.kind) then
+                dest,row.slot="warehouse",nil
             end
             if dest=="warehouse" then row.slot=NHStore.freeSlot(changed,dest,row.slot,row.item.kind) or NHStore.freeSlot(changed,dest,nil,row.item.kind) end
             if not ids[release.row.id] then
