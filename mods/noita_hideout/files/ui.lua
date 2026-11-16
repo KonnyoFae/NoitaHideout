@@ -31,7 +31,113 @@ local function fit(value, available, scale)
     return table.concat(chars, "", 1, lo) .. "...", true
 end
 
+local drag, last_case_frame
+local carried_page = 1
+local tile = "data/ui_gfx/inventory/quick_inventory_box.png"
+local icons = {
+    pouch = "mods/noita_hideout/files/items/pouch.png",
+    dose = "mods/noita_hideout/files/items/dose.png",
+    wand = "data/items_gfx/handgun.png", potion = "data/items_gfx/potion.png",
+}
+
+local function draw_case(model, ox, oy, scale, sw, sh, tr, label, button, dispatch)
+    local frame = GameGetFrameNum()
+    local fresh = last_case_frame ~= frame - 1
+    if fresh then drag, carried_page = nil, 1 end
+    last_case_frame = frame
+    local wx, wy = DEBUG_GetMouseWorld()
+    local cx, cy, cw, ch = GameGetCameraBounds()
+    local mx, my = (wx-cx)*sw/cw, (wy-cy)*sh/ch
+    local slots = {}
+    local function slot(x,y,key,kind,name,icon,entity)
+        slots[#slots+1] = {x=ox+x*scale, y=oy+y*scale, key=key, kind=kind,
+            name=name, icon=icon, entity=entity}
+    end
+
+    local protected = model.pouch_location == "safe"
+    local valuable = (model.secure_loot or {})[1]
+    label(8,19,tr("针剂包", "Pouch"),46,muted)
+    label(61,19,tr("针剂", "Injector"),46,muted)
+    label(119,19,tr("贵重物品", "Valuable"),60,muted)
+    slot(8,32,"pouch",protected and "pouch",tr("针剂包", "Injector pouch"))
+    slot(61,32,"dose",protected and model.case_count > 0 and "dose",tr("取一支针剂", "Take one injector"))
+    slot(119,32,"valuable",model.secure_kind,valuable or tr("贵重物品格", "Valuable slot"),model.secure_icon,model.secure_id)
+    if protected then label(85,36,"×"..model.case_count,29,muted) end
+
+    local carried = model.carried or {}
+    local pages = math.max(1, math.ceil(#carried/6))
+    carried_page = math.min(pages, carried_page)
+    label(8,59,tr("随身物品", "Carried items"),93,white)
+    if pages > 1 then
+        if not drag and button(35,102,59,"<") then carried_page = math.max(1,carried_page-1) end
+        label(116,59,carried_page.."/"..pages,27,muted)
+        if not drag and button(36,144,59,">") then carried_page = math.min(pages,carried_page+1) end
+    end
+    for i=1,6 do
+        local item = carried[(carried_page-1)*6+i]
+        slot(8+(i-1)*23,73,"belt",item and item.kind,item and item.name,item and item.icon,item and item.entity)
+    end
+    -- Always offer a return target, even when this page shows six occupied tiles.
+    slot(158,73,"return",nil,tr("取回随身栏", "Return to inventory"))
+    local hovered, source
+    for _, v in ipairs(slots) do
+        if mx >= v.x and my >= v.y and mx < v.x+20*scale and my < v.y+20*scale then hovered=v end
+        if drag and drag.key==v.key and drag.entity==v.entity and drag.kind==v.kind then source=v end
+    end
+    if drag and (not source or model.revision ~= drag.revision) then drag=nil; source=nil end
+    if not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind and hovered.kind ~= "other" then
+        drag={key=hovered.key, entity=hovered.entity, kind=hovered.kind, revision=model.revision}
+        source=hovered
+    end
+    local function drop(target)
+        if not source or not target then return end
+        if source.key=="belt" then
+            if (target.key=="pouch" and ((source.kind=="pouch" and not protected) or (source.kind=="dose" and protected)))
+                or (target.key=="dose" and source.kind=="dose" and protected)
+                or (target.key=="valuable" and not valuable and (source.kind=="wand" or source.kind=="potion")) then
+                return "place",source.entity
+            end
+        elseif target.key=="return" or (target.key=="belt" and not target.entity) then
+            if source.key=="pouch" then return "take_pouch" end
+            if source.key=="dose" then return "take_dose" end
+            if source.key=="valuable" then return "secure_withdraw",1 end
+        end
+    end
+    local function sprite(v,id,x,y,alpha)
+        local image = v.icon
+        if type(image) ~= "string" or not image:match("%.png$") then image=icons[v.kind] end
+        if not image then
+            GuiText(gui,x-2*scale,y-4*scale,"?",scale)
+            return
+        end
+        local w,h = GuiGetImageDimensions(gui,image)
+        if not w or not h or w<=0 or h<=0 then return end
+        local zoom = math.min(1,17/w,17/h)*scale
+        GuiZSetForNextWidget(gui,-83)
+        GuiImage(gui,id,x-w*zoom/2,y-h*zoom/2,image,alpha,zoom)
+    end
+    for i,v in ipairs(slots) do
+        if drop(v) then tint(green) end
+        GuiImage(gui,100+i,v.x,v.y,tile,1,scale)
+        if v.kind then sprite(v,130+i,v.x+10*scale,v.y+10*scale,source==v and 0.35 or 1)
+        elseif v.key=="return" then label(164,77,"+",12,green) end
+    end
+    local hint = hovered and hovered.name
+    if source then
+        sprite(source,160,mx,my,0.95)
+        if hovered and drop(hovered) then hint=tr("松开放置", "Release to place")
+        else hint=tr("拖至可用格，松手放置", "Drag to a highlighted slot") end
+    end
+    label(8,99,hint or (model.status ~= "" and model.status) or tr("拖动物品以存取", "Drag items to transfer"),172,muted)
+    if drag and InputIsMouseButtonJustUp(1) then
+        local action, arg = drop(hovered)
+        drag=nil
+        if action then dispatch(action,arg) end
+    elseif not InputIsMouseButtonDown(1) then drag=nil end
+end
+
 function NHUI.draw(model, dispatch)
+    if not model.open or model.mode ~= "case" then drag,last_case_frame=nil,nil end
     if not gui then gui = GuiCreate() end
     GuiStartFrame(gui)
     GuiZSet(gui, -80)
@@ -55,7 +161,7 @@ function NHUI.draw(model, dispatch)
     end
 
     local case = model.mode == "case"
-    local pw, ph = case and 153 or panel_width, case and 108 or panel_height
+    local pw, ph = case and 187 or panel_width, case and 116 or panel_height
     local s = math.min(1, (sw - 10) / pw, (sh - 10) / ph)
     if s <= 0 then return end
     local ox = case and sw - pw*s - 5 or math.floor((sw - pw*s)/2)
@@ -80,22 +186,10 @@ function NHUI.draw(model, dispatch)
     end
 
     label(9, 5, case and tr("安全箱", "Secure case") or tr("藏身处", "Hideout"), case and 98 or 198, white)
-    command(11, case and 119 or 252, 5, tr("关闭", "Close"), "close")
+    command(11, case and 151 or 252, 5, tr("关闭", "Close"), "close")
     if case then
-        local protected = model.pouch_location == "safe"
-        local name = protected and tr("针剂包 ×", "Pouch ×") .. (model.case_count or 0) or tr("针剂包格 · 空", "Pouch slot · empty")
-        GuiImage(gui, 29, ox+5*s, oy+20*s, "data/ui_gfx/inventory/quick_inventory_box.png", 1, s)
-        if protected then
-            GuiImage(gui, 30, ox+8*s, oy+24*s, "mods/noita_hideout/files/items/pouch.png", 1, s)
-            command(31, 28, 23, name, "take_pouch")
-            if model.case_count > 0 then command(32, 9, 39, tr("取一支针剂", "Take one injector"), "take_dose") end
-        else label(28, 23, name, 116, muted) end
-        local valuable = (model.secure_loot or {})[1]
-        if valuable then command(33, 9, 55, fit(valuable, 134*s, s), "secure_withdraw", 1)
-        else label(9, 55, tr("贵重物品格 · 空", "Valuable slot · empty"), 134, muted) end
-        command(34, 9, 71, tr("存入手持物品", "Store held item"), "place")
-        if model.status ~= "" then label(9, 89, model.status, 134, green) end
-        if next_action then dispatch(next_action, param) end
+        if next_action then drag=nil; dispatch(next_action); return end
+        draw_case(model,ox,oy,s,sw,sh,tr,label,button,dispatch)
         return
     end
 

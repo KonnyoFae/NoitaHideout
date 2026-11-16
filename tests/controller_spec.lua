@@ -134,7 +134,7 @@ assert(tick(10,"take_dose").mode=="case" and state().pouch.doses==2) -- opening 
 tick(nil,"take_dose")
 local dose=assert(EntityGetWithTag("noita_hideout_dose")[1])
 assert(state().pouch.doses==1 and EntityGetRootEntity(dose)==player)
-held=dose
+held=0 -- drag a specific item while another slot is active
 tick(nil,"place",dose)
 assert(not EntityGetIsAlive(dose) and state().pouch.doses==2)
 tick(nil,"take_dose")
@@ -171,7 +171,7 @@ tick(nil,"take_pouch")
 local pouch=assert(EntityGetWithTag("noita_hideout_pouch")[1])
 assert(EntityGetRootEntity(pouch)==player and state().pouch.location=="bag")
 held=pouch
-tick(nil,"place")
+tick(nil,"place",pouch)
 assert(not EntityGetIsAlive(pouch) and state().pouch.location=="safe")
 tick(nil,"take_pouch")
 assert(state().pouch.location=="bag")

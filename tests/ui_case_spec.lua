@@ -47,13 +47,45 @@ end
 local model={lang="en", open=false, near=false, status=""}
 assert(render(model,2)=="open_case")
 model.open, model.mode, model.pouch_location, model.case_count=true,"case","safe",2
-assert(render(model,31)=="take_pouch")
-assert(render(model,32)=="take_dose")
-assert(render(model,34)=="place")
-model.secure_loot={"Starter wand"}
-assert(render(model,33)=="secure_withdraw")
-model.pouch_location="bag"
-assert(not render(model,31))
-assert(not render(model,32))
+model.revision,model.carried=4,{{kind="wand",entity=42,name="Wand"},{kind="dose",entity=43,name="Dose"}}
+local function point(x,y,event)
+    pointer={x=width-187-5+x,y=height-116-5+y,down=event=="press" or event=="hold",
+        pressed=event=="press",released=event=="release"}
+    return render(model)
+end
+render(model)
+assert(not point(12,77,"press"))
+assert(not point(12,77,"release"),"clicking a source must not transfer it")
+point(12,77,"press")
+assert(not point(12,36,"release"),"wand cannot go in pouch")
+point(12,77,"press")
+local cmd,id=point(123,36,"release")
+assert(cmd=="place" and id==42)
+point(35,77,"press")
+cmd,id=point(12,36,"release")
+assert(cmd=="place" and id==43)
+point(12,36,"press")
+assert(point(164,78,"release")=="take_pouch")
+point(65,36,"press")
+assert(point(65,78,"release")=="take_dose")
+model.secure_loot,model.secure_kind,model.secure_id={"Starter wand"},"wand",15
+point(123,36,"press")
+assert(not point(12,77,"release"),"occupied target")
+point(123,36,"press")
+assert(not point(-20,-10,"release"),"outside cancels")
+point(123,36,"press")
+cmd,id=point(164,78,"release")
+assert(cmd=="secure_withdraw" and id==1)
+point(123,36,"press")
+model.secure_id=16
+assert(not point(164,78,"release"),"stored source was replaced")
+point(35,77,"press")
+model.carried[2]=nil
+assert(not point(12,36,"release"),"carried source was removed")
+point(12,36,"press")
+model.open=false
+render(model)
+model.open=true
+assert(not point(164,78,"release"),"closing cancels")
 assert(render(model,11)=="close")
-print("HUD field access, protected pouch, valuables and held-item controls passed.")
+print("Case HUD: drag both ways, correct entity, incompatible targets, stale items and cancellation passed.")
