@@ -2,6 +2,7 @@ NHNative = {}
 
 local item_path = "mods/noita_hideout/files/items/"
 local injectors=NHInjectors or dofile("mods/noita_hideout/files/injectors.lua")
+local medkits=NHMedkits or dofile("mods/noita_hideout/files/medkits.lua")
 local tag = {pouch = "noita_hideout_pouch", dose = "noita_hideout_dose"}
 NHNative.icons = {pouch = item_path .. "pouch.png", dose = item_path .. "dose.png"}
 
@@ -22,8 +23,6 @@ function NHNative.registerTranslations()
         {"nh_card_minotaur_desc","Call the minotaur maiden for 3 minutes. She grants melee immunity and may give bandages. Higher affinity adds a projectile shield.","召唤米诺陶少女接替当前伙伴，随行 3 分钟。她提供近战免疫，途中可能赠送绷带。好感度提高后额外提供飞弹护盾。"},
         {"nh_card_griffin_desc","Call the griffin maiden for 3 minutes. She speeds up levitation and may give sugar cubes. Higher affinity also restores flight fuel.","召唤狮鹫少女接替当前伙伴，随行 3 分钟。她提高飞行上升速度，途中可能赠送糖块。好感度提高后还能恢复飞行能量。"},
         {"nh_companion_gift","Your companion left you a gift:","伙伴送出了礼物："},
-        {"nh_hideout_medkit","Medkit","医疗包"},
-        {"nh_hideout_medkit_desc","Three uses. Each use restores up to 10 HP.","可使用三次，每次最多恢复 10 点生命。"},
         {"nh_hideout_bandage","Bandage","绷带"},
         {"nh_hideout_bandage_desc","Each roll restores up to 5 HP. The counter shows rolls left.","每卷最多恢复 5 点生命，数字为剩余卷数。"},
         {"nh_hideout_food_regen","Food regeneration","食物再生"},
@@ -33,6 +32,12 @@ function NHNative.registerTranslations()
         {"nh_hideout_pouch", "Injector pouch", "针剂包"},
         {"nh_hideout_pouch_desc", "Use to open the pouch. Drag injectors into or out of it.", "手持使用可打开针剂包。拖动针剂即可存入或取出。"},
     }
+    for _,id in ipairs(medkits.order) do
+        local kit=medkits.types[id]
+        local key="nh_hideout_"..id
+        labels[#labels+1]={key,kit.en,kit.zh}
+        labels[#labels+1]={key.."_desc",kit.noteEn,kit.noteZh}
+    end
     for _,id in ipairs(injectors.order) do
         local d=injectors.get(id)
         local key="nh_hideout_"..d.filename

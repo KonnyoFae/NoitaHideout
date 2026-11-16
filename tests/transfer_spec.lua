@@ -274,9 +274,10 @@ print("Summon cards: single withdrawals, same-species merges, partial charges, f
 
 dofile("mods/noita_hideout/files/products.lua")
 function EntityLoad(path)
-    assert(path=="mods/noita_hideout/files/items/bandage.xml")
-    local id=make("noita_hideout_bandage",false)
-    entities[id].item={uses_remaining=1}
+    local kind=assert(path:match("^mods/noita_hideout/files/items/([%w_]+)%.xml$"))
+    local uses=kind=="bandage" and 1 or NHMedkits.types[kind].uses
+    local id=make("noita_hideout_"..kind,false)
+    entities[id].item={uses_remaining=uses}
     return id
 end
 local bundles=state()
@@ -293,3 +294,22 @@ assert(ok and #bundles.safe==0 and entities[bundle].item.uses_remaining==7)
 pick(bundle)
 assert(NHTransfers.deposit(bundles,player,"warehouse",bundle,1) and bundles.warehouse[1].item.count==7)
 print("Bandages: whole bundles retain their roll count through the quickbar, secure case and warehouse.")
+
+for _,kind in ipairs({"tactical_medkit","advanced_medkit"}) do
+    local kits=state()
+    local kit=NHMedkits.item(kind)
+    kits.nextItemId=2
+    kits.warehouse[1]={id=1,slot=1,item=kit}
+    local withdrawn,entity=NHTransfers.withdraw(kits,player,1,"warehouse")
+    assert(withdrawn and entities[entity].item.uses_remaining==kit.remaining)
+    pick(entity)
+    entities[entity].item.uses_remaining=kit.remaining-1
+    assert(NHTransfers.deposit(kits,player,"safe",entity,1))
+    assert(kits.safe[1].item.kind==kind and kits.safe[1].item.remaining==kit.remaining-1)
+    withdrawn,entity=NHTransfers.withdraw(kits,player,1,"safe")
+    assert(withdrawn and entities[entity].item.uses_remaining==kit.remaining-1)
+    pick(entity)
+    assert(NHTransfers.deposit(kits,player,"warehouse",entity,1))
+    assert(kits.warehouse[1].item.kind==kind and kits.warehouse[1].item.remaining==kit.remaining-1)
+end
+print("Medical kits: both crafted tiers preserve spent charges through quickbar, secure case and warehouse.")

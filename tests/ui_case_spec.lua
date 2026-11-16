@@ -1377,3 +1377,35 @@ local function testBandageBatchDisplay()
     assert(drawn["小医疗包 ×1"] and drawn["0:05"] and drawn["9 / 1"])
 end
 testBandageBatchDisplay()
+
+local function testTieredMedkitDisplay()
+    model.secure_loot={{id=1,kind="tactical_medkit",name="战术医疗包",remaining=7}}
+    model.warehouse.supplies={{id=2,kind="advanced_medkit",name="高端医疗包",remaining=12}}
+    render(model,78)
+    render(model)
+    assert(drawn["7/9"] and drawn["12/12"])
+    point(tiles[1001].x+1,tiles[1001].y+1)
+    assert(drawn["剩余次数 7/9"] and drawn["每次恢复最大生命值的 15%"])
+    point(tiles[1003].x+1,tiles[1003].y+1)
+    assert(drawn["剩余次数 12/12"] and drawn["每次恢复最大生命值的 25%"])
+
+    width,height=320,180
+    pointer={x=0,y=0}
+    local kit=NHMedkits.types.advanced_medkit
+    model.recipes={{id="advanced_medkit",name=kit.zh,category="medical",medkit=kit,output=1,duration=180,ready=true,
+        inputs={{name="治疗精华",amount=165,available=200,essence="essence_healing"},{name="草药",amount=8,available=8},
+            {name="战术医疗包 (7/9)",amount=1,available=2,detail="优先消耗剩余次数最少的一包。"}}}}
+    render(model,212)
+    render(model,251)
+    render(model)
+    assert(green_button(244))
+    render(model,244)
+    render(model)
+    assert(drawn["3:00"] and drawn["12"] and drawn["25% 最大生命"] and drawn["200 / 165"] and drawn["8 / 8"] and drawn["2 / 1"])
+    assert(tips["战术医疗包 (7/9)"]:find("剩余次数最少",1,true))
+    reveal(model,214)
+    local cmd,arg=render(model,214)
+    assert(cmd=="craft" and arg.id=="advanced_medkit")
+end
+testTieredMedkitDisplay()
+print("UI: medkit charge overlays, percentage healing, fixed costs and scrollable narrow recipe confirmed.")

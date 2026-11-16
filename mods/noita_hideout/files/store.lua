@@ -5,6 +5,7 @@ dofile("mods/noita_hideout/files/companions.lua")
 dofile("mods/noita_hideout/files/affinity.lua")
 dofile("mods/noita_hideout/files/card_wallets.lua")
 NHInjectors=dofile("mods/noita_hideout/files/injectors.lua")
+NHMedkits=dofile("mods/noita_hideout/files/medkits.lua")
 dofile("mods/noita_hideout/files/farming.lua")
 dofile("mods/noita_hideout/files/essences.lua")
 dofile("mods/noita_hideout/files/pouches.lua")
@@ -189,19 +190,23 @@ local function validate(s)
     assert(type(s.materials)=="table" and type(s.docks)=="table","Invalid bulk storage")
     progression.validate(s,whole)
     NHFarm.validate(s,whole)
-    local function validateBandage(item)
-        if item.kind=="bandage" and item.count~=nil then assert(NHStore.validBandageCount(item.count),"Invalid bandage count.") end
+    local function validateMedicalItem(item)
+        if NHMedkits.types[item.kind] then
+            assert(NHMedkits.validUses(item.kind,NHMedkits.remaining(item)) and (item.count==nil or item.count==1),"Invalid medkit.")
+        elseif item.kind=="bandage" and item.count~=nil then
+            assert(NHStore.validBandageCount(item.count),"Invalid bandage count.")
+        end
     end
     for _,rows in ipairs({s.safe,s.warehouse}) do
         for _,row in ipairs(rows) do
             if row.item.kind=="card_wallet" then assert(NHCardWallets.valid(row.item),"Invalid card wallet") end
-            validateBandage(row.item)
+            validateMedicalItem(row.item)
         end
     end
     if s.transit then
         for _,release in pairs(s.transit.issued) do
             if release.row.item.kind=="card_wallet" then assert(NHCardWallets.valid(release.row.item),"Invalid issued card wallet") end
-            validateBandage(release.row.item)
+            validateMedicalItem(release.row.item)
         end
     end
     for name,amount in pairs(s.materials) do
@@ -252,7 +257,7 @@ local function validate(s)
             and s.order.progress < s.order.required and type(s.order.output) == "table", "Invalid production order")
         local output=s.order.output
         if output.item then
-            validateBandage(output.item)
+            validateMedicalItem(output.item)
             if output.item.kind=="dose" then
                 assert(validDose(output.item.remaining or NHStore.doseDurability,output.item.count or 1,output.item.subtype),"Invalid injector output")
             end
@@ -571,7 +576,7 @@ local magicGrenade={kind="grenade",name="$nh_hideout_grenade",icon="mods/noita_h
 local function farmItem(kind)
     return {kind=kind,name="$nh_hideout_"..kind,icon="mods/noita_hideout/files/items/"..kind..".png"}
 end
-local medkit={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"}
+local medkit=NHMedkits.item("medkit")
 local medkit_frames=5 * 60
 local bandage_bundle=farmItem("bandage")
 bandage_bundle.count=8
@@ -625,7 +630,7 @@ NHStore.recipes={
         inputs={{name="radioactive_liquid",amount=250},{name="blood_worm",amount=250},{name="fungi",amount=250}},
         materials={void_liquid=500},count=500,
         noteZh="原版列出两份液体产物，每批回收 500。",noteEn="The vanilla reaction yields two parts of liquid. This batch recovers 500."},
-    {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",durationFrames=medkit_frames,
+    {id="medical",category="medical",facility="medical",zh=NHMedkits.types.medkit.zh,en=NHMedkits.types.medkit.en,durationFrames=medkit_frames,
         inputs={{name="water",amount=100},{name="blood",amount=50}},item=medkit,
         noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
     {id="bandage",category="medical",facility="medical",zh="绷带",en="Bandage",durationFrames=3 * 60,
@@ -634,6 +639,8 @@ NHStore.recipes={
     {id="field_medkit",category="medical",facility="medical",zh="小医疗包（绷带与草药）",en="Medkit (bandage and herbs)",durationFrames=medkit_frames,
         inputs={},resources={herb=2},storedIngredient="bandage",item=medkit,
         noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
+    NHMedkits.upgradeRecipe("tactical_medkit","medkit",4,105,60),
+    NHMedkits.upgradeRecipe("advanced_medkit","tactical_medkit",8,165,180),
     NHInjectors.recipe("fire"),
     NHInjectors.recipe("lightning"),
     NHInjectors.recipe("frost"),
@@ -836,15 +843,18 @@ local function batchPayment(stock,inputs,held,freeSlots)
 end
 
 function NHStore.warehouseIngredientCount(state,kind)
-    local count,firstIndex,firstSlot,smallest=0,nil,nil,nil
+    local count,firstIndex,firstSlot,bestRank=0,nil,nil,nil
+    local kit=NHMedkits.types[kind]
     for i,row in ipairs(state.warehouse) do
-        if row.item.kind==kind then
-            local rolls=row.item.count or 1
-            count=count+rolls
+        local remaining=kit and NHMedkits.remaining(row.item)
+        if row.item.kind==kind and (not kit or NHMedkits.validUses(kind,remaining)) then
+            local quantity=row.item.count or 1
+            count=count+quantity
             local slot=row.slot or i
-            -- Finish the smallest bundle first so its last roll can free a product slot.
-            if not smallest or rolls<smallest or (rolls==smallest and slot<firstSlot) then
-                firstIndex,firstSlot,smallest=i,slot,rolls
+            -- Use worn kits first. For bandages, finish the smallest bundle first.
+            local rank=remaining or quantity
+            if not bestRank or rank<bestRank or (rank==bestRank and slot<firstSlot) then
+                firstIndex,firstSlot,bestRank=i,slot,rank
             end
         end
     end

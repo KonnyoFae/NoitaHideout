@@ -159,6 +159,12 @@ local function item_details(slot,model,tr)
         end
         return details
     end
+    local kit=NHMedkits.types[slot.kind]
+    if kit then
+        local healing=kit.healPercent and string.format(tr("每次恢复最大生命值的 %d%%","Restores %d%% of maximum HP per use"),kit.healPercent)
+            or string.format(tr("每次最多恢复 %d 点生命","Restores up to %d HP per use"),kit.healHP)
+        return {slot.name,tr("剩余次数 ","Uses left ")..(slot.remaining or kit.uses).."/"..kit.uses,healing}
+    end
     if slot.kind=="summon_card" then
         local species=NHCompanions.species[slot.species]
         local lines={species and tr(species.zh,species.en) or slot.name,
@@ -542,7 +548,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if spells then body_height=body_height+13 end
         if catalyst_count>0 then body_height=body_height+13+12*catalyst_count end
         if show_outputs then body_height=body_height+13+12*#outputs end
-        if selected.note then body_height=body_height+13 end
+        if selected.medkit then body_height=body_height+26
+        elseif selected.note then body_height=body_height+13 end
         if model.order_active and selected.unlocked==false then body_height=body_height+13 end
     elseif shopping and selected then
         body_height=86+(NHLivestock.species[selected.id] and 39 or 0)
@@ -811,7 +818,12 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
                 value_row(y,result.name,"×"..compact(result.amount),white,result.name.." ×"..result.amount)
             end
         end
-        if selected.note then
+        if selected.medkit then
+            y=y+13
+            value_row(y,tr("使用次数","Uses"),tostring(selected.medkit.uses),white)
+            y=y+13
+            value_row(y,tr("每次回血","Healing per use"),selected.medkit.healPercent..tr("% 最大生命","% max HP"),white)
+        elseif selected.note then
             y=y+13
             label(y,selected.note,muted)
         end
@@ -1289,8 +1301,11 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         elseif v.kind then sprite(v,2000+i,v.x+qw*scale/2,v.y+qh*scale/2,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and source.perkSlot==v.perkSlot and 0.35 or 1)
         end
         local caption
+        local kit=NHMedkits.types[v.kind]
         if v.kind=="bandage" and (v.count or 1)>1 then
             caption="×"..compact(v.count)
+        elseif kit and v.key~="native" then
+            caption=(v.remaining or kit.uses).."/"..kit.uses
         elseif v.kind=="dose" or v.kind=="summon_card" then
             local durability=v.kind=="summon_card" and NHCompanions.durability or model.maxUses
             local remaining=v.remaining or durability
@@ -1299,7 +1314,9 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         end
         if caption then
             GuiZSetForNextWidget(gui,-84)
-            GuiText(gui,v.x,v.y+(v.key=="warehouse" and qh-7 or qh-1)*scale,caption,0.8*scale)
+            local captionScale=0.8*scale
+            if kit then captionScale=math.min(captionScale,(qw-1)*scale/GuiGetTextDimensions(gui,caption)) end
+            GuiText(gui,v.x,v.y+(v.key=="warehouse" and qh-7 or qh-1)*scale,caption,captionScale)
         end
     end
     local tip=stock_tip

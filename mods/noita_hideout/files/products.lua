@@ -1,13 +1,14 @@
 -- Physical workshop products use the same capture/restore journal as ordinary equipment.
 NHProducts={}
 local items="mods/noita_hideout/files/items/"
-local function valid_medkit_uses(n)
-    return type(n)=="number" and n>=1 and n<=3 and n==math.floor(n)
-end
 local healing_items={
-    medkit={field="remaining",default=3,valid=valid_medkit_uses,heal=0.4,error="Invalid medkit."},
-    bandage={field="count",default=1,valid=NHStore.validBandageCount,heal=0.2,error="Invalid bandage count."},
+    bandage={field="count",default=1,valid=NHStore.validBandageCount,healHP=5,error="Invalid bandage count."},
 }
+for kind,kit in pairs(NHMedkits.types) do
+    local id=kind
+    healing_items[kind]={field="remaining",default=id=="medkit" and kit.uses or nil,healHP=kit.healHP,healPercent=kit.healPercent,
+        valid=function(n) return NHMedkits.validUses(id,n) end,error="Invalid medkit."}
+end
 local function healing_uses(entity,product)
     local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
     local uses=item and ComponentGetValue2(item,"uses_remaining")
@@ -17,7 +18,8 @@ local function healing_uses(entity,product)
 end
 
 local foods=dofile("mods/noita_hideout/files/cooking.lua")
-local products={"medkit","grenade","bandage"}
+local products={"grenade"}
+for kind in pairs(healing_items) do products[#products+1]=kind end
 for _,food in ipairs(foods) do products[#products+1]=food.id end
 for _,kind in ipairs(products) do
     local id=kind
@@ -51,11 +53,12 @@ for _,kind in ipairs(products) do
     })
 end
 
-local function heal(player,amount)
+local function heal(player,fixedHP,percent)
     local damage=EntityGetFirstComponentIncludingDisabled(player,"DamageModelComponent")
     if not damage then return false end
     local hp,max_hp=ComponentGetValue2(damage,"hp"),ComponentGetValue2(damage,"max_hp")
     if hp<=0 or hp>=max_hp then return false end
+    local amount=percent and max_hp*percent/100 or fixedHP/25
     ComponentSetValue2(damage,"hp",math.min(max_hp,hp+amount))
     return true
 end
@@ -83,22 +86,23 @@ local function eat(player,entity,food)
     end
     ComponentSetValue2(timer,field,math.max(duration,ComponentGetValue2(timer,field) or 0))
     if fresh then EntityAddChild(player,effect) end
-    if food.healHP then heal(player,food.healHP/25) end
+    if food.healHP then heal(player,food.healHP) end
     GameKillInventoryItem(player,entity)
     return true
 end
 
 function NHProducts.use(player,entity)
     if not entity or GameIsInventoryOpen() or NHNative.held(player)~=entity then return end
-    local product=EntityHasTag(entity,"noita_hideout_medkit") and healing_items.medkit
-        or EntityHasTag(entity,"noita_hideout_bandage") and healing_items.bandage
-    if product then
-        local item,uses=healing_uses(entity,product)
-        if not product.valid(uses) or not heal(player,product.heal) then return end
-        if uses==1 then GameKillInventoryItem(player,entity)
-        else ComponentSetValue2(item,"uses_remaining",uses-1) end
-        return true
-    elseif EntityHasTag(entity,"noita_hideout_grenade") then
+    for kind,product in pairs(healing_items) do
+        if EntityHasTag(entity,"noita_hideout_"..kind) then
+            local item,uses=healing_uses(entity,product)
+            if not product.valid(uses) or not heal(player,product.healHP,product.healPercent) then return end
+            if uses==1 then GameKillInventoryItem(player,entity)
+            else ComponentSetValue2(item,"uses_remaining",uses-1) end
+            return true
+        end
+    end
+    if EntityHasTag(entity,"noita_hideout_grenade") then
         local controls=EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")
         if not controls then return end
         local x,y=EntityGetTransform(player)

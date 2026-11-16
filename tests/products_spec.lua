@@ -100,6 +100,38 @@ omit_component="ItemComponent"
 assert(not medical.restore({remaining=3},0,0) and not entities[new_id])
 omit_component=nil
 
+for _,test in ipairs({{kind="tactical_medkit",charges=9,fraction=0.15},
+        {kind="advanced_medkit",charges=12,fraction=0.25}}) do
+    local adapter=adapters[test.kind].adapter
+    local fresh=NHMedkits.item(test.kind)
+    local pack=assert(adapter.restore(fresh,0,0))
+    selected=pack
+    assert(adapters[test.kind].match(pack) and adapter.capture(pack).remaining==test.charges)
+    health.hp,health.max_hp=40,40 -- 1000 displayed HP
+    assert(not NHProducts.use(player,pack) and adapter.capture(pack).remaining==test.charges)
+    health.hp=0
+    assert(not NHProducts.use(player,pack) and adapter.capture(pack).remaining==test.charges)
+    health.hp=2
+    assert(NHProducts.use(player,pack) and math.abs(health.hp-(2+40*test.fraction))<1e-8)
+    local worn=adapter.capture(pack)
+    assert(worn.kind==test.kind and worn.remaining==test.charges-1)
+    EntityKill(pack)
+    pack=assert(adapter.restore(worn,0,0))
+    selected=pack
+    health.hp,health.max_hp=1,4 -- maximum HP can change between uses of the same item
+    assert(NHProducts.use(player,pack) and math.abs(health.hp-(1+4*test.fraction))<1e-8)
+    for uses=test.charges-2,1,-1 do
+        assert(adapter.capture(pack).remaining==uses)
+        health.hp=3.99
+        assert(NHProducts.use(player,pack) and health.hp==4)
+    end
+    assert(not entities[pack])
+    for _,bad in ipairs({0,test.charges+1,0.5,"1",false}) do
+        assert(not adapter.restore({kind=test.kind,remaining=bad},0,0))
+    end
+    assert(not adapter.restore({kind=test.kind},0,0))
+end
+
 local explosive=adapters.grenade.adapter
 local grenade=assert(explosive.restore({kind="grenade"},0,0))
 assert(adapters.grenade.match(grenade) and not adapters.medkit.match(grenade))

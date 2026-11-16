@@ -37,6 +37,7 @@ end
 
 local error_translations = {
     ["Invalid bandage count."] = "绷带的剩余卷数无效。",
+    ["Invalid medkit."] = "医疗包的剩余次数无效。",
     ["Card wallet changed."] = "卡片夹已移动，请重新选择。",
     ["Card wallet slot unavailable."] = "卡片夹栏位已改变，或此格无法叠放该卡。",
     ["Invalid card wallet."] = "卡片夹记录无效。",
@@ -343,6 +344,8 @@ local function item_label(entry)
         return tr(d.zh,d.en)
     end
     if item.kind=="bandage" then return translated(item.name) or tr("绷带","Bandage") end
+    local kit=NHMedkits.types[item.kind]
+    if kit then return translated(item.name) or tr(kit.zh,kit.en) end
     if item.kind == "spell" then
         local id=item.card.id
         local name=item.name and item.name:match("^%$action_") and translated(item.name)
@@ -351,7 +354,6 @@ local function item_label(entry)
     end
     local name = item.name or ""
     if name ~= "" then name = GameTextGetTranslatedOrNot(name) end
-    if item.kind=="medkit" then return name.." ("..(item.remaining or 3).."/3)" end
     if item.kind=="summon_card" then return translated(item.name) or tr(NHCompanions.species[item.species].zh,NHCompanions.species[item.species].en) end
     if item.kind~="wand" then return name~="" and name or item.kind end
     if not name or name == "" then name = tr("魔杖", "Wand") end
@@ -364,7 +366,7 @@ local function stored_view(entry)
     return {id=entry.id,kind=item.kind,name=item_label(entry),potion=potion,
         icon=potion and NHPotion.inventoryIcon(potion) or (item.kind=="dose" and NHInjectors.get(item.subtype).icon)
             or item.icon or (item.sprite and item.sprite.image_file),
-        remaining=item.remaining,count=item.count or (item.kind=="bandage" and 1 or nil),
+        remaining=NHMedkits.remaining(item),count=item.count or (item.kind=="bandage" and 1 or nil),
         subtype=item.subtype,species=item.species,dockSlot=NHPotion.dockSlot(item)}
 end
 
@@ -456,6 +458,8 @@ local function inventory_view()
             duration=math.ceil(NHStore.productionFrames(recipe)/60),
             ready=ready,unlocked=reason~="Facility is locked." and reason~="Spell not unlocked in this save.",
             facility_name=facility_names[recipe.facility] or recipe.facility}
+        local kit=recipe.item and NHMedkits.types[recipe.item.kind]
+        if kit and kit.healPercent then view.medkit=kit end
         if recipe.category=="spell" then
             local card=recipe.item
             view.actionId=card.card.id
@@ -499,8 +503,20 @@ local function inventory_view()
         end
         if recipe.storedIngredient then
             local kind=recipe.storedIngredient
-            table.insert(view.inputs,{name=GameTextGetTranslatedOrNot("$nh_hideout_"..kind),amount=1,
-                available=NHStore.warehouseIngredientCount(state,kind),detail=tr("消耗品仓库","Supplies storage")})
+            local count,ingredientIndex=NHStore.warehouseIngredientCount(state,kind)
+            local inputKit=NHMedkits.types[kind]
+            local name=inputKit and tr(inputKit.zh,inputKit.en) or GameTextGetTranslatedOrNot("$nh_hideout_"..kind)
+            local detail=tr("消耗品仓库","Supplies storage")
+            if inputKit then
+                detail=tr("优先使用消耗品仓库中剩余次数最少的一包，精华用量固定。",
+                    "Uses the kit with the fewest charges in supplies storage. Essence cost is fixed.")
+                local row=ingredientIndex and state.warehouse[ingredientIndex]
+                if row then
+                    local remaining=NHMedkits.remaining(row.item)
+                    name=name.." ("..remaining.."/"..inputKit.uses..")"
+                end
+            end
+            table.insert(view.inputs,{name=name,amount=1,available=count,detail=detail})
         end
         local held=state.order and state.order.recipe==recipe.id and state.order.catalysts
         for _,sample in ipairs(recipe.catalysts or {}) do

@@ -1613,3 +1613,56 @@ local function testSpellWorkshopController()
 end
 testSpellWorkshopController()
 print("Controller: native discovery refresh, spell reservations, full-charge delivery and exact essence refund passed.")
+
+local function testTieredMedkits()
+    settings,flags={},{}
+    new_world()
+    local saved=state()
+    saved.levels.medical=1
+    saved.resources={essence_healing=270,herb=12}
+    for slot=1,2 do
+        local item=NHMedkits.item("medkit")
+        item.remaining=slot==2 and 1 or nil
+        saved.warehouse[slot]={id=saved.nextItemId,slot=slot,item=item}
+        saved.nextItemId=saved.nextItemId+1
+    end
+    assert(NHStore.commit(saved))
+    boot()
+    inventory_open=true
+    local function checkRecipe(id,duration,uses,percent,need,herbs,ingredient,count)
+        local recipe=assert(has_project(tick().recipes,id))
+        assert(recipe.ready and recipe.category=="medical" and recipe.duration==duration)
+        assert(recipe.medkit.uses==uses and recipe.medkit.healPercent==percent)
+        assert(recipe.inputs[1].essence=="essence_healing" and recipe.inputs[1].amount==need)
+        assert(recipe.inputs[2].amount==herbs)
+        local input=recipe.inputs[3]
+        assert(input.name==ingredient and input.available==count and input.amount==1)
+        assert(input.detail:find("fewest charges",1,true))
+    end
+    checkRecipe("tactical_medkit",60,9,15,105,4,"Medkit (1/3)",2)
+    tick(nil,"craft",{id="tactical_medkit"})
+    local order=state().order
+    assert(order.required==3600 and state().resources.essence_healing==165 and state().resources.herb==8)
+    assert(tick().warehouse.supplies[1].remaining==3 and tick().warehouse.supplies[order.output.slot].kind=="reserved")
+    advance(order.required)
+    local built=state()
+    local tactical=assert(tick().warehouse.supplies[order.output.slot])
+    assert(tactical.kind=="tactical_medkit" and tactical.remaining==9)
+    for _,row in ipairs(built.warehouse) do
+        if row.id==tactical.id then row.item.remaining=7 end
+    end
+    assert(NHStore.commit(built))
+    boot()
+    checkRecipe("advanced_medkit",180,12,25,165,8,"Tactical medkit (7/9)",1)
+    tick(nil,"craft",{id="advanced_medkit"})
+    order=state().order
+    assert(order.required==10800 and not state().resources.essence_healing and not state().resources.herb)
+    boot()
+    local reserved=tick().warehouse.supplies[order.output.slot]
+    assert(reserved.kind=="reserved")
+    advance(order.required)
+    local advanced=tick().warehouse.supplies[order.output.slot]
+    assert(advanced.kind=="advanced_medkit" and advanced.remaining==12 and state().finished==2)
+end
+testTieredMedkits()
+print("Controller: worn kits upgrade for fixed prices and both higher tiers arrive with full charges.")
