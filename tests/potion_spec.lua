@@ -32,6 +32,7 @@ local function comp(id)
 end
 function ComponentGetValue2(id, f) return comp(id)[f] end
 function ComponentSetValue2(id, f, v) comp(id)[f] = v end
+function GameGetPotionColorUint() return 0xff0011ff end
 function EntityGetFilename(e) return entities[e].path end
 function EntityHasTag(e, tag) return entities[e].tags[tag] or false end
 function EntityAddTag(e, tag) entities[e].tags[tag] = true end
@@ -73,17 +74,8 @@ assert(again.reactions == 0)
 NHPotion.discard(restored, 77)
 assert(entities[restored].killed and entities[restored].removed_from == 77)
 
-data.materials.water = 25
-assert(NHPotion.can_refine(data))
-local product = assert(NHPotion.recipe(data))
-assert(not NHPotion.can_refine(data) and not NHPotion.recipe(data))
-assert(data.materials.water == 25 and data.materials.slime == nil)
-assert(product.materials.magic_liquid_teleportation == 500)
-assert(not NHPotion.pour(data, "water", 26) and data.materials.water == 25)
-assert(NHPotion.pour(data, "water", 10) == 10 and data.materials.water == 15)
-local produced = assert(NHPotion.restore(product, 0, 0))
-local normal = assert(NHPotion.capture(produced))
-assert(normal.materials.magic_liquid_teleportation == 500 and normal.reactions == 20)
+assert(data.color==0xff0011ff and NHPotion.contentsColor(data)==data.color)
+assert(not NHPotion.contentsColor({materials={},color=data.color}))
 
 local unknown = {kind = "potion", materials = {missing_mod_liquid = 500}}
 local before = next_id
@@ -116,3 +108,31 @@ for _,variant in ipairs({"powder_stash","jar","jar_of_urine","potion_aggressive"
     local saved=assert(NHPotion.capture(rebuilt))
     assert(saved.variant==variant and saved.materials.slime==37)
 end
+
+-- Recolour an older stored mix and a reloaded pouch using an inert native inventory.
+local probe,probes,observed=nil,0,nil
+function EntityCreateNew()
+    probes=probes+1
+    probe=100000+probes
+    return probe
+end
+function EntityAddComponent2(entity,kind,settings)
+    assert(entity==probe)
+    if kind=="MaterialInventoryComponent" then assert(settings.on_death_spill==false and settings.do_reactions==0) end
+    return 2
+end
+function AddMaterialInventoryMaterial(entity,name,n)
+    assert(entity==probe)
+    observed=observed or {}
+    observed[name]=n
+end
+function GameGetPotionColorUint(entity)
+    assert(entity==probe)
+    return 0xffa02010
+end
+function EntityKill(entity) assert(entity==probe); probe=nil end
+local legacy={materials={slime=21,water=47}}
+assert(NHPotion.contentsColor(legacy)==0xffa02010 and observed.slime==21 and observed.water==47 and not probe)
+local powder={variant="powder_stash",materials={slime=5}}
+assert(NHPotion.contentsColor(powder)==0xffa02010)
+assert(NHPotion.contentsColor(powder)==0xffa02010 and probes==2 and not probe)

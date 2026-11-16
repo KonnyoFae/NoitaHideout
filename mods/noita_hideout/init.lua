@@ -37,7 +37,7 @@ local error_translations = {
     ["Slot unavailable."] = "目标格无法接收这件物品。",
     ["Item is no longer in this container."] = "物品已移出该容器。",
     ["Another order is active."] = "工坊已有一张在制订单。",
-    ["Not enough ingredients across warehouse flasks."] = "仓库药瓶里的原料不足。",
+    ["Not enough bulk ingredients."] = "物料库存中的原料不足。",
     ["The selected item is no longer in your quick inventory."] = "这件物品已经离开快捷栏。",
     ["The case is already in your inventory."] = "安全箱就在你的道具栏里。",
     ["The case is already within reach."] = "安全箱就在附近，可按 G 开箱。",
@@ -229,13 +229,15 @@ end
 
 local function stored_view(entry)
     local item=entry.item
-    return {id=entry.id,kind=item.kind,name=item_label(entry),icon=item.icon or (item.sprite and item.sprite.image_file),
+    local potion=item.kind=="potion" and item or nil
+    return {id=entry.id,kind=item.kind,name=item_label(entry),potion=potion,
+        icon=potion and NHPotion.inventoryIcon(potion) or item.icon or (item.sprite and item.sprite.image_file),
         remaining=item.remaining,count=item.count,dockSlot=NHPotion.dockSlot(item)}
 end
 
 local function inventory_view()
     if model_cache and model_cache.revision == state.revision then return model_cache end
-    local model = {revision = state.revision, loot = {}, secure_loot = {}, warehouse = {}, warehouse_last = {}, recipe_indices = {}}
+    local model = {revision = state.revision, secure_loot = {}, warehouse = {}, warehouse_last = {}}
     model.docks,model.materials={},{}
     for _,row in ipairs(state.docks) do
         local view=stored_view(row)
@@ -255,10 +257,6 @@ local function inventory_view()
     for i, entry in ipairs(state.warehouse) do
         local view=stored_view(entry)
         warehouse_slot(entry.item.kind,entry.slot or i,view)
-        model.loot[i] = view.name
-        if entry.item.kind == "potion" and NHPotion.can_refine(entry.item) then
-            model.recipe_indices[#model.recipe_indices + 1] = i
-        end
     end
     model.capacity = NHStore.safeCapacity(state)
     for _, entry in ipairs(state.safe) do
@@ -267,16 +265,8 @@ local function inventory_view()
     local pouch={kind="pouch",name=tr("针剂包","Injector pouch"),icon=NHNative.icons.pouch}
     if state.pouch.location=="safe" then model.secure_loot[state.pouch.slot]=pouch
     elseif state.pouch.location=="warehouse" then warehouse_slot("pouch",state.pouch.slot,pouch) end
-    local plan = NHStore.planBatch(state)
-    model.batch_available = plan ~= nil
-    if plan then
-        local lines = {}
-        for _, part in ipairs(plan) do
-            local material = part.material == "slime" and tr("黏液", "Slime") or tr("不稳定传送液", "Unstable teleportatium")
-            lines[#lines + 1] = "#" .. part.index .. "  " .. material .. "  " .. part.amount
-        end
-        model.batch_sources = table.concat(lines, "\n")
-    end
+    model.batch_available=NHStore.canStartBatch(state)
+    model.ingredients=state.materials
     model.cells,model.pouchCapacity,model.maxUses=state.pouch.cells,NHStore.pouchCapacity,NHStore.doseDurability
     model.order_active = state.order ~= false
     model.order = state.order and tr("已投料，等待一次通关", "Paid; waiting for one clear") or tr("空闲", "Idle")

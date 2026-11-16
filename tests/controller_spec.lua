@@ -219,19 +219,24 @@ new_world()
 tick(11)
 tick(nil,"restock")
 assert(state().runSerial==2 and state().pouch.location=="safe")
--- The old production path remains accessible exclusively at spawn.
+function CellFactory_GetAllLiquids() return {"magic_liquid_teleportation"} end
+function CellFactory_GetAllSands() return {"sand"} end
+function CellFactory_GetType(name) return name=="magic_liquid_teleportation" and 7 or -1 end
+function CellFactory_GetUIName() return "$mat_teleport" end
+-- Workshop spends loose stock and delivers material without creating a container.
 local s=state()
-s.warehouse[1]={id=s.nextItemId,item={kind="potion",materials={slime=250,magic_liquid_unstable_teleportation=250}}}
+s.warehouse[1]={id=s.nextItemId,item={kind="potion",materials={}}}
+s.materials={slime=250,magic_liquid_unstable_teleportation=250}
 s.nextItemId=s.nextItemId+1
 assert(NHStore.commit(s))
 boot()
 tick(11)
-tick(nil,"order",1)
-assert(state().order and not next(state().warehouse[1].item.materials))
+tick(nil,"order")
+assert(state().order and not next(state().materials))
 ending=true
 OnPlayerDied()
 OnPlayerDied()
-assert(state().finished==1 and #state().warehouse==2 and state().pouch.doses==2)
+assert(state().finished==1 and #state().warehouse==1 and state().materials.magic_liquid_teleportation==500 and state().pouch.doses==2)
 new_world()
 settings["noita_hideout.test_tools"]=false
 tick(11)
@@ -311,28 +316,22 @@ assert(tick().popup)
 entities[player].x=1000
 assert(not tick().popup)
 
--- Move an existing crafted flask from the stash, unload and refill it, then
+-- Move an empty flask from the stash and fill it with the workshop output, then
 -- return the same container with its new exact contents to a warehouse cell.
-function CellFactory_GetAllLiquids() return {"magic_liquid_teleportation"} end
-function CellFactory_GetAllSands() return {"sand"} end
-function CellFactory_GetType(name) return name=="magic_liquid_teleportation" and 7 or -1 end
-function CellFactory_GetUIName() return "$mat_teleport" end
 entities[player].x=227
-local product
-for _,r in ipairs(state().warehouse) do if r.item.materials and r.item.materials.magic_liquid_teleportation then product=r end end
+local product=state().warehouse[1]
 assert(product)
 local dock_move={container="docks",source="warehouse",destination="docks",from=product.slot,safeSlot=2,entity=product.id}
 tick(nil,"move_dock",dock_move)
 assert(#state().docks==0)
 dock_move.safeSlot=1
 tick(nil,"move_dock",dock_move)
-assert(tick().docks[1].used==500)
-local req={container="docks",slot=1,storedId=product.id,unload=true}
+assert(tick().docks[1].used==0)
+local req={container="docks",slot=1,storedId=product.id,material="magic_liquid_teleportation",amount=1}
 entities[player].x=1200
 tick(nil,"material_transfer",req)
-assert(not next(state().materials))
+assert(state().materials.magic_liquid_teleportation==500)
 entities[player].x=227
-tick(nil,"material_transfer",req)
 local hud=tick()
 assert(hud.docks[1].used==0 and hud.materials[1].amount==500 and hud.materials[1].slot==1)
 req.unload,req.material,req.amount=false,hud.materials[1].key,1

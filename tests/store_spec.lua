@@ -61,10 +61,11 @@ local potion = {kind = "potion", materials = {
 }}
 state.warehouse = {{id = state.nextItemId, item = potion}}
 state.nextItemId = state.nextItemId + 1
-assert(NHStore.findRecipe(state) == 1)
-assert(NHStore.startOrder(state, 1))
-assert(potion.materials.water == 20 and (potion.materials.slime or 0) == 0)
-assert(not NHStore.startOrder(state, 1))
+assert(not NHStore.startOrder(state)) -- Bottled and docked ingredients are not loose stock.
+state.materials={magic_liquid_unstable_teleportation=300,slime=250,water=20,magic_liquid_teleportation=12}
+assert(NHStore.startOrder(state))
+assert(state.materials.magic_liquid_unstable_teleportation==50 and state.materials.slime==nil)
+assert(potion.materials.slime==250 and not NHStore.startOrder(state))
 assert(not NHStore.reward(state, fourth))  -- Cannot spend a prior empty clear.
 state = save(state)
 assert(state.order and state.finished == 0 and #state.warehouse == 1)
@@ -74,8 +75,8 @@ assert(not NHStore.reward(state, fifth) and state.order)
 local sixth = NHStore.newRun(state)
 assert(NHStore.reward(state, sixth))
 state = save(state)
-assert(state.finished == 1 and not state.order and #state.warehouse == 2)
-assert(state.warehouse[2].item.materials.magic_liquid_teleportation == 500)
+assert(state.finished == 1 and not state.order and #state.warehouse == 1)
+assert(state.materials.magic_liquid_teleportation == 512 and state.materials.water==20)
 assert(not NHStore.reward(state, sixth))
 assert(state.warehouse[1].item.materials.water == 20)
 
@@ -89,36 +90,19 @@ assert(separate.profile == 2 and separate.runSerial == 0 and #separate.warehouse
 assert(not NHStore.commit(state))
 assert(NHStore.newRun(separate) == 1)
 local unstable = "magic_liquid_unstable_teleportation"
-local batch = {
-    {water = 9, [unstable] = 110},
-    {slime = 249},
-    {[unstable] = 220, oil = 31},
-}
-for _, materials in ipairs(batch) do
-    separate.warehouse[#separate.warehouse + 1] = {id = separate.nextItemId,
-        item = {kind = "potion", materials = materials}}
-    separate.nextItemId = separate.nextItemId + 1
-end
-assert(not NHStore.planBatch(separate))
-assert(not NHStore.startOrder(separate, 0))
-assert(batch[1][unstable] == 110 and batch[2].slime == 249 and batch[3][unstable] == 220)
-batch[2].slime = 350
-local plan = NHStore.planBatch(separate)
-assert(#plan == 3 and plan[1].index == 1 and plan[1].amount == 110)
-assert(plan[2].index == 3 and plan[2].amount == 140)
-assert(plan[3].index == 2 and plan[3].amount == 250)
-assert(not NHStore.startOrder(separate, 1))  -- Explicit single flask cannot pull from others.
-assert(NHStore.startOrder(separate, 0))
-assert(separate.warehouse[1].item.materials.water == 9 and not separate.warehouse[1].item.materials[unstable])
-assert(separate.warehouse[2].item.materials.slime == 100)
-assert(separate.warehouse[3].item.materials[unstable] == 80 and separate.warehouse[3].item.materials.oil == 31)
-assert(not NHStore.startOrder(separate, 0))
-assert(separate.order.output.materials.magic_liquid_teleportation == 500)
-assert(NHStore.reward(separate, 1) and #separate.warehouse == 4)
+separate.materials={[unstable]=330,slime=249}
+assert(not NHStore.canStartBatch(separate) and not NHStore.startOrder(separate))
+assert(separate.materials[unstable]==330 and separate.materials.slime==249)
+separate.materials.slime=350
+assert(NHStore.startOrder(separate))
+assert(separate.materials[unstable]==80 and separate.materials.slime==100)
+assert(not NHStore.startOrder(separate))
+assert(NHStore.reward(separate,1) and #separate.warehouse==0)
+assert(separate.materials.magic_liquid_teleportation==500)
 separate = save(separate)
 selected = 1
 state = load()
-assert(state.runSerial == sixth and #state.warehouse == 2)
+assert(state.runSerial == sixth and #state.warehouse == 1)
 assert(not NHStore.commit(separate))
 
 -- One corrupt redundant older copy is harmless. Losing the current committed

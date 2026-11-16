@@ -14,10 +14,15 @@ function GuiStartFrame() drawn = {} end
 function GuiGetScreenDimensions() return width, height end
 function GuiZSet() end
 function GuiZSetForNextWidget() end
-function GuiColorSetForNextWidget() end
-function GuiImageNinePiece() end
+local next_color,image_colors={},{}
+function GuiColorSetForNextWidget(_,r,g,b) next_color={r,g,b} end
+local tipbox
+function GuiImageNinePiece(_,id,x,y,w,h)
+    if id==200 then tipbox={x=x,y=y,w=w,h=h} end
+end
 local tiles={}
 function GuiImage(_,id,x,y,sprite)
+    image_colors[id],next_color=next_color,{}
     if sprite=="data/ui_gfx/inventory/quick_inventory_box.png" then tiles[id]={x=x,y=y} end
 end
 function GuiTooltip() end
@@ -40,6 +45,8 @@ end
 function GuiImageButton(_, id) return id == click end
 
 dofile("mods/noita_hideout/files/store.lua")
+dofile("mods/noita_hideout/files/potion.lua")
+function CellFactory_GetType() return -1 end
 dofile("mods/noita_hideout/files/ui.lua")
 local function render(model, widget)
     frame = frame + 1
@@ -150,7 +157,7 @@ render(model,79)
 render(model)
 assert(drawn.Flask and drawn["Powder pouch"] and drawn.Empty)
 local flask,powder=tiles[104],tiles[105]
-assert(powder.y-flask.y==20 and powder.x==flask.x)
+assert(powder.y==flask.y and powder.x>flask.x+20)
 local native_flask=native("tool",5,1,51,"potion")
 native_flask.dockSlot=1
 table.insert(model.native_slots,native_flask)
@@ -160,12 +167,28 @@ assert(cmd=="cancel_native")
 point(125,28,"press")
 cmd,arg=point(flask.x+2,flask.y+2,"release")
 assert(cmd=="place" and arg.container=="docks" and arg.safeSlot==1)
-model.docks[1]={kind="potion",id=123,name="Mixed flask",used=20,capacity=50}
+local mixed={kind="potion",capacity=50,materials={water=12,slime=8},color=0xff102080}
+model.docks[1]={kind="potion",id=123,name="Mixed flask",used=20,capacity=50,potion=mixed}
+model.secure_loot[1]={kind="potion",id=124,name="Mixed flask",potion=mixed}
 model.materials={{key="water",name="Water",amount=100,slot=1}}
 cmd,arg=render(model,181)
 assert(cmd=="material_transfer" and arg.unload and arg.storedId==123)
 render(model)
 local load_button=buttons[187]
+for n=2,9 do model.materials[n]={key="m"..n,name="M"..n,amount=n==2 and 1000 or 1250000,slot=1} end
+render(model)
+assert(drawn["1k"] and drawn["1.2M"] and drawn["1/2"] and buttons[188].x>load_button.x and buttons[188].y==load_button.y)
+local button2=buttons[188]
+point(button2.x+1,button2.y+1)
+assert(drawn["M2  1000"])
+render(model,185)
+assert(drawn["M9"] and not drawn["M2"])
+render(model,184)
+point(flask.x+1,flask.y+1)
+assert(drawn["Flask  20/50"] and drawn["water  12"] and drawn["slime  8"])
+assert(image_colors[134][1]==128/255 and image_colors[134][2]==32/255 and image_colors[134][3]==16/255)
+assert(image_colors[131][1]==128/255)
+assert(tipbox.x>flask.x and tipbox.x<flask.x+20 and tipbox.x>=0 and tipbox.y>=0 and tipbox.x+tipbox.w<=width and tipbox.y+tipbox.h<=height)
 cmd,arg=point(load_button.x+1,load_button.y+1,"press")
 assert(cmd=="material_transfer" and arg.amount==1 and arg.material=="water")
 assert(not point(load_button.x+1,load_button.y+1,"release"))
@@ -185,6 +208,13 @@ point(0,0,"release")
 point(flask.x+2,flask.y+2,"press")
 cmd,arg=point(148,28,"release")
 assert(cmd=="secure_withdraw" and arg.container=="docks" and arg.storedId==123)
+model.warehouse.containers={model.docks[1]}
+render(model,77)
+render(model)
+assert(image_colors[134][1]==128/255)
+local first_tile=tiles[104]
+point(first_tile.x+1,first_tile.y+1)
+assert(drawn["Flask  20/50"] and drawn["water  12"])
 render(model,71)
 render(model)
 assert(drawn["[+] Stash"] and not drawn.Materials)

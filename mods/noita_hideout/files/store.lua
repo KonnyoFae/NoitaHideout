@@ -187,7 +187,10 @@ local function validate(s)
     if s.order ~= false then
         assert(type(s.order) == "table" and whole(s.order.progress) and whole(s.order.required)
             and s.order.progress < s.order.required and type(s.order.output) == "table"
-            and s.order.output.kind == "potion", "Invalid production order")
+            and type(s.order.output.materials)=="table" and next(s.order.output.materials), "Invalid production order")
+        for name,amount in pairs(s.order.output.materials) do
+            assert(type(name)=="string" and whole(amount) and amount>0,"Invalid order yield")
+        end
     end
 end
 
@@ -436,74 +439,28 @@ function NHStore.restock(state)
     return true, "Two test doses placed in secure case."
 end
 
-function NHStore.findRecipe(state)
-    for i, entry in ipairs(state.warehouse) do
-        if entry.item.kind == "potion" and NHPotion.can_refine(entry.item) then return i end
+-- Inputs and the paid order are committed together. Only loose stock is spendable.
+NHStore.recipe={
+    inputs={{name="magic_liquid_unstable_teleportation",amount=250},{name="slime",amount=250}},
+    output={magic_liquid_teleportation=500},
+}
+
+function NHStore.canStartBatch(state)
+    for _,input in ipairs(NHStore.recipe.inputs) do
+        if (state.materials[input.name] or 0)<input.amount then return false end
     end
+    return true
 end
 
--- Select in warehouse order and only use the exact amounts still required.
--- One flask may contribute to both ingredients.
-function NHStore.planBatch(state)
-    local plan = {}
-    for _, ingredient in ipairs(NHPotion.ingredients) do
-        local remaining = ingredient.amount
-        for i, entry in ipairs(state.warehouse) do
-            local flask = entry.item
-            if flask.kind == "potion" then
-                local available = flask.materials[ingredient.material]
-                if whole(available) and available > 0 then
-                    local amount = math.min(remaining, available)
-                    plan[#plan + 1] = {index = i, material = ingredient.material, amount = amount}
-                    remaining = remaining - amount
-                    if remaining == 0 then break end
-                end
-            end
-        end
-        if remaining > 0 then return nil end
+function NHStore.startOrder(state)
+    if state.order then return false,"Another order is active." end
+    if not NHStore.canStartBatch(state) then return false,"Not enough bulk ingredients." end
+    for _,input in ipairs(NHStore.recipe.inputs) do
+        local left=state.materials[input.name]-input.amount
+        state.materials[input.name]=left>0 and left or nil
     end
-    return plan
-end
-
-local function payBatch(state)
-    local plan = NHStore.planBatch(state)
-    if not plan then return nil, "Not enough ingredients across warehouse flasks." end
-    -- Stage the new contents per source. Apply them together only once the
-    -- canonical flask recipe has produced a complete order.
-    local staged, pool = {}, {kind = "potion", materials = {}}
-    for _, charge in ipairs(plan) do
-        local index, name = charge.index, charge.material
-        if not staged[index] then
-            local source = state.warehouse[index].item
-            staged[index] = {kind = "potion", materials = {}}
-            for k, v in pairs(source.materials) do staged[index].materials[k] = v end
-        end
-        local removed, err = NHPotion.pour(staged[index], name, charge.amount)
-        if not removed then return nil, err end
-        pool.materials[name] = (pool.materials[name] or 0) + removed
-    end
-    local output, err = NHPotion.recipe(pool)
-    if not output then return nil, err end
-    for index, flask in pairs(staged) do
-        local source = state.warehouse[index].item
-        source.materials, source.label, source.name = flask.materials, flask.label, flask.name
-    end
-    return output
-end
-
-function NHStore.startOrder(state, index)
-    if state.order then return false, "Another order is active." end
-    local output, err
-    if index == 0 then
-        output, err = payBatch(state)
-    else
-        local entry = state.warehouse[index or NHStore.findRecipe(state)]
-        if not entry or entry.item.kind ~= "potion" then return false, "Deposit a flask with both ingredients." end
-        output, err = NHPotion.recipe(entry.item)
-    end
-    if not output then return false, err end
-    state.order = {progress = 0, required = 1, output = output}
-    return true, "Order paid. One completion will finish it."
+    state.order={progress=0,required=1,output={materials=NHStore.recipe.output}}
+    return true
 end
 
 function NHStore.reward(state, run_id)
@@ -515,11 +472,12 @@ function NHStore.reward(state, run_id)
     if state.order == false then return true, "Completion recorded. No active order." end
     state.order.progress = state.order.progress + 1
     if state.order.progress >= state.order.required then
-        state.warehouse[#state.warehouse + 1] = {id = state.nextItemId, item = state.order.output,slot=NHStore.freeSlot(state,"warehouse",nil,"potion")}
-        state.nextItemId = state.nextItemId + 1
+        for name,amount in pairs(state.order.output.materials) do
+            state.materials[name]=(state.materials[name] or 0)+amount
+        end
         state.order = false
         state.finished = state.finished + 1
-        return true, "Order finished. Refined flask stored in warehouse."
+        return true, "Order finished. Output credited to material stock."
     end
     return true, "Order advanced."
 end

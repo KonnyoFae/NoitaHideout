@@ -17,10 +17,6 @@ local normal_flask_tag = "noita_hideout_standard_flask"
 local unstable = "magic_liquid_unstable_teleportation"
 local stable = "magic_liquid_teleportation"
 local reagent_units = 250
-NHPotion.ingredients = {
-    {material = unstable, amount = reagent_units},
-    {material = "slime", amount = reagent_units},
-}
 
 -- These templates differ from the base flask only by their initial fill.
 -- Distinct material containers retain their template; mimics remain world entities.
@@ -238,6 +234,45 @@ function NHPotion.materialSlot(name)
     return material_slots[name]
 end
 
+function NHPotion.containerName(record,lang)
+    local variant=variants[record.variant]
+    if variant then return variant[lang=="zh" and "zh" or "en"] end
+    return lang=="zh" and "药瓶" or "Flask"
+end
+
+function NHPotion.inventoryIcon(record)
+    if record.icon and record.icon~="" then return record.icon end
+    local variant=variants[record.variant]
+    return "data/ui_gfx/items/"..(variant and variant.icon or "potion")..".png"
+end
+
+local pure_colors={}
+function NHPotion.contentsColor(record)
+    local first=next(record.materials)
+    if not first then return end
+    if record.color then return record.color end
+    local pure=next(record.materials,first)==nil
+    if pure and pure_colors[first] then return pure_colors[first] end
+    -- The stored item has no live entity. Ask the same native colour mixer
+    -- using only a material inventory, without physics, item scripts or spills.
+    local probe=EntityCreateNew("noita_hideout_color_sample")
+    if not probe or probe==0 then return end
+    local ok,color=pcall(function()
+        if not EntityAddComponent2(probe,"MaterialInventoryComponent",{on_death_spill=false,do_reactions=0}) then return end
+        EntityAddComponent2(probe,"PotionComponent",{})
+        for name,amount in pairs(record.materials) do
+            if CellFactory_GetType(name)<0 then return end
+            AddMaterialInventoryMaterial(probe,name,amount)
+        end
+        return GameGetPotionColorUint(probe)
+    end)
+    EntityKill(probe)
+    if ok and color then
+        if pure then pure_colors[first]=color end
+        return color
+    end
+end
+
 function NHPotion.materialName(name)
     local id=CellFactory_GetType(name)
     if id and id>=0 then
@@ -269,6 +304,7 @@ function NHPotion.transferMaterial(state,request)
         stock[name]=stock[name]-n
         if stock[name]==0 then stock[name]=nil end
     end
+    item.color=nil
     refresh_name(item)
     return true
 end
@@ -286,6 +322,8 @@ local function capture(entity)
     local inv = c.MaterialInventoryComponent
     return refresh_name({
         kind = "potion", materials = read_materials(inv), variant=variant,
+        -- Powder pouches disable native tinting. Sample their contents without that flag.
+        color=variant~="powder_stash" and GameGetPotionColorUint(entity) or nil,
         icon=ComponentGetValue2(c.ItemComponent,"ui_sprite"),
         capacity = ComponentGetValue2(c.MaterialSuckerComponent, "barrel_size"),
         max_capacity = ComponentGetValue2(inv, "max_capacity"),
@@ -373,40 +411,4 @@ function NHPotion.sample(x, y)
         kind = "potion", materials = {[unstable] = reagent_units, slime = reagent_units},
         capacity = 1000, reactions = 0,
     }, x, y)
-end
-
-local function subtract(materials, name, amount)
-    local remaining = materials[name] - amount
-    materials[name] = remaining > 0 and remaining or nil
-end
-
-function NHPotion.pour(record, name, amount)
-    if not whole_units(amount) or amount == 0 or (record.materials[name] or 0) < amount then
-        return nil, "Not enough material for that quantity"
-    end
-    subtract(record.materials, name, amount)
-    refresh_name(record)
-    return amount
-end
-
-function NHPotion.can_refine(record)
-    if type(record) ~= "table" or record.kind ~= "potion" or type(record.materials) ~= "table" then
-        return false
-    end
-    for _, input in ipairs(NHPotion.ingredients) do
-        if (record.materials[input.material] or 0) < input.amount then return false end
-    end
-    return true
-end
-
--- The caller commits the paid inputs and the resulting order in one profile update.
-function NHPotion.recipe(record)
-    if not NHPotion.can_refine(record) then return nil, "Need 250 unstable teleportatium and 250 slime" end
-    local output_units = 0
-    for _, input in ipairs(NHPotion.ingredients) do
-        subtract(record.materials, input.material, input.amount)
-        output_units = output_units + input.amount
-    end
-    refresh_name(record)
-    return refresh_name({kind = "potion", capacity = 1000, materials = {[stable] = output_units}})
 end
