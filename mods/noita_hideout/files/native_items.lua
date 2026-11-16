@@ -13,7 +13,7 @@ function NHNative.registerTranslations()
         {"nh_hideout_pouch", "Injector pouch", "针剂包"},
         {"nh_hideout_pouch_desc", "Use to open the pouch. Drag injectors into or out of it.", "手持使用可打开针剂包。拖动针剂即可存入或取出。"},
         {"nh_hideout_dose", "Fire immunity injector", "耐火激活剂"},
-        {"nh_hideout_dose_desc", "Hold and use to inject. Grants fire immunity for one minute.", "手持时点击注射。获得约一分钟的火焰免疫。"},
+        {"nh_hideout_dose_desc", "Three uses. Each injection grants one minute of fire immunity.", "每支可使用三次。每次注射获得约一分钟的火焰免疫。"},
     }
     local rows = {}
     for _, label in ipairs(labels) do

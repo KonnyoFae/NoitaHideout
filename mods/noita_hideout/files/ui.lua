@@ -69,6 +69,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
             local v = model.secure_loot[n] or {}
             slot(8+23*(i-1),25,"valuable",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id)
             slots[#slots].safeSlot=n
+            slots[#slots].remaining,slots[#slots].count=v.remaining,v.count
         end
     end
     local popupY = standalone and 0 or -66
@@ -83,8 +84,13 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
             dispatch("close_container")
             return
         end
-        slot(8,popupY+23,"dose",model.case_count>0 and "dose" or nil,tr("针剂","Injector"))
-        label(34,popupY+26,tr("耐火激活剂 ×","Fire injector ×")..model.case_count,146,white)
+        for i=1,model.pouchCapacity do
+            local cell=model.cells[i]
+            slot(8+42*(i-1),popupY+23,"dose",cell and "dose",cell and tr("耐火激活剂","Fire injector") or tr("空格","Empty slot"))
+            local v=slots[#slots]
+            v.cell=i
+            if cell then v.remaining,v.count=cell.remaining,cell.count end
+        end
     end
 
     local native_x = tonumber(MagicNumbersGetValue("UI_BARS_POS_X"))
@@ -123,15 +129,24 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         if source.kind=="pouch" and source.key=="valuable" and target.key=="valuable" and not target.kind then
             return "move_pouch",source,target.safeSlot
         end
-        if source.key=="dose" and target.key=="valuable" and not target.kind then
+        local canStack = source.kind=="dose" and target.kind=="dose"
+            and (source.remaining or model.maxUses)==model.maxUses and (target.remaining or model.maxUses)==model.maxUses
+        if source.key=="valuable" and source.kind=="dose" and target.key=="valuable"
+            and source.safeSlot~=target.safeSlot and (not target.kind or canStack) then
+            return "move_safe_dose",source,target.safeSlot
+        end
+        if source.key=="dose" and target.key=="dose" and source.cell~=target.cell and (not target.kind or canStack) then
+            return "move_cell",source
+        end
+        if source.key=="dose" and target.key=="valuable" and (not target.kind or canStack) then
             return "unpack_dose",source,target.safeSlot
         end
-        if source.key=="valuable" and source.kind=="dose" and target.key=="dose" then
+        if source.key=="valuable" and source.kind=="dose" and target.key=="dose" and (not target.kind or canStack) then
             return "pack_dose",source,source.safeSlot
         end
         if source.key=="native" then
-            if target.key=="dose" and model.popup and source.kind=="dose" then return "place",source end
-            if target.key=="valuable" and not target.kind and
+            if target.key=="dose" and model.popup and source.kind=="dose" and (not target.kind or canStack) then return "place",source end
+            if target.key=="valuable" and (not target.kind or canStack) and
                 (source.kind=="wand" or source.kind=="potion" or source.kind=="spell" or source.kind=="dose" or source.kind=="pouch") then
                 return "place",source,target.safeSlot
             end
@@ -160,11 +175,18 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
     for i,v in ipairs(slots) do
         if drop(v)=="place" then tint(green) end
         GuiImage(gui,100+i,v.x,v.y,tile,1,scale)
-        if v.kind then sprite(v,130+i,v.x+10*scale,v.y+10*scale,source and source.key==v.key and source.safeSlot==v.safeSlot and 0.35 or 1)
+        if v.kind then sprite(v,130+i,v.x+10*scale,v.y+10*scale,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and 0.35 or 1)
+        end
+        if v.kind=="dose" then
+            local remaining=v.remaining or model.maxUses
+            local caption=(v.count or 1)>1 and ("×"..v.count) or (remaining.."/"..model.maxUses)
+            GuiZSetForNextWidget(gui,-84)
+            GuiText(gui,v.x,v.y+19*scale,caption,0.8*scale)
         end
     end
     local hint = hovered and hovered.name
     if hovered and hovered.kind=="pouch" then hint=tr("点击打开，拖动移动","Click to open or drag to move") end
+    if hovered and hovered.kind=="dose" then hint=tr("耐火激活剂 · 耐久 ","Fire injector · durability ")..(hovered.remaining or model.maxUses).."/"..model.maxUses end
     if source then
         if source.key~="native" then sprite(source,160,mx,my,0.95) end
         if hovered and drop(hovered) and drop(hovered)~="cancel_native" then hint=tr("松开放置", "Release to place")
@@ -177,6 +199,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         if action then
             local request = {parent=arg.parent,lane=arg.lane,xslot=arg.xslot,yslot=arg.yslot,
                 entity=arg.entity,safeSlot=safeSlot,storedId=storedId,from=arg.safeSlot,
+                sourceCell=source.cell,targetCell=hovered and hovered.cell,
                 intoContainer=hovered and hovered.key=="dose"}
             dispatch(action,request)
         end

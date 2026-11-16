@@ -28,7 +28,7 @@ local first = NHStore.newRun(state)
 assert(first == 1 and state.pouch.location == "safe" and state.pouch.doses == 2)
 state.safe[1] = {id = state.nextItemId, item = {kind = "wand", name = "Varpuluuta"}}
 state.nextItemId = state.nextItemId + 1
-assert(NHStore.useDose(state))
+assert(NHStore.takePouchDose(state.pouch,1))
 state = save(state)
 assert(state.pouch.doses == 1)
 assert(NHStore.endRun(state, first))
@@ -45,7 +45,7 @@ assert(state.pouch.location == "bag" and state.pouch.doses == 1)
 local third = NHStore.newRun(state)
 assert(not NHStore.endRun(state, second))
 assert(state.pouch.location == "lost" and state.pouch.doses == 0)
-assert(not NHStore.useDose(state))
+assert(not NHStore.takePouchDose(state.pouch,1))
 assert(NHStore.restock(state))
 state.pouch.location = "bag"
 assert(NHStore.endRun(state, third))
@@ -137,7 +137,7 @@ assert(load().runSerial == 1)
 selected = 3
 local trial = load()
 local head_key = "noita_hideout.p3_revision"
-assert(NHStore.useDose(trial))
+assert(NHStore.takePouchDose(trial.pouch,1))
 -- Failing even to initialize a head leaves no staged item at all.
 blocked_key, blocked_value = head_key, 0
 assert(not NHStore.commit(trial))
@@ -151,7 +151,7 @@ blocked_key = nil
 trial = save(trial)
 assert(trial.revision == 1 and trial.pouch.doses == 1)
 -- Established profile: staged removal of the last dose must remain invisible.
-assert(NHStore.useDose(trial))
+assert(NHStore.takePouchDose(trial.pouch,1))
 blocked_key, blocked_value = head_key, 2
 assert(not NHStore.commit(trial))
 assert(load().revision == 1 and load().pouch.doses == 1)

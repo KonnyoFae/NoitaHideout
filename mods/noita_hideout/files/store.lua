@@ -7,12 +7,19 @@ local profile_counter = "noita_hideout.profile_count"
 local profile_flag = "noita_hideout_profile_"
 local cached_profile
 
+NHStore.pouchCapacity = 4
+NHStore.doseDurability = 3
+
+local function initial_doses(count)
+    return count>0 and {{remaining=NHStore.doseDurability,count=count}} or {}
+end
+
 local function fresh(profile)
     return {
         version = 1, profile = profile, revision = 0,
         runSerial = 0, rewardedThrough = 0, closedThrough = 0,
         nextItemId = 1, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true,
-        pouch = {location = "safe", slot = 2, doses = 2},
+        pouch = {location = "safe", slot = 2, doses = 2, cells = initial_doses(2)},
         order = false, finished = 0,
     }
 end
@@ -100,6 +107,22 @@ local function validate(s)
     assert(type(s.pouch) == "table" and whole(s.pouch.doses), "Invalid injector case")
     assert(s.pouch.location == "safe" or s.pouch.location == "bag" or s.pouch.location == "lost",
            "Invalid injector case location")
+    local total=0
+    local function validDose(remaining,count)
+        return whole(remaining) and remaining>=1 and remaining<=NHStore.doseDurability
+            and whole(count) and count>=1 and (remaining==NHStore.doseDurability or count==1)
+    end
+    for slot,cell in pairs(s.pouch.cells) do
+        assert(whole(slot) and slot>=1 and slot<=NHStore.pouchCapacity and validDose(cell.remaining,cell.count),"Invalid pouch contents")
+        total=total+cell.count
+    end
+    assert(total==s.pouch.doses,"Invalid injector count")
+    for _,row in ipairs(s.safe) do
+        if row.item.kind=="dose" then assert(validDose(row.item.remaining or NHStore.doseDurability,row.item.count or 1),"Invalid stored injector") end
+    end
+    for _,record in pairs(s.issuedDoses or {}) do
+        assert(validDose(record.remaining or NHStore.doseDurability,1),"Invalid issued injector")
+    end
     if s.order ~= false then
         assert(type(s.order) == "table" and whole(s.order.progress) and whole(s.order.required)
             and s.order.progress < s.order.required and type(s.order.output) == "table"
@@ -201,6 +224,7 @@ local function unpack_slot(raw)
     local payload = raw:sub(last + 1)
     assert(expected == checksum(payload), "Snapshot checksum mismatch")
     local s = decode(payload)
+    if not s.pouch.cells then s.pouch.cells=initial_doses(s.pouch.doses) end
     validate(s)
     if not s.sharedSlots then
         s.safeCapacity = NHStore.safeCapacity(s)+1
@@ -292,22 +316,46 @@ function NHStore.endRun(state, run_id)
     end
     state.closedThrough = id
     if state.pouch.location == "bag" then
-        state.pouch = {location = "lost", doses = 0}
+        state.pouch = {location = "lost", doses = 0, cells = {}}
     end
     return true, "Run closed."
 end
 
-function NHStore.useDose(state)
-    local pouch = state.pouch
-    if pouch.location == "lost" or pouch.doses <= 0 then return false, "No dose available." end
-    pouch.doses = pouch.doses - 1
-    return true, "Used one dose."
+-- Replace cell records on edits so a failed commit cannot mutate a live stack.
+function NHStore.acceptsDose(cell, remaining)
+    return not cell or (remaining==NHStore.doseDurability and cell.remaining==remaining)
+end
+
+function NHStore.putPouchDose(pouch, remaining, slot)
+    if pouch.location=="lost" then return false end
+    if slot==nil then
+        for i=1,NHStore.pouchCapacity do
+            if pouch.cells[i] and NHStore.acceptsDose(pouch.cells[i],remaining) then slot=i; break end
+        end
+        if not slot then
+            for i=1,NHStore.pouchCapacity do if not pouch.cells[i] then slot=i; break end end
+        end
+    end
+    if not whole(slot) or slot<1 or slot>NHStore.pouchCapacity then return false end
+    local cell=pouch.cells[slot]
+    if not NHStore.acceptsDose(cell,remaining) then return false end
+    pouch.cells[slot]={remaining=remaining,count=(cell and cell.count or 0)+1}
+    pouch.doses=pouch.doses+1
+    return true
+end
+
+function NHStore.takePouchDose(pouch,slot)
+    local cell=pouch.cells[slot]
+    if not cell or pouch.location=="lost" then return nil end
+    pouch.cells[slot]=cell.count>1 and {count=cell.count-1,remaining=cell.remaining} or nil
+    pouch.doses=pouch.doses-1
+    return cell.remaining
 end
 
 function NHStore.restock(state)
     local slot = state.pouch.location=="safe" and state.pouch.slot or NHStore.freeSafeSlot(state)
     if not slot then return false, "Secure valuables slot is full." end
-    state.pouch = {location = "safe", slot=slot, doses = 2}
+    state.pouch = {location = "safe", slot=slot, doses = 2, cells = initial_doses(2)}
     return true, "Two test doses placed in secure case."
 end
 

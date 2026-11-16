@@ -76,6 +76,7 @@ point(cx+58,cy+30,"press")
 cmd,arg=point(cx+58,cy+30,"release")
 assert(cmd=="open_container" and arg.safeSlot==3)
 model.popup=true
+model.maxUses,model.pouchCapacity,model.cells=3,4,{{remaining=3,count=2}}
 point(cx+58,cy+30,"press")
 cmd,arg=point(148,28,"release")
 assert(cmd=="take_pouch" and arg.xslot==2 and arg.safeSlot==3)
@@ -89,6 +90,15 @@ model.secure_loot[1]={kind="dose",id=9}
 point(cx+12,cy+30,"press")
 cmd,arg=point(cx+12,cy-38,"release")
 assert(cmd=="pack_dose" and arg.safeSlot==1)
+point(cx+12,cy-38,"press")
+cmd,arg=point(cx+138,cy-38,"release")
+assert(cmd=="move_cell" and arg.sourceCell==1 and arg.targetCell==4)
+model.cells[4]={remaining=2,count=1}
+point(cx+12,cy-38,"press")
+assert(not point(cx+138,cy-38,"release"))
+point(cx+138,cy-38,"press")
+cmd,arg=point(148,28,"release")
+assert(cmd=="take_dose" and arg.sourceCell==4)
 assert(render(model,38)=="close_container")
 model.popup=false
 point(198,28,"press")

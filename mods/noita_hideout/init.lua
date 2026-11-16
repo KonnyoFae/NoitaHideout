@@ -204,7 +204,7 @@ local function use_dose(player, item)
     ComponentSetValue2(effect, "frames", 3600)
     if created then EntityAddChild(player, created) end
     mouse_release = true
-    feedback(tr("已注射耐火激活剂。", "Fire immunity injector used."))
+    feedback(tr("已注射，剩余耐久 ","Injected. Durability ") .. reason .. "/" .. NHStore.doseDurability)
 end
 
 local function item_label(entry)
@@ -232,7 +232,8 @@ local function inventory_view()
     model.capacity = NHStore.safeCapacity(state)
     for _, entry in ipairs(state.safe) do
         model.secure_loot[entry.slot or 1] = {id=entry.id, kind=entry.item.kind,name=item_label(entry),
-            icon=entry.item.icon or (entry.item.sprite and entry.item.sprite.image_file)}
+            icon=entry.item.icon or (entry.item.sprite and entry.item.sprite.image_file),
+            remaining=entry.item.remaining,count=entry.item.count}
     end
     if state.pouch.location=="safe" then
         model.secure_loot[state.pouch.slot]={kind="pouch",name=tr("针剂包","Injector pouch"),icon=NHNative.icons.pouch}
@@ -247,7 +248,7 @@ local function inventory_view()
         end
         model.batch_sources = table.concat(lines, "\n")
     end
-    model.case_count, model.pouch_location = state.pouch.doses, state.pouch.location
+    model.cells,model.pouchCapacity,model.maxUses=state.pouch.cells,NHStore.pouchCapacity,NHStore.doseDurability
     model.order_active = state.order ~= false
     model.order = state.order and tr("已投料，等待一次通关", "Paid; waiting for one clear") or tr("空闲", "Idle")
     model.reward_spent = state.rewardedThrough >= run_id
@@ -286,6 +287,7 @@ local function native_slots(player)
                         local slot = grid[y*columns+x+(not full and kind~="wand" and 4 or 0)]
                         if slot then
                             slot.entity,slot.kind = id,kind
+                            if kind=="dose" then slot.remaining=NHDoses.remaining(state,id) end
                             slot.icon = ComponentGetValue2(item,"ui_sprite")
                         end
                     end
@@ -368,9 +370,16 @@ local function dispatch(player, action, index)
             if owner then popup=owner end
             return
         end
-        if action=="unpack_dose" or action=="pack_dose" then
+        if action=="unpack_dose" or action=="pack_dose" or action=="move_cell" then
             if not popup_accessible(player) then return end
-            local ok,reason=NHDoses.moveDose(state,index.safeSlot,action=="unpack_dose")
+            local ok,reason
+            if action=="move_cell" then ok,reason=NHDoses.moveCell(state,index.sourceCell,index.targetCell)
+            else ok,reason=NHDoses.moveDose(state,index.safeSlot,action=="unpack_dose",index.sourceCell or index.targetCell) end
+            if not ok then report(reason) else status="" end
+            return
+        end
+        if action=="move_safe_dose" then
+            local ok,reason=NHDoses.moveSafeDose(state,index.from,index.safeSlot)
             if not ok then report(reason) else status="" end
             return
         end
@@ -403,7 +412,7 @@ local function dispatch(player, action, index)
             if kind=="pouch" and index.safeSlot then ok,result=NHDoses.storePouch(state,player,id,index.safeSlot)
             elseif kind=="dose" then
                 if not index.safeSlot and not (index.intoContainer and popup_accessible(player)) then return end
-                ok,result=NHDoses.deposit(state,player,id,index.safeSlot)
+                ok,result=NHDoses.deposit(state,player,id,index.safeSlot,index.targetCell)
             else ok,result=NHTransfers.deposit(state,player,"safe",id,index.safeSlot) end
         else
             if slot.entity then return end
@@ -413,7 +422,7 @@ local function dispatch(player, action, index)
                 ok,result=NHDoses.takePouch(state,player,deliver)
             elseif action=="take_dose" then
                 if not popup_accessible(player) then return end
-                ok,result=NHDoses.withdraw(state,player,deliver,popup.entity)
+                ok,result=NHDoses.withdraw(state,player,deliver,popup.entity,nil,index.sourceCell)
             elseif action=="secure_withdraw" then
                 local row = NHStore.safeIndex(state,index.safeSlot)
                 if not row or state.safe[row].id~=index.storedId then return end
