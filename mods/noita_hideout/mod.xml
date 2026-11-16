@@ -1,3 +1,3 @@
 <Mod name="Hideout Prototype | 藏身处测试版"
-     description="0.18.0 | Edit wands near spawn and use the hideout workshop for alchemy. Catalyst samples are returned with finished orders. Take Draught of Midas into the world to turn materials into gold."
+     description="0.19.0 | Extract 17 types of essence from projectile spells at the hideout salvage bench. A spent spell yields as much as a fully charged one."
      request_no_api_restrictions="0" />

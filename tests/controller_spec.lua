@@ -534,8 +534,11 @@ for n,expected in ipairs(products) do
     tick()
 end
 
-local function stash_spell(action)
+local function stash_spell(action,uses,name)
     local id=CreateItemActionEntity(action,200,-80)
+    local item=EntityGetFirstComponentIncludingDisabled(id,"ItemComponent")
+    if uses~=nil then ComponentSetValue2(item,"uses_remaining",uses) end
+    if name then ComponentSetValue2(item,"item_name",name) end
     EntityAddChild(3,id)
     tick(nil,"place",{parent=3,lane="spell",xslot=0,yslot=0,entity=id,safeSlot=1,container="warehouse",kind="spell"})
     return assert(tick().warehouse.spell[1])
@@ -547,13 +550,47 @@ assert(tick().warehouse.spell[1].id==salvage.id and not state().resources.arcane
 tick(nil,"buy_upgrade",{id="salvage",level=0})
 local unlocked=tick()
 assert(unlocked.salvage_enabled and unlocked.warehouse.spell[1].salvage_yield==1)
+assert(unlocked.warehouse.spell[1].essence.key==NHEssences.byAction.BOMB and unlocked.warehouse.spell[1].spell_uses==3)
 entities[player].x=900
 tick(nil,"salvage",salvage)
 entities[player].x=227
 assert(tick().warehouse.spell[1].id==salvage.id)
 tick(nil,"salvage",salvage)
 assert(state().resources.arcane_scrap==1 and not tick().warehouse.spell)
-local replacement=stash_spell("LIGHT")
+do
+    local key=NHEssences.byAction.HEAL_BULLET
+    for expected,uses in ipairs({0,2,20}) do
+        local view=stash_spell("HEAL_BULLET",uses)
+        assert(view.spell_uses==uses and view.essence.key==key and view.essence.amount==1 and view.essence.stock==expected-1)
+        local request={id=view.id,kind="spell",slot=1,mode="essence"}
+        tick(nil,"salvage",request)
+        tick(nil,"salvage",request)
+        assert(state().resources[key]==expected and state().resources.arcane_scrap==1 and not tick().warehouse.spell)
+    end
+    boot()
+    local balances=tick().essences
+    assert(#balances==17)
+    for _,balance in ipairs(balances) do
+        assert(balance.amount==(balance.key==key and 3 or 0))
+        assert(balance.name==NHEssences.types[balance.key].en)
+    end
+    local previous=GameTextGetTranslatedOrNot
+    function GameTextGetTranslatedOrNot(key)
+        if key=="$action_teleport_closer" then return "Homebringer Teleport Bolt" end
+        if key=="$action_custom_name" then return "Stored card name" end
+        return previous(key)
+    end
+    for _,test in ipairs({{"TELEPORT_PROJECTILE_CLOSER","$item_spell","Homebringer Teleport Bolt"},
+        {"HEAL_BULLET","$action_custom_name","Stored card name"}}) do
+        local view=stash_spell(test[1],1,test[2])
+        assert(view.name==test[3])
+        tick(nil,"salvage",{id=view.id,kind="spell",slot=1,mode="essence"})
+    end
+    GameTextGetTranslatedOrNot=previous
+end
+local replacement=stash_spell("FUNKY_SPELL",1,"$item_spell")
+assert(replacement.name=="???" and not replacement.essence)
+tick(nil,"salvage",{id=replacement.id,slot=1,kind="spell",mode="essence"})
 tick(nil,"salvage",salvage)
 assert(replacement.id~=salvage.id and tick().warehouse.spell[1].id==replacement.id and state().resources.arcane_scrap==1)
 tick(nil,"buy_upgrade",{id="perk_pack",level=0})

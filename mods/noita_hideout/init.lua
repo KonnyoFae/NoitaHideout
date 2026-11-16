@@ -72,6 +72,9 @@ local error_translations = {
     ["Waiting for wallet settlement."] = "待随身金币或钱包空间足够后，将继续结算。",
     ["Not enough empty containers."] = "容器仓库里可用的空容器不足。",
     ["Only empty containers can be dismantled."] = "只能拆解仓库内已清空的普通物料容器。",
+    ["No essence for this spell."] = "这张法术没有对应的精华。",
+    ["Resource storage is full."] = "这项资源的库存已满。",
+    ["Invalid salvage mode."] = "无法识别所选的拆解方式。",
     ["The selected item is no longer in your quick inventory."] = "这件物品已经离开快捷栏。",
     ["The case is already in your inventory."] = "安全箱就在你的道具栏里。",
     ["The case is already within reach."] = "安全箱就在附近，可按 G 开箱。",
@@ -289,12 +292,26 @@ local function use_dose(player, item)
     feedback(tr("已注射，剩余耐久 ","Injected. Durability ") .. reason .. "/" .. NHStore.doseDurability)
 end
 
+local spell_names={
+    DISC_BULLET_BIGGER="$action_omega_disc_bullet",LANCE_HOLY="$action_holy",
+    LASER_LUMINOUS_DRILL="$action_luminous_drill_timer",TELEPORT_PROJECTILE_CLOSER="$action_teleport_closer",
+    FUNKY_SPELL="???",
+}
+local function translated(key)
+    if not key or key=="" then return end
+    local value=GameTextGetTranslatedOrNot(key)
+    if value and value~="" and value:sub(1,1)~="$" then return value end
+end
+
 local function item_label(entry)
     local item = entry.item
     if item.kind == "potion" then return NHPotion.label(item, lang) end
     if item.kind == "dose" then return tr("耐火激活剂","Fire injector") end
     if item.kind == "spell" then
-        return GameTextGetTranslatedOrNot("$action_" .. item.card.id:lower()) .. (item.card.stack and (" ×" .. item.card.stack) or "")
+        local id=item.card.id
+        local name=item.name and item.name:match("^%$action_") and translated(item.name)
+        name=name or translated(spell_names[id] or "$action_"..id:lower()) or translated(item.name) or id
+        return name .. (item.card.stack and (" ×" .. item.card.stack) or "")
     end
     local name = item.name or ""
     if name ~= "" then name = GameTextGetTranslatedOrNot(name) end
@@ -319,6 +336,11 @@ end
 local function inventory_view()
     if model_cache and model_cache.profile_revision == state.revision then return model_cache end
     local model = {revision = state.revision, profile_revision=state.revision, secure_loot = {}, warehouse = {}}
+    model.essences={}
+    for _,key in ipairs(NHEssences.order) do
+        local kind=NHEssences.types[key]
+        model.essences[#model.essences+1]={key=key,name=tr(kind.zh,kind.en),amount=state.resources[key] or 0}
+    end
     model.docks,model.materials={},{}
     for _,row in ipairs(state.docks) do
         local view=stored_view(row)
@@ -341,6 +363,15 @@ local function inventory_view()
             view.salvage_yield=amount
             view.salvage_name=resource=="container_scrap" and tr("容器碎片","Container scrap") or tr("奥术碎片","Arcane scrap")
             view.salvage_stock=state.resources[resource] or 0
+        end
+        if entry.item.kind=="spell" then
+            local card=entry.item.card
+            view.spell_uses=card.item and card.item.uses_remaining
+            local count,key=NHStore.salvageYield(entry.item,"essence")
+            if count then
+                local kind=NHEssences.types[key]
+                view.essence={key=key,name=tr(kind.zh,kind.en),amount=count,stock=state.resources[key] or 0}
+            end
         end
         warehouse_slot(entry.item.kind,entry.slot or i,view)
     end
@@ -558,7 +589,11 @@ local function workshop_action(player,action,index)
     elseif action=="buy_upgrade" and type(index)=="table" then
         commit_edit(NHStore.buyUpgrade,"建设完成。","Construction complete.",index)
     elseif action=="salvage" and type(index)=="table" then
-        commit_edit(NHStore.salvage,"拆解完成，碎片已入库。","Item dismantled. Scrap stored.",index)
+        if index.mode=="essence" then
+            commit_edit(NHStore.salvage,"提取完成，精华已入库。","Essence extracted and stored.",index)
+        else
+            commit_edit(NHStore.salvage,"拆解完成，碎片已入库。","Item dismantled. Scrap stored.",index)
+        end
     elseif action=="order" or (action=="craft" and index and index.id) then
         if commit_edit(NHStore.startOrder,"已扣除原料，开始生产。","Ingredients consumed. Production started.",index and index.id) then
             NHClock.observe(state,GameGetFrameNum())

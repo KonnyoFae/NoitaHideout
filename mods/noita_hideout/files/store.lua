@@ -1,6 +1,7 @@
 -- Two revisioned snapshots in Noita's normal mod settings. A complete
 -- readback checks the settings API; it does not force the engine to flush.
 NHStore = {}
+dofile("mods/noita_hideout/files/essences.lua")
 dofile("mods/noita_hideout/files/pouches.lua")
 local progression=dofile("mods/noita_hideout/files/progression.lua")
 local max_bytes = 1024 * 1024
@@ -15,6 +16,7 @@ NHStore.doseDurability = 3
 NHStore.checkpointFrames = 60 * 60
 NHStore.maxGold = max_safe_integer
 NHStore.maxMaterialAmount = max_safe_integer
+NHStore.maxResourceAmount = max_safe_integer
 
 function NHStore.productionFrames(recipe)
     return (recipe and recipe.durationFrames) or 2 * 60 * 60
@@ -782,9 +784,22 @@ function NHStore.startOrder(state,id)
     return true
 end
 
-function NHStore.salvageYield(item)
+function NHStore.salvageYield(item,mode)
+    if mode~=nil and mode~="scrap" and mode~="essence" then return end
+    if item.kind=="spell" then
+        local card=item.card
+        if type(card)~="table" then return end
+        local amount=card.stack or 1
+        if not whole(amount) or amount<1 then return end
+        if mode=="essence" then
+            local resource=NHEssences.byAction[card.id]
+            if resource then return amount,resource end
+            return
+        end
+        return amount,"arcane_scrap"
+    end
+    if mode=="essence" then return end
     if item.kind=="wand" then return 3,"arcane_scrap" end
-    if item.kind=="spell" then return item.card.stack or 1,"arcane_scrap" end
     if item.kind=="potion" and NHPotion.isEmptyContainer(item) then return 1,"container_scrap" end
 end
 
@@ -793,12 +808,16 @@ function NHStore.salvage(state,request)
     local index=NHStore.slotIndex(state,"warehouse",request.slot,request.kind)
     local row=index and state.warehouse[index]
     if not row or row.id~=request.id or row.item.kind~=request.kind then return false,"Inventory slot changed." end
-    local amount,resource=NHStore.salvageYield(row.item)
+    local amount,resource=NHStore.salvageYield(row.item,request.mode)
     if not amount then
+        if request.mode=="essence" then return false,"No essence for this spell." end
+        if request.mode~=nil and request.mode~="scrap" then return false,"Invalid salvage mode." end
         return false,row.item.kind=="potion" and "Only empty containers can be dismantled." or "Unsupported salvage item."
     end
+    local stock=state.resources[resource] or 0
+    if amount>NHStore.maxResourceAmount-stock then return false,"Resource storage is full." end
     table.remove(state.warehouse,index)
-    state.resources[resource]=(state.resources[resource] or 0)+amount
+    state.resources[resource]=stock+amount
     return true
 end
 

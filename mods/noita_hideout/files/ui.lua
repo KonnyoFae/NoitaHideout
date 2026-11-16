@@ -9,7 +9,7 @@ local bank_amounts={1,10,100,1000}
 local warehouse_tabs = {
     {"wand","魔杖","Wands"}, {"spell","法术","Spells"}, {"containers","容器","Containers"},
     {"supplies","消耗品","Supplies"}, {"equipment","装备","Equipment"}, {"materials","物料","Materials"},
-    {"bank","存钱罐","Piggy bank"},
+    {"bank","存钱罐","Piggy bank"}, {"essences","精华","Essences"},
 }
 local workshop_folded=false
 local list_pages={}
@@ -234,6 +234,28 @@ local function draw_bank(model,left,top,width,scale,tr,dispatch)
     action(277,77,tr("全部取出","Withdraw all"),"withdraw","all",model.bankGold,model.walletGold)
 end
 
+local function draw_essences(entries,start,limit,left,top,width,scale,mx,my)
+    local column_width=(width-16)/2
+    local tip
+    for i=1,math.min(limit,#entries-start+1) do
+        local entry=entries[start+i-1]
+        local x=left+(8+(i-1)%2*column_width)*scale
+        local y=top+(2+math.floor((i-1)/2)*13)*scale
+        local right=x+(column_width-4)*scale
+        local value=compact(entry.amount)
+        local value_x=right-GuiGetTextDimensions(gui,value,scale)
+        local name=entry.name:gsub("精华$",""):gsub(" [Ee]ssence$","")
+        tint(entry.amount>0 and white or muted)
+        GuiText(gui,x,y,fit(name,value_x-x-3*scale,scale),scale)
+        tint(entry.amount>0 and green or muted)
+        GuiText(gui,value_x,y,value,scale)
+        if mx>=x and mx<right and my>=y and my<y+12*scale then
+            tip={entry.name.."  "..string.format("%.0f",entry.amount)}
+        end
+    end
+    return tip
+end
+
 local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local left,width=layout.middle,layout.bench
     if not model.debug and tab=="samples" then tab="orders" end
@@ -285,7 +307,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     if salvage_target and model.salvage_enabled then
         local category=model.warehouse[NHStore.category(salvage_target.kind)]
         salvage=category and category[salvage_target.slot]
-        if not salvage or salvage.id~=salvage_target.id or not salvage.salvage_yield then salvage_target,salvage=nil,nil end
+        if not salvage or salvage.id~=salvage_target.id or not salvage.salvage_yield
+            or (salvage_target.mode=="essence" and not salvage.essence) then salvage_target,salvage=nil,nil end
     end
     local category_nav,alchemy_nav
     if crafting and not selected and not salvage then
@@ -300,7 +323,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         return item.canBuy
     end
     local body_height=62
-    if salvage then body_height=77
+    if salvage then
+        body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)
     elseif crafting and selected then
         body_height=68+12*#selected.inputs
         if catalyst_count>0 then body_height=body_height+13+12*catalyst_count end
@@ -315,7 +339,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if crafting and model.order_active then body_height=body_height+15 end
     end
     local height=workshop_folded and 18 or body+body_height
-    if crafting and selected and height*scale>sh-10 then
+    if (salvage or crafting and selected) and height*scale>sh-10 then
         local panel_width=width*scale
         scale=(sh-10)/height
         width=panel_width/scale
@@ -384,12 +408,42 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     if salvage then
         label(body,tr("拆解","Dismantle"),gold)
         label(body+13,salvage.name)
-        label(body+27,salvage.salvage_name.." +"..salvage.salvage_yield,green)
-        label(body+39,tr("现有碎片 ","Current scrap ")..compact(salvage.salvage_stock),muted)
-        if button(260,6,body+53,tr("确认拆解","Dismantle item")) then
-            dispatch("salvage",salvage_target)
-            salvage_target=nil
-        elseif button(261,6,body+65,tr("取消","Cancel")) then salvage_target=nil end
+        local y=body+27
+        local extract=salvage_target.mode=="essence"
+        local amount,stock=salvage.salvage_yield,salvage.salvage_stock
+        if salvage.essence then
+            local essence=tr("精华","Essence")
+            local scrap=tr("碎片","Scrap")
+            local choice=extract and "["..essence.."]" or essence
+            if button(262,6,y,choice,extract and gold or muted) then salvage_target.mode="essence"; return hover end
+            local x=13+GuiGetTextDimensions(gui,choice,scale)/scale
+            if button(263,x,y,extract and scrap or "["..scrap.."]",extract and muted or gold) then
+                salvage_target.mode="scrap"; return hover
+            end
+            y=y+14
+        end
+        if salvage.spell_uses~=nil then
+            value_row(y,tr("剩余次数","Charges left"),salvage.spell_uses<0 and "∞" or tostring(salvage.spell_uses),
+                white,nil,tr("剩余次数不影响回收量","Remaining charges do not affect the yield"))
+            y=y+13
+        end
+        if extract then
+            amount,stock=salvage.essence.amount,salvage.essence.stock
+            value_row(y,salvage.essence.name,"+"..amount,green)
+            value_row(y+12,tr("当前库存","In storage"),compact(stock),white,string.format("%.0f",stock))
+        else
+            label(y,salvage.salvage_name.." +"..amount,green)
+            label(y+12,tr("现有碎片 ","Current scrap ")..compact(stock),muted)
+        end
+        if amount<=NHStore.maxResourceAmount-stock then
+            local confirm=extract and tr("确认提取","Extract essence") or tr("确认拆解","Dismantle item")
+            if button(260,6,y+26,confirm,green) then
+                dispatch("salvage",salvage_target)
+                salvage_target=nil
+                return hover
+            end
+        else label(y+26,tr("库存已满","Storage full"),muted) end
+        if button(261,6,y+38,tr("取消","Cancel")) then salvage_target=nil end
     elseif crafting and selected then
         local back=tr("< 返回配方","< Recipes")
         local confirm=tr("确认制造","Confirm craft")
@@ -639,8 +693,9 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                 end
             end
             local bulk=warehouse_tab=="materials"
-            local per_page=bulk and material_rows*2 or cols*math.floor(content_height/qh)
-            local capacity=model.warehouse_capacity[warehouse_tab]
+            local essences=warehouse_tab=="essences"
+            local per_page=essences and 12 or (bulk and material_rows*2 or cols*math.floor(content_height/qh))
+            local capacity=essences and #model.essences or model.warehouse_capacity[warehouse_tab]
             local page_no
             if warehouse_tab=="bank" then
                 draw_bank(model,left,top+grid_y*scale,width,scale,tr,dispatch)
@@ -651,7 +706,9 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                 if current~=page_no then loading=nil end
                 warehouse_pages[warehouse_tab]=page_no
             end
-            if bulk then
+            if essences then
+                stock_tip=draw_essences(model.essences,(page_no-1)*per_page+1,per_page,left,top+grid_y*scale,width,scale,mx,my)
+            elseif bulk then
                 local docks,materials=model.docks,model.materials
                 local column_width=math.floor((width-12)/2)
                 for n=1,2 do
@@ -762,7 +819,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     if drag and (model.revision~=drag.revision or model.pouchId~=drag.popupId) then drag=nil end
     if model.salvage_enabled and hovered and hovered.key=="warehouse" and hovered.view and hovered.view.salvage_yield
         and not fresh and not drag and InputIsMouseButtonJustDown(2) then
-        salvage_target={id=hovered.entity,kind=hovered.kind,slot=hovered.safeSlot}
+        salvage_target={id=hovered.entity,kind=hovered.kind,slot=hovered.safeSlot,mode=hovered.view.essence and "essence" or "scrap"}
         workshop_folded=false
     end
     if not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind and hovered.kind~="reserved" then

@@ -690,6 +690,51 @@ render(model)
 pointer.right=false
 action,param=render(model,260)
 assert(action=="salvage" and param.id==32 and param.kind=="spell" and param.slot==1)
+do
+    local view=model.warehouse.spell[1]
+    view.spell_uses=0
+    view.essence={key="essence_high_energy",name="High-energy essence",amount=3,stock=1000}
+    pointer.right=true
+    render(model)
+    pointer.right=false
+    render(model)
+    assert(drawn["[Essence]"] and drawn["Charges left"] and drawn["0"] and drawn["+3"] and drawn["1k"])
+    assert(not render(model,263))
+    render(model)
+    assert(drawn["[Scrap]"] and drawn["Arcane scrap +3"])
+    local command,request=render(model,260)
+    assert(command=="salvage" and request.mode=="scrap")
+    pointer.right=true
+    render(model)
+    pointer.right=false
+    view.essence.stock=NHStore.maxResourceAmount
+    assert(not render(model,260) and drawn["Storage full"])
+    view.essence.stock=0
+    command,request=render(model,260)
+    assert(command=="salvage" and request.mode=="essence" and request.id==32)
+    model.essences={}
+    for i,key in ipairs(NHEssences.order) do
+        model.essences[i]={name=NHEssences.types[key].en,amount=i==1 and 1234000 or 0}
+    end
+    local sw,sh=width,height
+    width=640
+    render(model,82)
+    render(model)
+    assert(drawn.Healing and drawn["1.2M"] and drawn["0"] and drawn["[1]"])
+    render(model,301)
+    render(model)
+    assert(drawn.Enhancement and drawn["[2]"] and not drawn.Healing)
+    width,height,model.lang=320,180,"zh"
+    for i,key in ipairs(NHEssences.order) do model.essences[i].name=NHEssences.types[key].zh end
+    render(model)
+    assert(drawn["强化"] and panels[70].y>=0 and buttons[300].y<height)
+    render(model,300)
+    render(model)
+    assert(drawn["酸液"] and drawn["1.2M"])
+    point(panels[70].x+9,buttons[82].y+18)
+    assert(drawn["治疗精华  1234000"])
+    width,height,model.lang=sw,sh,"en"
+end
 model.warehouse.containers[2]={kind="potion",id=162,name="Empty flask",salvage_yield=1,salvage_name="Container scrap",salvage_stock=7}
 render(model,77)
 render(model)

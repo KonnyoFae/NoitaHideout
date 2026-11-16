@@ -22,7 +22,7 @@ define("injector","expansion","针剂工位","Injector station",1,{{"water",250}
 define("grenade","expansion","手雷工位","Grenade station",1,{{"gunpowder",150},{"oil",100}},
     {effect={"制造手雷","Craft grenades"}})
 define("salvage","expansion","拆解台","Salvage bench",1,{{"sand",250},{"oil",100}},
-    {effect={"拆解魔杖、法术与空容器","Salvage wands, spells and empty containers"}})
+    {effect={"回收碎片，提取法术精华","Recover scrap or extract spell essences"}})
 define("support","expansion","支援站","Support station",0,{},
     {planned=true,effect={"呼叫支援","Call for support"}})
 define("perk_pack","expansion","特质打包台","Perk packing",1,{{"slime",200},{"arcane_scrap",1}},
