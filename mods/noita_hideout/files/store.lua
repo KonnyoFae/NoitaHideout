@@ -58,11 +58,14 @@ function NHStore.freeSafeSlot(s, preferred)
     for i=1,capacity do if i~=occupied and not NHStore.safeIndex(s,i) then return i end end
 end
 
--- Each category owns its own numbered grid; recipe order remains the dense warehouse array.
+-- Each item kind resolves to one warehouse grid for both live items and saved rows.
+NHStore.itemCategories={wand="wand",spell="spell",potion="containers",pouch="equipment"}
 function NHStore.category(kind)
-    if kind=="wand" or kind=="spell" then return kind end
-    if kind=="potion" then return "containers" end
-    return "supplies"
+    return NHStore.itemCategories[kind] or "supplies"
+end
+
+local function warehouse_grids()
+    return {wand={},spell={},containers={},supplies={},equipment={}}
 end
 
 function NHStore.slotIndex(s,container,slot,kind)
@@ -85,7 +88,7 @@ function NHStore.freeSlot(s,container,preferred,kind)
     end
     local occupied={}
     local category=NHStore.category(kind)
-    if category=="supplies" and s.pouch and s.pouch.location=="warehouse" then occupied[s.pouch.slot]=true end
+    if category=="equipment" and s.pouch and s.pouch.location=="warehouse" then occupied[s.pouch.slot]=true end
     for i,row in ipairs(s.warehouse) do
         if NHStore.category(row.item.kind)==category then occupied[row.slot or i]=true end
     end
@@ -174,10 +177,10 @@ local function validate(s)
     for _,row in ipairs(s.safe) do
         if row.item.kind=="dose" then assert(validDose(row.item.remaining or NHStore.doseDurability,row.item.count or 1),"Invalid stored injector") end
     end
-    local warehouseSlots={wand={},spell={},containers={},supplies={}}
+    local warehouseSlots=warehouse_grids()
     if s.pouch.location=="warehouse" then
-        assert(whole(s.pouch.slot) and s.pouch.slot>=1 and s.pouch.slot<=NHStore.warehouseCapacity(s,"supplies"),"Invalid warehouse pouch slot")
-        warehouseSlots.supplies[s.pouch.slot]=true
+        assert(whole(s.pouch.slot) and s.pouch.slot>=1 and s.pouch.slot<=NHStore.warehouseCapacity(s,"equipment"),"Invalid warehouse pouch slot")
+        warehouseSlots.equipment[s.pouch.slot]=true
     end
     for i,row in ipairs(s.warehouse) do
         local slot=row.slot or i
@@ -194,8 +197,10 @@ local function validate(s)
             and s.order.progress < s.order.required and type(s.order.output) == "table", "Invalid production order")
         local output=s.order.output
         if output.item then
-            assert(not output.materials and whole(output.slot) and output.slot>=1 and output.slot<=NHStore.warehouseCapacity(s,"supplies")
-                and not warehouseSlots.supplies[output.slot] and NHStore.category(output.item.kind)=="supplies","Invalid reserved production slot")
+            local category=NHStore.category(output.item.kind)
+            assert(type(output.item.kind)=="string" and not output.materials and whole(output.slot) and output.slot>=1
+                and output.slot<=NHStore.warehouseCapacity(s,category) and not warehouseSlots[category][output.slot],
+                "Invalid reserved production slot")
         else
             assert(type(output.materials)=="table" and next(output.materials),"Missing order yield")
             for name,amount in pairs(output.materials) do
@@ -301,8 +306,8 @@ local function unpack_slot(raw)
     local s = decode(payload)
     s.materials,s.docks=s.materials or {},s.docks or {}
     -- Old warehouse records had only a list order. Give them stable grid positions.
-    local used={wand={},spell={},containers={},supplies={}}
-    if s.pouch.location=="warehouse" then used.supplies[s.pouch.slot]=true end
+    local used=warehouse_grids()
+    if s.pouch.location=="warehouse" then used.equipment[s.pouch.slot]=true end
     for _,row in ipairs(s.warehouse) do
         if row.slot then used[NHStore.category(row.item.kind)][row.slot]=true end
     end
@@ -453,13 +458,13 @@ end
 
 -- Inputs and the paid order are committed together. Only loose stock is spendable.
 NHStore.recipes={
-    {id="stable",zh="稳定传送液",en="Teleportatium",inputs={{name="magic_liquid_unstable_teleportation",amount=250},{name="slime",amount=250}},
+    {id="stable",category="alchemy",zh="稳定传送液",en="Teleportatium",inputs={{name="magic_liquid_unstable_teleportation",amount=250},{name="slime",amount=250}},
         materials={magic_liquid_teleportation=500},count=500},
-    {id="medical",zh="医疗包",en="Medkit",inputs={{name="water",amount=100},{name="blood",amount=50}},
+    {id="medical",category="medical",facility="medical",zh="医疗包",en="Medkit",inputs={{name="water",amount=100},{name="blood",amount=50}},
         item={kind="medkit",remaining=3,name="$nh_hideout_medkit",icon="mods/noita_hideout/files/items/medkit.png"}},
-    {id="injector",zh="耐火激活剂",en="Fire injector",inputs={{name="water",amount=100},{name="lava",amount=25}},
+    {id="injector",category="medical",facility="injector",zh="耐火激活剂",en="Fire injector",inputs={{name="water",amount=100},{name="lava",amount=25}},
         item={kind="dose",remaining=3,count=1}},
-    {id="grenade",zh="魔法手雷",en="Magic grenade",inputs={{name="sand",amount=100},{name="slime",amount=50}},
+    {id="grenade",category="weapons",facility="grenade",zh="魔法手雷",en="Magic grenade",inputs={{name="sand",amount=100},{name="slime",amount=50}},
         item={kind="grenade",name="$nh_hideout_grenade",icon="mods/noita_hideout/files/items/grenade.png"}},
 }
 NHStore.recipe=NHStore.recipes[1]
@@ -470,7 +475,8 @@ end
 
 function NHStore.canStartBatch(state,recipe)
     recipe=recipe or NHStore.recipe
-    if recipe.id~="stable" and NHStore.level(state,recipe.id)==0 then return false,"Facility is locked." end
+    if recipe.facility and NHStore.level(state,recipe.facility)==0 then return false,"Facility is locked." end
+    if state.order then return false,"Another order is active." end
     local payment={}
     for _,input in ipairs(recipe.inputs) do
         if (state.materials[input.name] or 0)<input.amount then return false,"Not enough bulk ingredients." end
@@ -478,7 +484,7 @@ function NHStore.canStartBatch(state,recipe)
     end
     if recipe.item then
         local slot=NHStore.freeSlot(state,"warehouse",nil,recipe.item.kind)
-        if not slot then return false,"Consumables storage is full." end
+        if not slot then return false,"Product storage is full." end
         return true,slot
     end
     if not NHStore.canStockMaterials(state,recipe.materials,payment) then return false,"Material storage is full." end
@@ -486,7 +492,6 @@ function NHStore.canStartBatch(state,recipe)
 end
 
 function NHStore.startOrder(state,id)
-    if state.order then return false,"Another order is active." end
     local recipe=findRecipe(id or "stable")
     if not recipe then return false,"Unknown recipe." end
     local ready,slot=NHStore.canStartBatch(state,recipe)

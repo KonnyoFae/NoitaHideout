@@ -39,7 +39,7 @@ end
 function GuiText(_, _, _, value) drawn[value] = true end
 local buttons={}
 function GuiButton(_, id, x, y, value)
-    buttons[id]={x=x,y=y}
+    buttons[id]={x=x,y=y,name=value,color=next_color}
     drawn[value] = true
     return id == click
 end
@@ -53,12 +53,17 @@ dofile("mods/noita_hideout/files/perks.lua")
 dofile("mods/noita_hideout/files/ui.lua")
 local function render(model, widget)
     frame = frame + 1
+    buttons={}
     click, action, argument = widget, nil, nil
     NHUI.draw(model, function(command, item)
         assert(not action, "multiple actions on a single input")
         action, argument = command, item
     end)
     return action, argument
+end
+local function green_button(id)
+    local b=buttons[id]
+    return b and b.color[1]==0.62 and b.color[2]==0.95 and b.color[3]==0.75
 end
 
 local function native(lane,col,x,id,kind)
@@ -135,12 +140,16 @@ print("Native inventory drag, spell row, exact slot, upgrade pages and close can
 
 -- Left warehouse, native tile pitch, automatic filing and materials tab.
 model.near,model.warehouse=true,{}
-model.warehouse_capacity={wand=48,spell=48,containers=48,supplies=48,materials=16}
-model.debug,model.batch_available,model.ingredients=true,true,{slime=300,magic_liquid_unstable_teleportation=500}
+model.warehouse_capacity={wand=48,spell=48,containers=48,supplies=48,equipment=48,materials=16}
+model.debug=true
 local profile={safeCapacity=2,levels={},materials={water=500,sand=350,slime=200},resources={}}
 model.progression=NHStore.progressMenu(profile,"en")
-model.recipes={{id="stable",name="Teleportatium",output=500,ready=true,inputs={{name="Slime",available=300,amount=250}}},
-    {id="medical",name="Medical pack",output=1,ready=true,inputs={{name="Slime",available=300,amount=100}}}}
+model.recipes={
+    {id="stable",category="alchemy",name="Teleportatium",output=500,ready=true,inputs={{name="Slime",available=300,amount=250}}},
+    {id="medical",category="medical",name="Medkit",output=1,ready=true,inputs={{name="Slime",available=300,amount=100}}},
+    {id="injector",category="medical",name="Fire injector",output=1,ready=false,reason="Need stock",inputs={}},
+    {id="grenade",category="weapons",name="Magic grenade",output=1,ready=false,unlocked=false,reason="Build the station",inputs={}},
+}
 render(model)
 local origin=tiles[1004]
 assert(tiles[1005].x-origin.x==20)
@@ -170,8 +179,25 @@ assert(cmd=="place" and arg.safeSlot==4*page_size+1)
 render(model,300)
 render(model)
 assert(drawn["[4]"])
+-- The pouch files into equipment even while another category is displayed.
+-- Its popup still accepts interaction inside the warehouse.
+model.native_slots[2].kind="pouch"
+point(108,28,"press")
+cmd,arg=point(origin.x+1,origin.y+1,"release")
+assert(cmd=="place" and arg.kind=="pouch" and arg.container=="warehouse" and arg.safeSlot==1)
+model.native_slots[2].kind="dose"
+model.warehouse.equipment={[1]={kind="pouch",name="Injector pouch"}}
+render(model)
+point(origin.x+1,origin.y+1)
+assert(drawn["Injector pouch"])
+point(origin.x+1,origin.y+1,"press")
+cmd,arg=point(origin.x+1,origin.y+1,"release")
+assert(cmd=="open_container" and arg.container=="warehouse" and arg.safeSlot==1)
+point(origin.x+1,origin.y+1,"press")
+cmd,arg=point(148,28,"release")
+assert(cmd=="take_pouch" and arg.container=="warehouse" and arg.safeSlot==1)
 model.docks,model.materials={},{}
-render(model,79)
+render(model,80)
 render(model)
 assert(drawn.Flask and drawn["Powder pouch"] and drawn.Empty)
 assert(item_pager.x==panels[299].x and item_pager.y==panels[299].y)
@@ -253,14 +279,67 @@ for _,size in ipairs({{640,360},{427,240},{320,240}}) do
     assert(secure.x+secure.w<=width and pouch.x>=bench.x+bench.w and pouch.y+pouch.h<secure.y)
     assert(bench.y+bench.h==stash.y+stash.h and bench.y+bench.h==secure.y+secure.h)
     assert(tiles[1002].x-tiles[1001].x==20 and tiles[1007].x+20<=pouch.x+pouch.w)
+    for i=250,253 do
+        local b=assert(buttons[i])
+        assert(b.x>=bench.x and b.y>=bench.y and b.x+GuiGetTextDimensions(nil,b.name)<=bench.x+bench.w)
+    end
 end
+-- Select a recipe to inspect it before submission. Categories are usable at
+-- the narrow size as well, and availability colors update with live stock.
+assert(drawn.Alchemy and drawn.Medical and drawn.Weapons and drawn.Equipment)
+assert(drawn.Teleportatium and not drawn.Medkit and green_button(244))
+assert(not render(model,214))
+assert(not render(model,244))
+render(model)
+assert(drawn["Teleportatium ×500"] and drawn["300 / 250"] and green_button(214))
 local action,param=render(model,214)
 assert(action=="craft" and param.id=="stable")
+assert(render(model,215)=="simulate")
+render(model,240)
 render(model,251)
+render(model)
+assert(drawn.Medkit and drawn["Fire injector"] and not drawn.Teleportatium)
+assert(green_button(244) and not green_button(245))
+render(model,245)
+assert(not render(model,214) and drawn["Need stock"])
+render(model,240)
+render(model,244)
 action,param=render(model,214)
 assert(action=="craft" and param.id=="medical")
-render(model,250)
-assert(render(model,215)=="simulate")
+model.order_active,model.order_name=true,"Medkit"
+assert(not render(model,214) and drawn["Queued: Medkit"])
+render(model,240)
+render(model)
+assert(drawn["Queued: Medkit"] and not green_button(244))
+model.order_active=false
+model.recipes[2].ready,model.recipes[2].reason=false,"No storage space"
+assert(not render(model) and not green_button(244))
+render(model,244)
+assert(not render(model,214) and drawn["No storage space"])
+render(model,240)
+render(model,252)
+render(model)
+assert(drawn["Magic grenade"] and not green_button(244))
+render(model,244)
+assert(not render(model,214) and drawn["Build the station"])
+model.order_active=true
+assert(not render(model,214) and drawn["Queued: Medkit"] and drawn["Build the station"])
+model.order_active=false
+render(model,240)
+render(model,253)
+render(model)
+assert(drawn["No recipes yet"] and not buttons[244] and not buttons[214])
+-- Future equipment recipes share the same pagination and return navigation.
+for i=1,6 do
+    model.recipes[#model.recipes+1]={id="gear"..i,category="equipment",name="Gear "..i,output=1,ready=true,inputs={}}
+end
+render(model,243)
+render(model,244)
+action,param=render(model,214)
+assert(action=="craft" and param.id=="gear6")
+render(model,240)
+render(model)
+assert(green_button(244) and buttons[244].name=="Gear 6" and not buttons[245])
 render(model,213)
 assert(render(model,216)=="preview_items")
 assert(render(model,217)=="restock")
@@ -298,21 +377,28 @@ assert(not panels[210] and not panels[70])
 -- Selecting previews a single project. Payment requires its own confirmation.
 model.mode,model.near,model.popup="case",true,false
 render(model,218)
+render(model)
+assert(green_button(244))
 assert(not render(model,244))
 render(model)
-assert(drawn["Now: 48 slots"] and drawn["Next: 72 slots"] and drawn["350 / 200"])
+assert(drawn["Now: 48 slots"] and drawn["Next: 72 slots"] and drawn["350 / 200"] and green_button(241))
 action,param=render(model,241)
 assert(action=="buy_upgrade" and param.id=="warehouse_wand" and param.level==0)
 render(model,243)
-render(model,247) -- Salvage bench, missing oil.
+render(model)
+assert(not green_button(248)) -- Salvage bench, missing oil.
+render(model,248)
 assert(not render(model,241) and drawn["Insufficient stock"])
 render(model,240)
-render(model,248) -- Future support station.
+render(model,243)
+render(model,244) -- Future support station.
 assert(not render(model,241) and drawn["In development"])
 render(model,219)
+render(model)
+assert(green_button(244))
 render(model,244)
 render(model)
-assert(drawn["Now: 2 slots"] and drawn["Next: 3 slots"])
+assert(drawn["Now: 2 slots"] and drawn["Next: 3 slots"] and green_button(241))
 action,param=render(model,241)
 assert(action=="buy_upgrade" and param.id=="safe")
 model.salvage_enabled,model.scrap=true,2

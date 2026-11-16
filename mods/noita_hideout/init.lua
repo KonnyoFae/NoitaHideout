@@ -43,7 +43,7 @@ local error_translations = {
     ["Upgrade level changed."] = "项目等级已变动，请重新查看。",
     ["Not enough construction resources."] = "建设所需的库存不足。",
     ["Facility is locked."] = "请先扩建对应的工位。",
-    ["Consumables storage is full."] = "消耗品库没有可预留的空格。",
+    ["Product storage is full."] = "成品所属仓库没有可预留的空格。",
     ["Perk already equipped."] = "已装备同一种特质。",
     ["No packable perk nearby."] = "附近没有可封装的特质。",
     ["Could not activate perk."] = "未能激活这项特质。",
@@ -284,24 +284,30 @@ local function inventory_view()
     elseif state.pouch.location=="warehouse" then warehouse_slot("pouch",state.pouch.slot,pouch) end
     model.progression=NHStore.progressMenu(state,lang)
     model.warehouse_capacity={}
-    for _,category in ipairs({"wand","spell","containers","supplies","materials"}) do
+    for _,category in ipairs({"wand","spell","containers","supplies","equipment","materials"}) do
         model.warehouse_capacity[category]=NHStore.warehouseCapacity(state,category)
     end
     model.salvage_enabled=NHStore.level(state,"salvage")>0
     model.scrap=state.resources.arcane_scrap or 0
+    local facility_names={}
+    for _,project in ipairs(model.progression.expansion) do facility_names[project.id]=project.name end
     model.recipes={}
     for _,recipe in ipairs(NHStore.recipes) do
-        if recipe.id=="stable" or NHStore.level(state,recipe.id)>0 then
-            local ready,reason=NHStore.canStartBatch(state,recipe)
-            local view={id=recipe.id,name=tr(recipe.zh,recipe.en),output=recipe.count or 1,inputs={},ready=ready}
-            if not ready then view.reason=(lang=="zh" and error_translations[reason]) or reason end
-            for _,input in ipairs(recipe.inputs) do
-                table.insert(view.inputs,{name=NHPotion.materialName(input.name),amount=input.amount,
-                    available=state.materials[input.name] or 0})
-            end
-            table.insert(model.recipes,view)
-            if state.order and recipe.id==(state.order.recipe or "stable") then model.order_name=view.name end
+        local ready,reason=NHStore.canStartBatch(state,recipe)
+        local view={id=recipe.id,category=recipe.category,name=tr(recipe.zh,recipe.en),output=recipe.count or 1,
+            inputs={},ready=ready,unlocked=not recipe.facility or NHStore.level(state,recipe.facility)>0,
+            facility_name=facility_names[recipe.facility] or recipe.facility}
+        if not view.unlocked then
+            view.reason=tr("需要先建造","Build first: ")..view.facility_name
+        elseif not ready then
+            view.reason=(lang=="zh" and error_translations[reason]) or reason
         end
+        for _,input in ipairs(recipe.inputs) do
+            table.insert(view.inputs,{name=NHPotion.materialName(input.name),amount=input.amount,
+                available=state.materials[input.name] or 0})
+        end
+        table.insert(model.recipes,view)
+        if state.order and recipe.id==(state.order.recipe or "stable") then model.order_name=view.name end
     end
     model.cells,model.pouchCapacity,model.maxUses=state.pouch.cells,NHStore.pouchCapacity,NHStore.doseDurability
     model.order_active = state.order ~= false

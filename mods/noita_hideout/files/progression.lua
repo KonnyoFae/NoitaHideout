@@ -13,6 +13,7 @@ define("warehouse_wand","expansion","魔杖库","Wand storage",4,stock_cost,{cat
 define("warehouse_spell","expansion","法术库","Spell storage",4,stock_cost,{category="spell"})
 define("warehouse_containers","expansion","容器库","Container storage",4,stock_cost,{category="containers"})
 define("warehouse_supplies","expansion","消耗品库","Supply storage",4,stock_cost,{category="supplies"})
+define("warehouse_equipment","expansion","装备库","Equipment storage",4,stock_cost,{category="equipment"})
 define("warehouse_materials","expansion","物料库","Material storage",4,{{"sand",250},{"slime",100}},{category="materials"})
 define("medical","expansion","医疗工位","Medical station",1,{{"water",250},{"slime",100}},
     {effect={"制造医疗物品","Craft medical supplies"}})
@@ -129,14 +130,22 @@ function NHStore.buyUpgrade(s,request)
 end
 
 local function adopt(s)
-    if s.levels then return end
+    if s.levels then
+        -- A pouch in an expanded supply grid may have no matching slot in the new equipment grid.
+        if s.pouch.location=="warehouse" and not s.levels.warehouse_equipment
+            and s.pouch.slot>NHStore.warehouseCapacity(s,"equipment")
+            and s.pouch.slot<=NHStore.warehouseCapacity(s,"supplies") then
+            s.pouch.slot=assert(NHStore.freeSlot(s,"warehouse",nil,"pouch"),"No equipment slot for stored pouch")
+        end
+        return
+    end
     s.levels,s.storageBase,s.resources={},{},{}
     -- Existing profiles had unlimited storage. Retain every occupied cell.
     local function preserve(category,used)
         if used>(s.storageBase[category] or base_capacity(category)) then s.storageBase[category]=used end
     end
     for i,row in ipairs(s.warehouse) do preserve(NHStore.category(row.item.kind),row.slot or i) end
-    if s.pouch.location=="warehouse" then preserve("supplies",s.pouch.slot) end
+    if s.pouch.location=="warehouse" then preserve("equipment",s.pouch.slot) end
     preserve("materials",material_slots(s))
 end
 

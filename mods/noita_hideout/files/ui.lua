@@ -6,17 +6,24 @@ local warehouse_tab, folded = "wand", false
 local warehouse_pages = {}
 local warehouse_tabs = {
     {"wand","魔杖","Wands"}, {"spell","法术","Spells"}, {"containers","容器","Containers"},
-    {"supplies","消耗品","Supplies"}, {"materials","物料","Materials"},
+    {"supplies","消耗品","Supplies"}, {"equipment","装备","Equipment"}, {"materials","物料","Materials"},
 }
 local workshop_folded=false
-local project_pages={expansion=1,upgrade=1}
-local selected_project,selected_recipe,salvage_target
-local projects_per_page=5
+local list_pages={}
+local entries_per_page=5
+local recipe_category="alchemy"
+local selected_entry,salvage_target
 local work_tabs={
     {key="orders",id=212,zh="工坊",en="Workshop"},
     {key="expansion",id=218,zh="扩建",en="Build"},
     {key="upgrade",id=219,zh="升级",en="Upgrades"},
     {key="samples",id=213,zh="测试物资",en="Supplies"},
+}
+local recipe_tabs={
+    {key="alchemy",id=250,zh="炼金",en="Alchemy"},
+    {key="medical",id=251,zh="医疗",en="Medical"},
+    {key="weapons",id=252,zh="武器",en="Weapons"},
+    {key="equipment",id=253,zh="装备",en="Equipment"},
 }
 local white = { 0.96, 0.93, 0.84 }
 local gold = { 1.00, 0.83, 0.47 }
@@ -161,38 +168,55 @@ end
 local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local left,width=layout.middle,layout.bench
     if not model.debug and tab=="samples" then tab="orders" end
-    local tx,ty=6,18
-    local nav={}
-    for _,t in ipairs(work_tabs) do
-        if t.key~="samples" or model.debug then
-            local name=tr(t.zh,t.en)
-            local w=GuiGetTextDimensions(gui,name,scale)/scale
-            if tx>6 and tx+w>width-5 then tx,ty=6,ty+13 end
-            nav[#nav+1]={id=t.id,key=t.key,name=name,x=tx,y=ty}
-            tx=tx+w+7
+    local function position_tabs(tabs,y)
+        local x,positions=6,{}
+        for _,t in ipairs(tabs) do
+            if t.key~="samples" or model.debug then
+                local name=tr(t.zh,t.en)
+                local w=GuiGetTextDimensions(gui,name,scale)/scale
+                if x>6 and x+w>width-5 then x,y=6,y+13 end
+                positions[#positions+1]={id=t.id,key=t.key,name=name,x=x,y=y}
+                x=x+w+7
+            end
+        end
+        return positions,y+16
+    end
+    local nav,body=position_tabs(work_tabs,18)
+    local crafting=tab=="orders"
+    local menu=model.progression[tab]
+    if crafting then
+        menu={}
+        for _,recipe in ipairs(model.recipes) do
+            if recipe.category==recipe_category then menu[#menu+1]=recipe end
         end
     end
-    local body=ty+16
-    local menu=model.progression[tab]
     local selected
     for _,item in ipairs(menu or {}) do
-        if item.id==selected_project then selected=item; break end
+        if item.id==selected_entry then selected=item; break end
     end
-    local recipes=model.recipes
-    local rindex=1
-    for i,recipe in ipairs(recipes) do if recipe.id==selected_recipe then rindex=i; break end end
-    local recipe=recipes[rindex]
     local salvage
     if salvage_target and model.salvage_enabled then
         local category=model.warehouse[salvage_target.kind]
         salvage=category and category[salvage_target.slot]
         if not salvage or salvage.id~=salvage_target.id then salvage_target,salvage=nil,nil end
     end
+    local category_nav
+    if crafting and not selected and not salvage then category_nav,body=position_tabs(recipe_tabs,body) end
+    local function available(item)
+        if crafting then return item.ready and item.unlocked~=false and not model.order_active end
+        return item.canBuy
+    end
     local body_height=62
     if salvage then body_height=77
+    elseif crafting and selected then
+        body_height=80+12*#selected.inputs+(model.debug and 14 or 0)
+        if model.order_active and selected.unlocked==false then body_height=body_height+13 end
     elseif selected then body_height=80+12*#selected.costs
-    elseif menu then body_height=16+projects_per_page*13
-    elseif tab=="orders" then body_height=69+12*#recipe.inputs+(model.debug and 14 or 0) end
+    elseif menu then
+        body_height=5+13*math.max(1,math.min(#menu,entries_per_page))
+        if #menu>entries_per_page then body_height=body_height+13 end
+        if crafting and model.order_active then body_height=body_height+15 end
+    end
     local height=workshop_folded and 18 or body+body_height
     local top=sh-5-height*scale
     local function label(y,value,color)
@@ -218,7 +242,13 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     if workshop_folded then return hover end
     for _,t in ipairs(nav) do
         if button(t.id,t.x,t.y,t.name,t.key==tab and gold or muted) then
-            tab,selected_project,salvage_target=t.key,nil,nil
+            tab,selected_entry,salvage_target=t.key,nil,nil
+            return hover
+        end
+    end
+    for _,t in ipairs(category_nav or {}) do
+        if button(t.id,t.x,t.y,t.name,t.key==recipe_category and gold or muted) then
+            recipe_category,selected_entry=t.key,nil
             return hover
         end
     end
@@ -243,11 +273,34 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             dispatch("salvage",salvage_target)
             salvage_target=nil
         elseif button(261,6,body+65,tr("取消","Cancel")) then salvage_target=nil end
-    elseif menu and selected then
-        if button(240,6,body,tr("< 返回列表","< Projects")) then selected_project=nil; return hover end
-        label(body+14,selected.name,gold)
+    elseif crafting and selected then
+        if button(240,6,body,tr("< 返回配方","< Recipes")) then selected_entry=nil; return hover end
+        label(body+14,selected.name.." ×"..selected.output,available(selected) and green or white)
+        label(body+27,tr("物料  库存 / 所需","Materials  stock / cost"),muted)
+        local y=body+27
+        for _,input in ipairs(selected.inputs) do
+            y=y+12
+            cost(y,input.name,input.available,input.amount)
+        end
+        y=y+15
+        if model.order_active then
+            label(y,tr("生产中：","Queued: ")..model.order_name,muted)
+            if selected.unlocked==false then
+                y=y+13
+                label(y,selected.reason,muted)
+            end
+        elseif available(selected) then
+            if button(214,6,y,tr("确认制造","Confirm craft"),green) then dispatch("craft",{id=selected.id}) end
+        else label(y,selected.reason or tr("材料或空位不足","Need stock or space"),muted) end
+        label(y+13,model.reward_spent and tr("下次通关后入库","Delivered on next run's clear")
+            or tr("本局通关后入库","Delivered on this run's clear"),muted)
+        if model.debug and button(215,6,y+28,tr("模拟通关","Simulate clear"),gold,
+            tr("每局仅结算一次通关奖励。","Uses this run's one clear reward.")) then dispatch("simulate") end
+    elseif selected then
+        if button(240,6,body,tr("< 返回列表","< Projects")) then selected_entry=nil; return hover end
+        label(body+14,selected.name,available(selected) and green or white)
         label(body+27,tr("当前：","Now: ")..selected.current)
-        if selected.next then label(body+39,tr("升级后：","Next: ")..selected.next,green) end
+        if selected.next then label(body+39,tr("升级后：","Next: ")..selected.next) end
         local y=body+51
         if #selected.costs>0 then
             label(y,tr("物料  库存 / 所需","Materials  stock / cost"),muted)
@@ -259,53 +312,42 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         end
         if selected.canBuy then
             local confirm=tab=="expansion" and tr("确认扩建","Confirm build") or tr("确认升级","Confirm upgrade")
-            if button(241,6,y,confirm) then
+            if button(241,6,y,confirm,green) then
                 dispatch("buy_upgrade",{id=selected.id,level=selected.level})
-                selected_project=nil
+                selected_entry=nil
             end
         elseif selected.planned then label(y,tr("尚未开放","In development"),muted)
-        elseif selected.maxed then label(y,tr("已完成","Complete"),green)
+        elseif selected.maxed then label(y,tr("已完成","Complete"),muted)
         else label(y,tr("所需物料不足","Insufficient stock"),gold) end
     elseif menu then
-        local pages=math.max(1,math.ceil(#menu/projects_per_page))
-        local current=math.min(project_pages[tab],pages)
-        if pages>1 then
-            if button(242,6,body,"<",current>1 and gold or muted) then current=math.max(1,current-1) end
-            if button(243,width-14,body,">",current<pages and gold or muted) then current=math.min(pages,current+1) end
-            tint(muted)
-            GuiText(gui,left+(width/2-8)*scale,top+body*scale,current.."/"..pages,scale)
-        end
-        project_pages[tab]=current
-        for i=1,projects_per_page do
-            local item=menu[(current-1)*projects_per_page+i]
-            if item and button(243+i,6,body+(pages>1 and 13 or 0)+(i-1)*13,item.name,item.planned and muted or white) then
-                selected_project=item.id
-                return hover
-            end
-        end
-    elseif tab=="orders" then
+        local list_key=crafting and recipe_category or tab
+        local pages=math.max(1,math.ceil(#menu/entries_per_page))
+        local current=math.min(list_pages[list_key] or 1,pages)
         local y=body
-        if #recipes>1 then
-            if button(250,6,y,"<") then selected_recipe=recipes[(rindex-2)%#recipes+1].id; return hover end
-            if button(251,width-14,y,">") then selected_recipe=recipes[rindex%#recipes+1].id; return hover end
+        if crafting and model.order_active then
+            label(y,tr("生产中：","Queued: ")..model.order_name,muted)
+            y=y+15
+        end
+        if crafting and #menu==0 then label(y,tr("暂无配方","No recipes yet"),muted) end
+        if pages>1 then
+            if button(242,6,y,"<",current>1 and gold or muted) then current=math.max(1,current-1) end
+            if button(243,width-14,y,">",current<pages and gold or muted) then current=math.min(pages,current+1) end
             tint(muted)
-            GuiText(gui,left+(width/2-8)*scale,top+y*scale,rindex.."/"..#recipes,scale)
+            GuiText(gui,left+(width/2-8)*scale,top+y*scale,current.."/"..pages,scale)
             y=y+13
         end
-        label(y,recipe.name.." ×"..recipe.output)
-        for _,input in ipairs(recipe.inputs) do
-            y=y+12
-            cost(y,input.name,input.available,input.amount)
+        list_pages[list_key]=current
+        for i=1,entries_per_page do
+            local item=menu[(current-1)*entries_per_page+i]
+            if item then
+                local color=available(item) and green or white
+                if item.planned or item.maxed or item.unlocked==false then color=muted end
+                if button(243+i,6,y+(i-1)*13,item.name,color) then
+                    selected_entry=item.id
+                    return hover
+                end
+            end
         end
-        y=y+15
-        if model.order_active then label(y,tr("生产中：","Queued: ")..model.order_name,green)
-        elseif recipe.ready then
-            if button(214,6,y,tr("从物料库存投料","Start batch from stock")) then dispatch("craft",{id=recipe.id}) end
-        else label(y,recipe.reason or tr("材料或空位不足","Need stock or space"),muted) end
-        label(y+13,model.reward_spent and tr("下次通关后入库","Delivered on next run's clear")
-            or tr("本局通关后入库","Delivered on this run's clear"),muted)
-        if model.debug and button(215,6,y+28,tr("模拟通关","Simulate clear"),gold,
-            tr("每局仅结算一次通关奖励。","Uses this run's one clear reward.")) then dispatch("simulate") end
     else
         if button(216,6,body+3,tr("生成测试魔杖和混合瓶","Spawn wand and flask")) then dispatch("preview_items") end
         label(body+17,tr("在脚边拾取样品","Pick up the samples at your feet"),muted)
@@ -398,10 +440,12 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         local top=sh-5-height*scale
         local warehouse_hover=mx>=left and mx<left+width*scale and my>=top and my<top+height*scale
         panel_hover=panel_hover or warehouse_hover
-        if warehouse_hover and drag and drag.source.key=="native" and not folded and warehouse_tab~="materials"
-            and drag.source.kind~="other" then
-            local category=NHStore.category(drag.source.kind)
-            warehouse_tab=category
+        if warehouse_hover and drag and not folded then
+            local src=drag.source
+            if src.key=="dose" then warehouse_tab="supplies"
+            elseif src.key=="native" and src.kind~="other" and (warehouse_tab~="materials" or src.kind~="potion") then
+                warehouse_tab=NHStore.category(src.kind)
+            end
         end
         GuiZSetForNextWidget(gui,-79)
         GuiImageNinePiece(gui,70,left,top,width*scale,height*scale,1)

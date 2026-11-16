@@ -325,15 +325,34 @@ local bag=assert(EntityGetWithTag("noita_hideout_pouch")[1])
 local to_stash=tool(bag,1)
 to_stash.container="warehouse"
 tick(nil,"place",to_stash)
-assert(state().pouch.location=="warehouse" and tick().warehouse.supplies[1].kind=="pouch")
+local stored_bag=tick()
+assert(state().pouch.location=="warehouse" and stored_bag.warehouse.equipment[1].kind=="pouch")
+assert(not stored_bag.warehouse.supplies and #EntityGetWithTag("noita_hideout_pouch")==0)
 tick(nil,"open_container",{safeSlot=1,container="warehouse"})
 assert(tick().popup)
+-- The same number can hold a loose injector and its pouch in separate categories.
+tick(nil,"unpack_dose",{container="warehouse",safeSlot=1,sourceCell=1})
+local separated=tick()
+assert(separated.warehouse.supplies[1].kind=="dose" and separated.warehouse.equipment[1].kind=="pouch")
+tick(nil,"pack_dose",{container="warehouse",safeSlot=1,targetCell=1})
+local packed_count=state().pouch.doses
 entities[player].x=1000
 assert(not tick().popup)
 
 -- Move an empty flask from the stash and fill it with the workshop output, then
 -- return the same container with its new exact contents to a warehouse cell.
 entities[player].x=227
+tick(nil,"move_pouch",{container="warehouse",from=1,safeSlot=2})
+boot()
+local moved=tick()
+assert(moved.warehouse.equipment[2].kind=="pouch" and not moved.warehouse.equipment[1])
+local take_bag=tool(nil,2)
+take_bag.container="warehouse"
+tick(nil,"take_pouch",take_bag)
+local bags=EntityGetWithTag("noita_hideout_pouch")
+assert(#bags==1 and EntityGetRootEntity(bags[1])==player and not tick().warehouse.equipment)
+tick(nil,"place",tool(bags[1],2))
+assert(tick().secure_loot[2].kind=="pouch" and state().pouch.doses==packed_count)
 local product=state().warehouse[1]
 assert(product)
 local dock_move={container="docks",source="warehouse",destination="docks",from=product.slot,safeSlot=2,entity=product.id}
@@ -392,10 +411,21 @@ assert(tick().capacity==3)
 tick(nil,"buy_upgrade",{id="warehouse_spell",level=0})
 local expanded_view=tick()
 assert(expanded_view.warehouse_capacity.spell==72 and expanded_view.warehouse_capacity.wand==48)
+local equip_project=assert(has_project(expanded_view.progression.expansion,"warehouse_equipment"))
+assert(equip_project.canBuy and expanded_view.warehouse_capacity.equipment==48)
+tick(nil,"buy_upgrade",{id="warehouse_equipment",level=0})
+assert(tick().warehouse_capacity.equipment==72 and tick().warehouse_capacity.supplies==48)
 
--- Locked facilities do not expose recipes or accept forged workshop requests.
-assert(#tick().recipes==1 and tick().recipes[1].id=="stable")
+-- Locked recipes remain readable in their own category; the backend rechecks access.
+local catalog=tick().recipes
+assert(#catalog==4)
+local alchemy=assert(has_project(catalog,"stable"))
+assert(alchemy.category=="alchemy" and alchemy.unlocked and not alchemy.ready and alchemy.reason)
+local expected_category={medical="medical",injector="medical",grenade="weapons"}
 for _,id in ipairs({"medical","injector","grenade"}) do
+    local locked=assert(has_project(catalog,id))
+    assert(locked.category==expected_category[id] and not locked.unlocked and not locked.ready)
+    assert(locked.facility_name and locked.reason:find(locked.facility_name,1,true))
     tick(nil,"craft",{id=id})
     assert(not state().order)
 end
@@ -408,7 +438,8 @@ local products={
 for n,expected in ipairs(products) do
     tick(nil,"buy_upgrade",{id=expected.recipe,level=0})
     local recipe=assert(has_project(tick().recipes,expected.recipe))
-    assert(recipe.ready and recipe.name==expected.name and #recipe.inputs==2)
+    assert(recipe.unlocked and recipe.ready and recipe.category==expected_category[expected.recipe])
+    assert(recipe.name==expected.name and #recipe.inputs==2)
     local before=state()
     entities[player].x=900
     tick(nil,"craft",{id=expected.recipe})
@@ -424,6 +455,7 @@ for n,expected in ipairs(products) do
     end
     local working=tick()
     assert(working.order_name==expected.name and working.warehouse.supplies[reserved].kind=="reserved")
+    for _,busy in ipairs(working.recipes) do assert(not busy.ready and busy.reason) end
     if first_product then
         tick(nil,"move_warehouse",{container="warehouse",kind="medkit",from=first_product.slot,entity=first_product.id,safeSlot=reserved})
         local still_reserved=tick().warehouse.supplies
@@ -516,3 +548,20 @@ new_world()
 inventory_open=true
 assert(tick().warehouse.supplies[4].id==protected.id)
 print("Controller: field equip from safe, home-only return to stash and perk persistence passed.")
+
+-- A funded recipe stays unavailable while its output category is full.
+local full=state()
+full.materials.water,full.materials.blood=100,50
+for slot=1,NHStore.warehouseCapacity(full,"supplies") do
+    if not NHStore.slotIndex(full,"warehouse",slot,"dose") then
+        table.insert(full.warehouse,{id=full.nextItemId,slot=slot,item={kind="dose",remaining=3,count=1}})
+        full.nextItemId=full.nextItemId+1
+    end
+end
+assert(NHStore.commit(full))
+boot()
+local unavailable=assert(has_project(tick().recipes,"medical"))
+assert(unavailable.unlocked and not unavailable.ready and unavailable.reason)
+tick(nil,"craft",{id="medical"})
+assert(not state().order and state().materials.water==100 and state().materials.blood==50)
+print("Controller: workshop categories, unlocks, readiness and equipment slots passed.")

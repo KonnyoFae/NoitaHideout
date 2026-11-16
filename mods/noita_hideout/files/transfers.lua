@@ -88,11 +88,16 @@ local customItems = {}
 local customOrder = {}
 -- Register before gameplay. A codec snapshots a live item and rebuilds it
 -- from the saved record; the transfer journal owns commit and disposal.
+-- Set adapter.warehouseCategory="equipment" for wearable gear and mod containers.
 function NHTransfers.registerItem(kind, matches, adapter)
     assert(type(kind)=="string" and type(matches)=="function" and type(adapter)=="table" and type(adapter.capture)=="function"
         and type(adapter.restore)=="function","Invalid item adapter")
     assert(not customItems[kind] and kind~="wand" and kind~="spell" and kind~="potion"
         and kind~="pouch" and kind~="dose" and kind~="other","Duplicate or reserved item kind")
+    if adapter.warehouseCategory then
+        assert(adapter.warehouseCategory=="equipment" or adapter.warehouseCategory=="supplies","Invalid warehouse category")
+        NHStore.itemCategories[kind]=adapter.warehouseCategory
+    end
     customItems[kind]={matches=matches,adapter=adapter}
     customOrder[#customOrder+1]=kind
 end
