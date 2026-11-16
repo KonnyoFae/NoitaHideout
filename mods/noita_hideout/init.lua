@@ -1,5 +1,6 @@
 local files = "mods/noita_hideout/files/"
 dofile_once(files .. "store.lua")
+dofile_once(files .. "bank.lua")
 dofile_once(files .. "workshop_clock.lua")
 dofile_once(files .. "wand.lua")
 dofile_once(files .. "potion.lua")
@@ -25,6 +26,7 @@ local lang, status, last_error = "en", "", nil
 local model_cache, next_attempt = nil, 0
 local last_dose_frame = -1
 local next_room_check,pending_visit=0,nil
+local bank_synced=false
 
 local function tr(zh, en)
     return lang == "zh" and zh or en
@@ -52,6 +54,18 @@ local error_translations = {
     ["Could not create packed perk."] = "未能生成特质物品。",
     ["Another order is active."] = "工坊已有一张在制订单。",
     ["Not enough bulk ingredients."] = "物料库存中的原料不足。",
+    ["Invalid gold transfer."] = "无法识别这笔存取操作。",
+    ["Invalid gold amount."] = "请输入有效的金币数额。",
+    ["Not enough carried gold."] = "随身金币不足。",
+    ["Not enough stored gold."] = "存钱罐余额不足。",
+    ["Wallet is full."] = "钱包余额已达上限。",
+    ["Piggy bank is full."] = "存钱罐余额已达上限。",
+    ["Wallet unavailable."] = "当前钱包无法存取金币。",
+    ["Gold transfer exceeds the exact integer range."] = "这笔转账超过可精确记录的金额。",
+    ["Invalid wallet receipt."] = "钱包转账记录异常。",
+    ["Could not record the wallet transfer."] = "钱包转账记录写入失败，将重试。",
+    ["Could not update the wallet."] = "钱包写入失败，将重试。",
+    ["Waiting for wallet settlement."] = "待随身金币或钱包空间足够后，将继续结算。",
     ["Not enough empty containers."] = "容器仓库里可用的空容器不足。",
     ["Only empty containers can be dismantled."] = "只能拆解仓库内已清空的普通物料容器。",
     ["The selected item is no longer in your quick inventory."] = "这件物品已经离开快捷栏。",
@@ -104,6 +118,7 @@ end
 
 local function invalidate()
     state, run_id, model_cache = nil, nil, nil
+    bank_synced=false
     next_attempt = GameGetFrameNum() + 60
 end
 
@@ -485,7 +500,21 @@ end
 
 local function workshop_action(player,action,index)
     if not case_open or not GameIsInventoryOpen() or not near_home(player) then return end
-    if action=="buy_upgrade" and type(index)=="table" then
+    if action=="bank_transfer" and type(index)=="table" then
+        local draft=active_draft()
+        if not draft then return end
+        local reason
+        bank_synced,reason=NHBank.reconcile(draft,player)
+        if not bank_synced then report(reason); return end
+        local amount,problem=NHBank.prepare(draft,player,index)
+        if not amount then report(problem); return end
+        if not save(draft) then return end
+        bank_synced,reason=NHBank.reconcile(state,player)
+        if not bank_synced then report(reason); return end
+        local message=index.direction=="deposit" and tr("已存入 %.0f 金币。","Deposited %.0f gold.")
+            or tr("已取出 %.0f 金币。","Withdrew %.0f gold.")
+        feedback(string.format(message,amount))
+    elseif action=="buy_upgrade" and type(index)=="table" then
         commit_edit(NHStore.buyUpgrade,"建设完成。","Construction complete.",index)
     elseif action=="salvage" and type(index)=="table" then
         commit_edit(NHStore.salvage,"拆解完成，碎片已入库。","Item dismantled. Scrap stored.",index)
@@ -515,7 +544,7 @@ local function dispatch(player, action, index)
             if not case_open then close_panel() end
             return
         end
-        if type(index)~="table" or action=="buy_upgrade" or action=="craft" or action=="salvage" then
+        if type(index)~="table" or action=="buy_upgrade" or action=="craft" or action=="salvage" or action=="bank_transfer" then
             workshop_action(player,action,index)
             return
         end
@@ -681,6 +710,7 @@ end
 
 function OnWorldInitialized()
     NHClock.reset()
+    bank_synced=false
     next_room_check,pending_visit=0,nil
     state, run_id, home_x, home_y, player_id = nil, nil, nil, nil, nil
     opened, mouse_release, next_attempt, last_dose_frame = false, false, 0, -1
@@ -728,6 +758,11 @@ function OnWorldPostUpdate()
     if not attach() or not active_run() then return end
     local frame = GameGetFrameNum()
     if not traveler then NHClock.suspend(); opened,case_open=false,nil; return end
+    if player and not bank_synced then
+        local reason
+        bank_synced,reason=NHBank.reconcile(state,player)
+        if not bank_synced then report(reason) end
+    end
     if not update_workshop(traveler,frame) then return end
     if not player then opened,case_open=false,nil; return end
     local inventory_open = GameIsInventoryOpen()
@@ -761,6 +796,11 @@ function OnWorldPostUpdate()
     end
     if not active_run() then return end
     local model = opened and inventory_view() or {}
+    if opened and nearby then
+        model.bankGold=state.bankGold
+        model.walletGold,model.walletInfinite=NHBank.wallet(player)
+        if not bank_synced then model.walletGold=nil end
+    end
     if opened and state.order then
         model.order_remaining=math.ceil((state.order.required-NHClock.observe(state,frame))/60)
     end

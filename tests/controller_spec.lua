@@ -761,3 +761,196 @@ EntityKill(poly)
 entities[player].tags.player_unit=true
 assert(tick().order_remaining<50 and state().finished==1)
 print("Controller: timers, suspension, polymorph, Holy Mountain hitboxes, checkpoint deduplication and reverse alchemy passed.")
+
+-- Drive both sides through the inventory callback. Account for the native
+-- wallet separately from the profile so a reload can expose a duplicate debit.
+local function testBank()
+    settings,flags={},{}
+    new_world()
+    local function addWallet(gold)
+        return EntityAddComponent2(player,"WalletComponent",{
+            money=gold,money_spent=17,mMoneyPrevFrame=31,mHasReachedInf=false})
+    end
+    local wallet=addWallet(135)
+    local function transfer(direction,amount)
+        tick(nil,"bank_transfer",{direction=direction,amount=amount})
+    end
+    local function balances(carried,stored)
+        assert(wallet.money==carried,"Unexpected native gold: "..tostring(wallet.money))
+        assert(state().bankGold==stored,"Unexpected bank balance: "..tostring(state().bankGold))
+        assert(wallet.money_spent==17 and wallet.mMoneyPrevFrame==31)
+    end
+    inventory_open=true
+    transfer("deposit",100) -- suppress the opening click
+    balances(135,0)
+    assert(tick().walletGold==135 and tick().bankGold==0)
+    transfer("deposit",100)
+    balances(35,100)
+    transfer("deposit",1000)
+    transfer("withdraw",101)
+    for _,amount in ipairs({0,-1,0.5,"10",math.huge,0/0}) do transfer("deposit",amount) end
+    transfer("bogus",10)
+    balances(35,100)
+    wallet.money=42 -- vanilla gold pickup, no profile revision
+    assert(tick().walletGold==42)
+    entities[player].x=800
+    transfer("withdraw",10)
+    transfer("deposit","all")
+    balances(42,100)
+    entities[player].x=227
+    inventory_open=false
+    transfer("deposit","all")
+    inventory_open=true
+    tick()
+    balances(42,100)
+    transfer("withdraw",10)
+    balances(52,90)
+    transfer("deposit","all")
+    balances(0,142)
+    transfer("deposit","all")
+    transfer("withdraw","all")
+    balances(142,0)
+    transfer("withdraw","all")
+    balances(142,0)
+    local comps=entities[player].comps
+    comps.WalletComponent=nil
+    assert(tick().walletGold==nil)
+    transfer("deposit",10)
+    balances(142,0)
+    comps.WalletComponent=wallet
+
+    fail_commit=true
+    transfer("deposit",42)
+    fail_commit=false
+    boot()
+    tick()
+    balances(142,0)
+    transfer("deposit",42)
+    balances(100,42)
+    -- The profile has accepted the transfer, but the native component write
+    -- is lost. Reload the same world twice; recovery must finish only once.
+    local function failWalletWrite(direction,amount,oldGold,newBank)
+        local set=ComponentSetValue2
+        local touched=false
+        function ComponentSetValue2(c,key,...)
+            if c==wallet and key=="money" then touched=true; return end
+            set(c,key,...)
+        end
+        transfer(direction,amount)
+        ComponentSetValue2=set
+        assert(touched,"No native gold transfer attempted")
+        balances(oldGold,newBank)
+        for i=1,2 do
+            boot()
+            tick()
+            advance(120)
+        end
+    end
+    failWalletWrite("withdraw",12,100,30)
+    balances(112,30)
+    failWalletWrite("deposit",28,112,58)
+    balances(84,58)
+    local function savedWorld()
+        local copy={}
+        for k,v in pairs(world) do copy[k]=v end
+        return copy
+    end
+    local earlierWorld=savedWorld()
+    transfer("deposit",20)
+    transfer("withdraw",5)
+    balances(69,73)
+    world=earlierWorld
+    wallet.money=84+7 -- restored native wallet plus gold earned outside the bank
+    boot()
+    tick()
+    balances(76,73)
+    local setWorld=GlobalsSetValue
+    function GlobalsSetValue(k,v)
+        if not k:match("^noita_hideout%.bank_wallet%.") then setWorld(k,v) end
+    end
+    transfer("deposit",5)
+    balances(76,78)
+    tick()
+    balances(76,78) -- the receipt cannot be saved, so native money stays intact
+    GlobalsSetValue=setWorld
+    tick()
+    balances(71,78)
+    boot()
+    tick()
+    balances(71,78)
+    transfer("withdraw",5)
+    balances(76,73)
+    -- Only the prepared world receipt survives. Test both a lost native write
+    -- and a successful one whose rollback fails, then reload each twice.
+    for _,credited in ipairs({false,true}) do
+        local setMoney=ComponentSetValue2
+        local beforeWallet,beforeBank=wallet.money,state().bankGold
+        function GlobalsSetValue(k,v)
+            if not k:match("^noita_hideout%.bank_wallet%.") or v:find("/",1,true) then setWorld(k,v) end
+        end
+        function ComponentSetValue2(c,k,v,...)
+            if c~=wallet or k~="money" or (credited and v==beforeWallet+1) then setMoney(c,k,v,...) end
+        end
+        transfer("withdraw",1)
+        balances(beforeWallet+(credited and 1 or 0),beforeBank-1)
+        GlobalsSetValue,ComponentSetValue2=setWorld,setMoney
+        for i=1,2 do
+            boot()
+            tick()
+            balances(beforeWallet+1,beforeBank-1)
+        end
+        transfer("deposit",1)
+        balances(76,73)
+    end
+    -- Replaying a much poorer native world never creates a negative wallet.
+    -- Pickups settle the outstanding debit before withdrawals become possible.
+    earlierWorld=savedWorld()
+    transfer("deposit",30)
+    balances(46,103)
+    world,wallet.money=earlierWorld,4
+    boot()
+    assert(tick().walletGold==nil)
+    balances(0,103)
+    transfer("withdraw",10)
+    balances(0,103)
+    wallet.money=20
+    assert(tick().walletGold==nil)
+    balances(0,103)
+    wallet.money=9
+    assert(tick().walletGold==3)
+    balances(3,103)
+    transfer("withdraw",30)
+    balances(33,73)
+    boot()
+    tick()
+    balances(33,73)
+    OnPlayerDied()
+    new_world()
+    wallet=addWallet(0)
+    inventory_open=true
+    tick()
+    balances(0,73)
+    transfer("withdraw","all")
+    balances(73,0)
+    -- Integer arithmetic at each destination limit. An all-transfer that
+    -- exceeds headroom must leave both amounts and the original wallet intact.
+    wallet.money=NHStore.maxGold
+    transfer("deposit","all")
+    balances(0,NHStore.maxGold)
+    wallet.money=1
+    transfer("deposit",1)
+    transfer("deposit","all")
+    transfer("withdraw","all")
+    balances(1,NHStore.maxGold)
+    boot()
+    tick()
+    balances(1,NHStore.maxGold)
+    wallet.mHasReachedInf=true
+    local infinite=tick()
+    assert(infinite.walletInfinite and infinite.walletGold==nil)
+    transfer("withdraw",1)
+    balances(1,NHStore.maxGold)
+    assert(wallet.mHasReachedInf)
+end
+testBank()
+print("Controller: live wallet transfers, range, exact balances, recovery and cross-run bank savings passed.")

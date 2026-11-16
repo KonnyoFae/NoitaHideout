@@ -4,9 +4,12 @@ local gui
 local tab = "orders"
 local warehouse_tab, folded = "wand", false
 local warehouse_pages = {}
+local bank_amount=1
+local bank_amounts={1,10,100,1000}
 local warehouse_tabs = {
     {"wand","魔杖","Wands"}, {"spell","法术","Spells"}, {"containers","容器","Containers"},
     {"supplies","消耗品","Supplies"}, {"equipment","装备","Equipment"}, {"materials","物料","Materials"},
+    {"bank","存钱罐","Piggy bank"},
 }
 local workshop_folded=false
 local list_pages={}
@@ -178,6 +181,51 @@ end
 
 local function time_text(seconds)
     return string.format("%d:%02d",math.floor(seconds/60),seconds%60)
+end
+
+local function draw_bank(model,left,top,width,scale,tr,dispatch)
+    local x=left+8*scale
+    local right=left+(width-8)*scale
+    local function balance(y,title,value,infinite)
+        local amount=infinite and "∞" or (value and string.format("%.0f",value) or "—")
+        local amount_x=right-GuiGetTextDimensions(gui,amount,scale)
+        local shown,short=fit(title,amount_x-x-3*scale,scale)
+        tint(muted)
+        GuiText(gui,x,top+y*scale,shown,scale)
+        if short then GuiTooltip(gui,title,"") end
+        tint(gold)
+        GuiText(gui,amount_x,top+y*scale,amount,scale)
+        if infinite then GuiTooltip(gui,tr("无限金币钱包不支持存取","Transfers unavailable with infinite gold"),"")
+        elseif value==nil then GuiTooltip(gui,tr("当前钱包不可用","Wallet unavailable"),"") end
+    end
+    balance(0,tr("随身金币","Wallet"),model.walletGold,model.walletInfinite)
+    balance(13,tr("存款","Savings"),model.bankGold)
+    tint(muted)
+    GuiText(gui,x,top+30*scale,tr("存取金额","Transfer amount"),scale)
+    local cell=(right-x)/#bank_amounts
+    for i,n in ipairs(bank_amounts) do
+        local selected=n==bank_amount
+        local title=selected and ("["..n.."]") or tostring(n)
+        tint(selected and gold or white)
+        local center=x+(i-0.5)*cell
+        if GuiButton(gui,269+i,center-GuiGetTextDimensions(gui,title,scale)/2,top+43*scale,title,scale) and not drag then
+            bank_amount=n
+        end
+    end
+    local function action(id,y,title,direction,amount,source,destination)
+        local n=amount=="all" and (source or 0) or amount
+        local enabled=not model.walletInfinite and source and destination and n>0 and source>=n
+            and n<=NHStore.maxGold-destination
+        local bx=amount=="all" and right-GuiGetTextDimensions(gui,title,scale) or x
+        tint(enabled and green or muted)
+        if GuiButton(gui,id,bx,top+y*scale,title,scale) and enabled and not drag then
+            dispatch("bank_transfer",{direction=direction,amount=amount})
+        end
+    end
+    action(274,61,tr("存入","Deposit"),"deposit",bank_amount,model.walletGold,model.bankGold)
+    action(276,61,tr("全部存入","Deposit all"),"deposit","all",model.walletGold,model.bankGold)
+    action(275,77,tr("取出","Withdraw"),"withdraw",bank_amount,model.bankGold,model.walletGold)
+    action(277,77,tr("全部取出","Withdraw all"),"withdraw","all",model.bankGold,model.walletGold)
 end
 
 local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
@@ -523,13 +571,16 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             local bulk=warehouse_tab=="materials"
             local per_page=bulk and material_rows*2 or cols*math.floor(content_height/qh)
             local capacity=model.warehouse_capacity[warehouse_tab]
-            local pages
-            if bulk then pages=math.max(1,math.ceil(#model.materials/per_page))
-            else pages=math.max(1,math.ceil(capacity/per_page)) end
-            local current=warehouse_pages[warehouse_tab] or 1
-            local page_no=warehouse_pager(left+4*scale,top+(height-17)*scale,width-8,scale,current,pages)
-            if current~=page_no then loading=nil end
-            warehouse_pages[warehouse_tab]=page_no
+            local page_no
+            if warehouse_tab=="bank" then
+                draw_bank(model,left,top+grid_y*scale,width,scale,tr,dispatch)
+            else
+                local pages=math.max(1,math.ceil((bulk and #model.materials or capacity)/per_page))
+                local current=warehouse_pages[warehouse_tab] or 1
+                page_no=warehouse_pager(left+4*scale,top+(height-17)*scale,width-8,scale,current,pages)
+                if current~=page_no then loading=nil end
+                warehouse_pages[warehouse_tab]=page_no
+            end
             if bulk then
                 local docks,materials=model.docks,model.materials
                 local column_width=math.floor((width-12)/2)
@@ -600,7 +651,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                     end
                 end
                 if not held_target then loading=nil end
-            else
+            elseif page_no then
                 local rows=model.warehouse[warehouse_tab] or {}
                 for i=0,math.min(per_page,capacity-(page_no-1)*per_page)-1 do
                     local n=(page_no-1)*per_page+i+1

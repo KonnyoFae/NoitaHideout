@@ -290,6 +290,70 @@ assert(image_colors[2004][1]==128/255)
 local first_tile=tiles[1004]
 point(first_tile.x+1,first_tile.y+1)
 assert(drawn["Flask  20/50"] and drawn["water  12"])
+
+-- The bank has no inventory cells or pager. Presets move the exact amount;
+-- "all" is a separate one-click action in either direction.
+model.walletGold,model.bankGold=234,120345
+render(model,81)
+render(model)
+assert(drawn.Wallet and drawn.Savings and drawn["234"] and drawn["120345"] and not panels[299])
+assert(not render(model,272))
+cmd,arg=render(model,274)
+assert(cmd=="bank_transfer" and arg.direction=="deposit" and arg.amount==100)
+cmd,arg=render(model,275)
+assert(cmd=="bank_transfer" and arg.direction=="withdraw" and arg.amount==100)
+assert(not render(model,273))
+assert(not render(model,274) and not green_button(274))
+cmd,arg=render(model,276)
+assert(cmd=="bank_transfer" and arg.direction=="deposit" and arg.amount=="all")
+cmd,arg=render(model,277)
+assert(cmd=="bank_transfer" and arg.direction=="withdraw" and arg.amount=="all")
+model.walletGold=0
+assert(not render(model,276) and green_button(277))
+model.walletGold=nil
+assert(not render(model,277) and not green_button(275) and drawn["—"])
+model.walletInfinite=true
+assert(not render(model,277) and not green_button(276) and drawn["∞"])
+model.walletInfinite=false
+model.walletGold,model.bankGold=NHStore.maxGold-2,20
+assert(not render(model,277) and drawn["9007199254740989"],"all requires space for the entire source balance")
+assert(not render(model,270))
+assert(green_button(275))
+model.walletGold,model.bankGold=20,NHStore.maxGold-2
+assert(not render(model,276) and green_button(274))
+model.walletGold,model.bankGold=13,0
+assert(not render(model,277) and not green_button(275))
+assert(not render(model,270))
+assert(green_button(274))
+for _,lang in ipairs({"zh","en"}) do
+    model.lang=lang
+    for _,sw in ipairs({320,427,640}) do
+        width=sw
+        render(model)
+        local panel=panels[70]
+        local function inside(id)
+            local b=assert(buttons[id])
+            assert(b.x>=panel.x and b.x+GuiGetTextDimensions(nil,b.name)<=panel.x+panel.w and b.y+9<panel.y+panel.h)
+            return b
+        end
+        for i=270,277 do inside(i) end
+        for i=274,275 do
+            local a,b=inside(i),inside(i+2)
+            assert(a.x+GuiGetTextDimensions(nil,a.name)<b.x)
+        end
+        assert(drawn[lang=="zh" and "存钱罐" or "Piggy bank"])
+    end
+end
+width=427
+render(model)
+local case_flask,bank_button=tiles[1001],buttons[276]
+point(case_flask.x+1,case_flask.y+1,"press")
+pointer={x=bank_button.x+1,y=bank_button.y+1,released=true}
+assert(not render(model,276),"dragging an item over a money button cannot transfer gold")
+pointer.released=false
+render(model,77)
+render(model)
+assert(drawn["[1]"] and not buttons[274])
 render(model,71)
 render(model)
 assert(drawn["[+] Stash"] and not drawn.Materials)

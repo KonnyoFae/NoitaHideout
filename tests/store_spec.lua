@@ -225,6 +225,7 @@ local function move(slot,material,count)
 end
 assert(move(1) and move(2))
 assert(bulk.materials.water==9 and bulk.materials.slime==4 and bulk.materials.sand==8)
+
 assert(not move(2) and not move(1,"sand",1) and not move(2,"water",1))
 assert(not NHPotion.transferMaterial(bulk,{slot=1,storedId=17,unload=true}))
 assert(move(1,"water",1) and bulk.docks[1].item.materials.water==1)
@@ -241,3 +242,35 @@ blocked_key=nil
 assert(move(1) and move(2))
 bulk=save(bulk)
 assert(bulk.materials.water==9 and bulk.materials.slime==4 and bulk.materials.sand==8)
+
+-- Shop spending and vault transfers share the same profile commit boundary.
+selected=6
+profiles[6]={}
+local bank=load()
+assert(bank.bankGold==0 and not NHStore.spendGold(bank,1))
+for _,amount in ipairs({0,-1,0.5,"1",math.huge,0/0,NHStore.maxGold+1}) do
+    assert(not NHStore.creditGold(bank,amount) and not NHStore.spendGold(bank,amount))
+    assert(bank.bankGold==0)
+end
+assert(NHStore.creditGold(bank,NHStore.maxGold) and not NHStore.creditGold(bank,1))
+bank=save(bank)
+assert(bank.bankGold==NHStore.maxGold)
+assert(NHStore.spendGold(bank,NHStore.maxGold-1000))
+bank=save(bank)
+local spend=load()
+assert(NHStore.spendGold(bank,600) and NHStore.spendGold(spend,500))
+assert(not NHStore.spendGold(bank,401) and bank.bankGold==400)
+bank=save(bank)
+assert(not NHStore.commit(spend) and load().bankGold==400)
+local bankRun=NHStore.newRun(bank)
+assert(NHStore.endRun(bank,bankRun))
+NHStore.newRun(bank)
+bank=save(bank)
+assert(bank.bankGold==400)
+for _,invalid in ipairs({-5,0.1,"0",false,NHStore.maxGold+1}) do
+    bank.bankGold=invalid
+    assert(not NHStore.commit(bank) and load().bankGold==400)
+end
+selected=5
+assert(load().bankGold==0)
+print("Store: piggy bank persistence, precision, isolated balances and concurrent spending passed.")

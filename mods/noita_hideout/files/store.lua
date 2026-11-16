@@ -5,6 +5,7 @@ dofile("mods/noita_hideout/files/pouches.lua")
 local progression=dofile("mods/noita_hideout/files/progression.lua")
 local max_bytes = 1024 * 1024
 local max_depth = 40
+local max_safe_integer = 9007199254740991
 local profile_counter = "noita_hideout.profile_count"
 local profile_flag = "noita_hideout_profile_"
 local cached_profile
@@ -12,6 +13,7 @@ local cached_profile
 NHStore.pouchCapacity = 4
 NHStore.doseDurability = 3
 NHStore.checkpointFrames = 60 * 60
+NHStore.maxGold = max_safe_integer
 
 function NHStore.productionFrames(recipe)
     return (recipe and recipe.durationFrames) or 2 * 60 * 60
@@ -23,14 +25,29 @@ local function fresh(profile)
         runSerial = 0, closedThrough = 0, checkpoints = {},
         nextItemId = 1, materials = {}, docks = {}, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true,
         pouches = {},
-        order = false, finished = 0, levels = {}, storageBase = {}, resources = {},
+        order = false, finished = 0, levels = {}, storageBase = {}, resources = {}, bankGold = 0, bankWalletNet = 0,
     }
     s.starterPouchId=NHPouches.create(s,"safe",2,2)
     return s
 end
 
 local function whole(n)
-    return type(n) == "number" and n >= 0 and n <= 9007199254740991 and n == math.floor(n)
+    return type(n) == "number" and n >= 0 and n <= max_safe_integer and n == math.floor(n)
+end
+
+-- Mutate the same detached profile draft as the transfer or shop purchase.
+function NHStore.creditGold(s,amount)
+    if not whole(amount) or amount==0 then return false,"Invalid gold amount." end
+    if amount>NHStore.maxGold-s.bankGold then return false,"Piggy bank is full." end
+    s.bankGold=s.bankGold+amount
+    return true
+end
+
+function NHStore.spendGold(s,amount)
+    if not whole(amount) or amount==0 then return false,"Invalid gold amount." end
+    if amount>s.bankGold then return false,"Not enough stored gold." end
+    s.bankGold=s.bankGold-amount
+    return true
 end
 
 function NHStore.safeCapacity(s)
@@ -145,6 +162,8 @@ local function validate(s)
     end
     assert(s.profile >= 1 and s.closedThrough <= s.runSerial
         and s.nextItemId >= 1, "Invalid profile counters")
+    assert(whole(s.bankGold),"Invalid piggy bank balance")
+    assert(type(s.bankWalletNet)=="number" and whole(math.abs(s.bankWalletNet)),"Invalid wallet transfer total")
     assert(type(s.checkpoints)=="table","Invalid Holy Mountain checkpoints")
     for key,visited in pairs(s.checkpoints) do
         assert(type(key)=="string" and key~="" and visited==true,"Invalid Holy Mountain checkpoint")
@@ -304,6 +323,8 @@ local function unpack_slot(raw)
     local payload = raw:sub(last + 1)
     assert(expected == checksum(payload), "Snapshot checksum mismatch")
     local s = decode(payload)
+    if s.bankGold==nil then s.bankGold=0 end
+    if s.bankWalletNet==nil then s.bankWalletNet=0 end
     if s.checkpoints==nil then
         -- The previous format counted one world clear per order. Keep its already
         -- paid output and reservation while converting that unit into gameplay frames.
@@ -417,6 +438,7 @@ end
 function NHStore.newRun(state)
     NHStore.endRun(state, state.runSerial)
     state.runSerial = state.runSerial + 1
+    state.bankWalletNet = 0
     state.checkpoints = {}
     state.transit = nil
     state.issuedDoses = nil
