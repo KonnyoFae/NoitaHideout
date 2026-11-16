@@ -16,7 +16,10 @@ function GuiZSet() end
 function GuiZSetForNextWidget() end
 function GuiColorSetForNextWidget() end
 function GuiImageNinePiece() end
-function GuiImage() end
+local tiles={}
+function GuiImage(_,id,x,y,sprite)
+    if sprite=="data/ui_gfx/inventory/quick_inventory_box.png" then tiles[id]={x=x,y=y} end
+end
 function GuiTooltip() end
 function GuiGetImageDimensions() return 20,20 end
 function MagicNumbersGetValue(k) return k=="UI_FULL_INVENTORY_OFFSET_X" and "170" or "20" end
@@ -77,6 +80,9 @@ cmd,arg=point(cx+58,cy+30,"release")
 assert(cmd=="open_container" and arg.safeSlot==3)
 model.popup=true
 model.maxUses,model.pouchCapacity,model.cells=3,4,{{remaining=3,count=2}}
+render(model)
+for i=102,103 do assert(tiles[i].x-tiles[i-1].x==20) end -- case
+for i=105,107 do assert(tiles[i].x-tiles[i-1].x==20) end -- pouch
 point(cx+58,cy+30,"press")
 cmd,arg=point(148,28,"release")
 assert(cmd=="take_pouch" and arg.xslot==2 and arg.safeSlot==3)
@@ -91,12 +97,12 @@ point(cx+12,cy+30,"press")
 cmd,arg=point(cx+12,cy-38,"release")
 assert(cmd=="pack_dose" and arg.safeSlot==1)
 point(cx+12,cy-38,"press")
-cmd,arg=point(cx+138,cy-38,"release")
+cmd,arg=point(cx+72,cy-38,"release")
 assert(cmd=="move_cell" and arg.sourceCell==1 and arg.targetCell==4)
 model.cells[4]={remaining=2,count=1}
 point(cx+12,cy-38,"press")
-assert(not point(cx+138,cy-38,"release"))
-point(cx+138,cy-38,"press")
+assert(not point(cx+72,cy-38,"release"))
+point(cx+72,cy-38,"press")
 cmd,arg=point(148,28,"release")
 assert(cmd=="take_dose" and arg.sourceCell==4)
 assert(render(model,38)=="close_container")

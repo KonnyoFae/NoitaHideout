@@ -50,7 +50,10 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
     local cx, cy, cw, ch = GameGetCameraBounds()
     local mx, my = (wx-cx)*sw/cw, (wy-cy)*sh/ch
     local slots = {}
-    local function slot(x,y,key,kind,name,icon,entity)
+    -- Container rows advance by the native tile width, including its border.
+    local qw,qh = GuiGetImageDimensions(gui,tile)
+    local function slot(column,y,key,kind,name,icon,entity)
+        local x = 8 + column * qw
         slots[#slots+1] = {x=ox+x*scale, y=oy+y*scale, key=key, kind=kind,
             name=name, icon=icon, entity=entity}
     end
@@ -67,7 +70,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         for i=1,math.min(3,model.capacity-(page-1)*3) do
             local n = (page-1)*3+i
             local v = model.secure_loot[n] or {}
-            slot(8+23*(i-1),25,"valuable",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id)
+            slot(i-1,25,"valuable",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id)
             slots[#slots].safeSlot=n
             slots[#slots].remaining,slots[#slots].count=v.remaining,v.count
         end
@@ -86,7 +89,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         end
         for i=1,model.pouchCapacity do
             local cell=model.cells[i]
-            slot(8+42*(i-1),popupY+23,"dose",cell and "dose",cell and tr("耐火激活剂","Fire injector") or tr("空格","Empty slot"))
+            slot(i-1,popupY+23,"dose",cell and "dose",cell and tr("耐火激活剂","Fire injector") or tr("空格","Empty slot"))
             local v=slots[#slots]
             v.cell=i
             if cell then v.remaining,v.count=cell.remaining,cell.count end
@@ -96,7 +99,6 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
     local native_x = tonumber(MagicNumbersGetValue("UI_BARS_POS_X"))
     local native_y = tonumber(MagicNumbersGetValue("UI_BARS_POS_Y"))
     local full_offset = tonumber(MagicNumbersGetValue("UI_FULL_INVENTORY_OFFSET_X"))
-    local qw,qh = GuiGetImageDimensions(gui,tile)
     local fw,fh = GuiGetImageDimensions(gui,full_tile)
     local hovered
     -- Hit-test the vanilla widgets without drawing over them or consuming
@@ -109,7 +111,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         if (not standalone or not full) and mx>=x and my>=y and mx<x+w and my<y+h then hovered=v; break end
     end
     for _,v in ipairs(slots) do
-        if mx>=v.x and my>=v.y and mx<v.x+20*scale and my<v.y+20*scale then hovered=v end
+        if mx>=v.x and my>=v.y and mx<v.x+qw*scale and my<v.y+qh*scale then hovered=v end
     end
     if not hovered and mx>=ox and my>=oy+(model.popup and popupY or 0)*scale and mx<ox+187*scale and my<oy+72*scale then
         hovered = {key="panel"}
@@ -168,20 +170,20 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch)
         end
         local w,h = GuiGetImageDimensions(gui,image)
         if not w or not h or w<=0 or h<=0 then return end
-        local zoom = math.min(1,17/w,17/h)*scale
+        local zoom = math.min(1,(qw-3)/w,(qh-3)/h)*scale
         GuiZSetForNextWidget(gui,-83)
         GuiImage(gui,id,x-w*zoom/2,y-h*zoom/2,image,alpha,zoom)
     end
     for i,v in ipairs(slots) do
         if drop(v)=="place" then tint(green) end
         GuiImage(gui,100+i,v.x,v.y,tile,1,scale)
-        if v.kind then sprite(v,130+i,v.x+10*scale,v.y+10*scale,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and 0.35 or 1)
+        if v.kind then sprite(v,130+i,v.x+qw*scale/2,v.y+qh*scale/2,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and 0.35 or 1)
         end
         if v.kind=="dose" then
             local remaining=v.remaining or model.maxUses
             local caption=(v.count or 1)>1 and ("×"..v.count) or (remaining.."/"..model.maxUses)
             GuiZSetForNextWidget(gui,-84)
-            GuiText(gui,v.x,v.y+19*scale,caption,0.8*scale)
+            GuiText(gui,v.x,v.y+(qh-1)*scale,caption,0.8*scale)
         end
     end
     local hint = hovered and hovered.name
