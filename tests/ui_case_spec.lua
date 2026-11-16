@@ -120,6 +120,11 @@ assert(cmd=="move_cell" and arg.sourceCell==1 and arg.targetCell==4 and arg.pouc
 model.cells[4]={remaining=2,count=1}
 point(cx+12,cy-38,"press")
 assert(not point(cx+72,cy-38,"release"))
+model.cells[4]={subtype="frost",remaining=3,count=1}
+point(cx+72,cy-38)
+assert(drawn["Frost injector"] and drawn["60 seconds of freeze immunity"])
+point(cx+12,cy-38,"press")
+assert(not point(cx+72,cy-38,"release"))
 point(cx+72,cy-38,"press")
 cmd,arg=point(148,28,"release")
 assert(cmd=="take_dose" and arg.sourceCell==4 and arg.pouchId==17)
@@ -850,7 +855,7 @@ assert(action=="pack_perk" and param.entity==135)
 local function testFarmPanel(lang)
     width,height,model.lang,model.near=320,180,lang,true
     pointer={x=0,y=0}
-    local stock={levels={},resources={fiber=13},farm={time=0,plots={}}}
+    local stock={profile=1,levels={},resources={fiber=13},farm={time=0,plots={}},warehouse={},pouches={},nextItemId=1}
     model.farm=NHFarm.view(stock,lang,0)
     render(model,221)
     render(model,410)
@@ -898,3 +903,44 @@ end
 testFarmPanel("en")
 testFarmPanel("zh")
 print("UI: farming navigation, stock ledger, advanced crop lock and timed sowing/harvest in both languages passed.")
+
+local function testLivestockPanel(lang)
+    width,height,model.lang,model.near=320,180,lang,true
+    pointer={x=0,y=0}
+    local stock={levels={livestock=1},resources={egg=21},farm={time=0,plots={}}}
+    model.shopGoods={{id="chick",category="livestock",name="Chick",price=120,quantity=1,ready=true,pen=1}}
+    model.farm=NHFarm.view(stock,lang,0)
+    render(model,223)
+    render(model,440)
+    render(model)
+    assert(buttons[451] and buttons[452] and panels[210].y>=0)
+    render(model,451)
+    render(model,444)
+    render(model)
+    assert(buttons[258] and drawn["120"] and drawn["3:00"] and drawn["2:00"] and drawn["2 / 1"])
+    assert(panels[210].y>=0 and buttons[258].y<height)
+    local action,request=render(model,258)
+    assert(action=="shop_buy" and request.id=="chick" and request.pen==1)
+    NHLivestock.deliver(stock,"chick",1,0)
+    model.farm=NHFarm.view(stock,lang,0)
+    render(model,223)
+    render(model,451)
+    render(model)
+    assert(drawn["3:00"] and not buttons[445])
+    model.farm=NHFarm.view(stock,lang,300*60)
+    render(model)
+    assert(green_button(445) and drawn["1 / 4"] and buttons[445].y<height)
+    action,request=render(model,445)
+    assert(action=="collect_livestock" and request.pen==1 and request.nextAt==300*60)
+    render(model,441)
+    render(model)
+    assert(drawn["21"] and panels[210].y>=0)
+    stock.levels.livestock,stock.farm.pens=0,nil
+    model.farm=NHFarm.view(stock,lang,0)
+    render(model,440)
+    render(model)
+    assert(buttons[442] and not buttons[451])
+end
+testLivestockPanel("en")
+testLivestockPanel("zh")
+print("UI: youngstock shop, pen timers, stock and collection in both languages passed.")

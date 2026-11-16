@@ -1,6 +1,8 @@
 -- Two revisioned snapshots in Noita's normal mod settings. A complete
 -- readback checks the settings API; it does not force the engine to flush.
 NHStore = {}
+dofile("mods/noita_hideout/files/companions.lua")
+NHInjectors=dofile("mods/noita_hideout/files/injectors.lua")
 dofile("mods/noita_hideout/files/farming.lua")
 dofile("mods/noita_hideout/files/essences.lua")
 dofile("mods/noita_hideout/files/pouches.lua")
@@ -82,7 +84,7 @@ function NHStore.freeSafeSlot(s, preferred)
 end
 
 -- Each item kind resolves to one warehouse grid for both live items and saved rows.
-NHStore.itemCategories={wand="wand",spell="spell",potion="containers",pouch="equipment"}
+NHStore.itemCategories={wand="wand",spell="spell",potion="containers",pouch="equipment",summon_card="equipment"}
 function NHStore.category(kind)
     return NHStore.itemCategories[kind] or "supplies"
 end
@@ -169,6 +171,7 @@ local function validate(s)
     assert(whole(s.bankGold),"Invalid piggy bank balance")
     assert(type(s.bankWalletNet)=="number" and whole(math.abs(s.bankWalletNet)),"Invalid wallet transfer total")
     assert(type(s.checkpoints)=="table","Invalid Holy Mountain checkpoints")
+    NHCompanions.validate(s,whole)
     for key,visited in pairs(s.checkpoints) do
         assert(type(key)=="string" and key~="" and visited==true,"Invalid Holy Mountain checkpoint")
     end
@@ -188,16 +191,18 @@ local function validate(s)
     assert(whole(capacity) and capacity>=1, "Invalid secure inventory capacity")
     for _,row in ipairs(s.safe) do
         local slot = row.slot or 1
+        if row.item.kind=="summon_card" then assert(NHCompanions.validCard(row.item),"Invalid summon card") end
         assert(row.item.kind~="pouch" and whole(slot) and slot>=1 and slot<=capacity and not seen[slot],"Invalid secure inventory slot")
         seen[slot]=true
     end
-    local function validDose(remaining,count)
-        return whole(remaining) and remaining>=1 and remaining<=NHStore.doseDurability
+    local function validDose(remaining,count,subtype)
+        return (subtype==nil or NHInjectors.types[subtype]~=nil)
+            and whole(remaining) and remaining>=1 and remaining<=NHStore.doseDurability
             and whole(count) and count>=1 and (remaining==NHStore.doseDurability or count==1)
     end
     NHPouches.validate(s,whole,validDose)
     for _,row in ipairs(s.safe) do
-        if row.item.kind=="dose" then assert(validDose(row.item.remaining or NHStore.doseDurability,row.item.count or 1),"Invalid stored injector") end
+        if row.item.kind=="dose" then assert(validDose(row.item.remaining or NHStore.doseDurability,row.item.count or 1,row.item.subtype),"Invalid stored injector") end
     end
     local warehouseSlots=warehouse_grids()
     for _,pouch in pairs(s.pouches) do
@@ -209,18 +214,22 @@ local function validate(s)
     for i,row in ipairs(s.warehouse) do
         local slot=row.slot or i
         local used=warehouseSlots[NHStore.category(row.item.kind)]
+        if row.item.kind=="summon_card" then assert(NHCompanions.validCard(row.item),"Invalid summon card") end
         assert(row.item.kind~="pouch" and whole(slot) and slot>=1 and slot<=NHStore.warehouseCapacity(s,NHStore.category(row.item.kind)) and not used[slot],"Invalid warehouse slot")
         used[slot]=true
-        if row.item.kind=="dose" then assert(validDose(row.item.remaining or NHStore.doseDurability,row.item.count or 1),"Invalid warehouse injector") end
+        if row.item.kind=="dose" then assert(validDose(row.item.remaining or NHStore.doseDurability,row.item.count or 1,row.item.subtype),"Invalid warehouse injector") end
     end
     for _,record in pairs(s.issuedDoses or {}) do
-        assert(validDose(record.remaining or NHStore.doseDurability,1),"Invalid issued injector")
+        assert(validDose(record.remaining or NHStore.doseDurability,1,record.subtype),"Invalid issued injector")
     end
     if s.order ~= false then
         assert(type(s.order) == "table" and s.order.id==s.finished+1 and whole(s.order.progress) and whole(s.order.required)
             and s.order.progress < s.order.required and type(s.order.output) == "table", "Invalid production order")
         local output=s.order.output
         if output.item then
+            if output.item.kind=="dose" then
+                assert(validDose(output.item.remaining or NHStore.doseDurability,output.item.count or 1,output.item.subtype),"Invalid injector output")
+            end
             local category=NHStore.category(output.item.kind)
             assert(type(output.item.kind)=="string" and not output.materials and whole(output.slot) and output.slot>=1
                 and output.slot<=NHStore.warehouseCapacity(s,category) and not warehouseSlots[category][output.slot],
@@ -430,6 +439,7 @@ function NHStore.commit(state)
         local next_state = {}
         for k, v in pairs(state) do next_state[k] = v end
         next_state.revision = saved.revision + 1
+        NHCompanions.stageDelivery(next_state)
         validate(next_state)
         local payload = encode(next_state)
         local raw = "NH1:" .. checksum(payload) .. ":" .. payload
@@ -440,10 +450,11 @@ function NHStore.commit(state)
         write_verified(key, raw)
         -- This pointer is the commit boundary; a newer unpointed snapshot is staged.
         write_verified(head_key, next_state.revision)
-        return next_state.revision
+        return next_state
     end)
     if not ok then return nil, tostring(result) end
-    state.revision = result
+    state.revision,state.nextItemId=result.revision,result.nextItemId
+    state.warehouse,state.summons=result.warehouse,result.summons
     return true
 end
 
@@ -468,15 +479,16 @@ function NHStore.endRun(state, run_id)
 end
 
 -- Replace cell records on edits so a failed commit cannot mutate a live stack.
-function NHStore.acceptsDose(cell, remaining)
-    return not cell or (remaining==NHStore.doseDurability and cell.remaining==remaining)
+function NHStore.acceptsDose(cell, remaining, subtype)
+    return not cell or ((cell.subtype or "fire")==(subtype or "fire") and remaining==NHStore.doseDurability
+        and (cell.remaining or NHStore.doseDurability)==remaining and (cell.count or 1)<max_safe_integer)
 end
 
-function NHStore.putPouchDose(pouch, remaining, slot)
+function NHStore.putPouchDose(pouch, remaining, slot, subtype)
     if pouch.location=="lost" then return false end
     if slot==nil then
         for i=1,NHStore.pouchCapacity do
-            if pouch.cells[i] and NHStore.acceptsDose(pouch.cells[i],remaining) then slot=i; break end
+            if pouch.cells[i] and NHStore.acceptsDose(pouch.cells[i],remaining,subtype) then slot=i; break end
         end
         if not slot then
             for i=1,NHStore.pouchCapacity do if not pouch.cells[i] then slot=i; break end end
@@ -484,8 +496,8 @@ function NHStore.putPouchDose(pouch, remaining, slot)
     end
     if not whole(slot) or slot<1 or slot>NHStore.pouchCapacity then return false end
     local cell=pouch.cells[slot]
-    if not NHStore.acceptsDose(cell,remaining) then return false end
-    pouch.cells[slot]={remaining=remaining,count=(cell and cell.count or 0)+1}
+    if not NHStore.acceptsDose(cell,remaining,subtype) then return false end
+    pouch.cells[slot]={remaining=remaining,subtype=subtype,count=(cell and cell.count or 0)+1}
     pouch.doses=pouch.doses+1
     return true
 end
@@ -493,9 +505,9 @@ end
 function NHStore.takePouchDose(pouch,slot)
     local cell=pouch.cells[slot]
     if not cell or pouch.location=="lost" then return nil end
-    pouch.cells[slot]=cell.count>1 and {count=cell.count-1,remaining=cell.remaining} or nil
+    pouch.cells[slot]=cell.count>1 and {count=cell.count-1,remaining=cell.remaining,subtype=cell.subtype} or nil
     pouch.doses=pouch.doses-1
-    return cell.remaining
+    return cell.remaining,cell.subtype
 end
 
 NHStore.restock=NHPouches.restock
@@ -518,7 +530,6 @@ local function catalyticBatch(id,zh,en,ingredient,catalyst,product)
         materials={[product]=250},count=250}
 end
 
-local fireInjector={kind="dose",remaining=3,count=1}
 local magicGrenade={kind="grenade",name="$nh_hideout_grenade",icon="mods/noita_hideout/files/items/grenade.png"}
 local function farmItem(kind)
     return {kind=kind,name="$nh_hideout_"..kind,icon="mods/noita_hideout/files/items/"..kind..".png"}
@@ -583,17 +594,10 @@ NHStore.recipes={
     {id="field_medkit",category="medical",facility="medical",zh="小医疗包（绷带与草药）",en="Medkit (bandage and herbs)",
         inputs={},resources={herb=2},storedIngredient="bandage",item=medkit,
         noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
-    {id="bread",category="food",facility="farmland",zh="面包",en="Bread",
-        inputs={},resources={grain=2},item=farmItem("bread"),
-        noteZh="食用后每 4 秒恢复 1 生命，持续 120 秒。",noteEn="Restores 1 HP every 4 seconds for 120 seconds."},
-    {id="sugar_cube",category="food",facility="farmland",zh="糖块",en="Sugar cube",
-        inputs={},resources={sugar=2},item=farmItem("sugar_cube"),
-        noteZh="食用后行动速度提高，持续 120 秒。",noteEn="Increases movement speed for 120 seconds."},
-    {id="injector",category="medical",facility="injector",zh="耐火激活剂",en="Fire injector",inputs={{name="water",amount=100},{name="lava",amount=25}},
-        item=fireInjector},
-    {id="injector_essence",category="medical",facility="injector",zh="耐火激活剂（火焰精华）",en="Fire injector (fire essence)",
-        inputs={},resources={essence_fire=180},item=fireInjector,
-        noteZh="每支可使用 3 次，每次获得 60 秒火焰免疫。",noteEn="Three injections per item. Each grants 60 seconds of fire immunity."},
+    NHInjectors.recipe("fire"),
+    NHInjectors.recipe("lightning"),
+    NHInjectors.recipe("frost"),
+    NHInjectors.recipe("healing"),
     {id="grenade",category="weapons",facility="grenade",zh="魔法手雷",en="Magic grenade",inputs={{name="sand",amount=100},{name="slime",amount=50}},
         item=magicGrenade},
     {id="grenade_essence",category="weapons",facility="grenade",zh="魔法手雷（高能精华）",en="Magic grenade (high-energy essence)",
@@ -602,6 +606,10 @@ NHStore.recipes={
     {id="pouch",category="equipment",facility="injector",zh="空针剂包",en="Empty injector pouch",
         inputs={{name="slime",amount=50}},emptyContainers=1,item={kind="pouch"}},
 }
+for _,food in ipairs(dofile("mods/noita_hideout/files/cooking.lua")) do
+    NHStore.recipes[#NHStore.recipes+1]={id=food.id,category="food",facility=food.facility,zh=food.zh,en=food.en,
+        inputs={},resources=food.resources,item=farmItem(food.id),noteZh=food.noteZh,noteEn=food.noteEn}
+end
 NHStore.recipe=NHStore.recipes[1]
 
 -- A reversible material recipe spends the entire original yield and returns
@@ -658,9 +666,17 @@ NHStore.shopGoods={
     materialGood("slime","黏液","Slime",50),
     supplyGood("medkit","medical",120),
     supplyGood("injector","injector",160),
+    {id="chick",animal="chick",zh="小鸡",en="Chick",category="livestock",price=120,quantity=1},
+    {id="calf",animal="calf",zh="牛犊",en="Calf",category="livestock",price=240,quantity=1},
 }
 
 function NHStore.canBuyGood(state,good)
+    if good.animal then
+        local slot,reason=NHLivestock.freePen(state,good.animal)
+        if not slot then return false,reason end
+        if state.bankGold<good.price then return false,"Not enough stored gold." end
+        return true,slot
+    end
     if state.bankGold<good.price then return false,"Not enough stored gold." end
     if good.material then
         local incoming={[good.material]=good.quantity}
@@ -671,8 +687,7 @@ function NHStore.canBuyGood(state,good)
     if kind=="dose" then
         for _,row in ipairs(state.warehouse) do
             local item=row.item
-            if item.kind==kind and (item.remaining or NHStore.doseDurability)==NHStore.doseDurability
-                and (item.count or 1)<max_safe_integer then return true,row.slot,row end
+            if item.kind==kind and NHStore.acceptsDose(item,NHStore.doseDurability,good.item.subtype) then return true,row.slot,row end
         end
     end
     local slot=NHStore.freeSlot(state,"warehouse",nil,kind)
@@ -687,7 +702,7 @@ end
 
 -- The request names the offer. Price, quantity and destination come from the
 -- catalog and are checked on the same draft that pays and receives the goods.
-function NHStore.buyGood(state,request)
+function NHStore.buyGood(state,request,now)
     if type(request)~="table" then return false,"Unknown shop item." end
     local good
     for _,offer in ipairs(NHStore.shopGoods) do
@@ -696,12 +711,15 @@ function NHStore.buyGood(state,request)
     if not good then return false,"Unknown shop item." end
     local ready,slot,stack=NHStore.canBuyGood(state,good)
     if not ready then return false,slot end
+    if good.animal and request.pen and request.pen~=slot then return false,"Livestock collection changed." end
     local paid,reason=NHStore.spendGold(state,good.price)
     if not paid then return false,reason end
-    if good.material then
+    if good.animal then
+        NHLivestock.deliver(state,good.animal,slot,now)
+    elseif good.material then
         state.materials[good.material]=(state.materials[good.material] or 0)+good.quantity
     elseif stack then
-        stack.item={kind="dose",remaining=NHStore.doseDurability,count=(stack.item.count or 1)+1}
+        stack.item={kind="dose",subtype=good.item.subtype,remaining=NHStore.doseDurability,count=(stack.item.count or 1)+1}
     else
         local item={}
         for key,value in pairs(good.item) do item[key]=value end

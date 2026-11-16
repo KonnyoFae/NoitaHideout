@@ -5,7 +5,10 @@ local function valid_uses(n)
     return type(n)=="number" and n>=1 and n<=3 and n==math.floor(n)
 end
 
-for _,kind in ipairs({"medkit","grenade","bandage","bread","sugar_cube"}) do
+local foods=dofile("mods/noita_hideout/files/cooking.lua")
+local products={"medkit","grenade","bandage"}
+for _,food in ipairs(foods) do products[#products+1]=food.id end
+for _,kind in ipairs(products) do
     local id=kind
     NHTransfers.registerItem(id,function(entity) return EntityHasTag(entity,"noita_hideout_"..id) end,{
         capture=function(entity)
@@ -40,8 +43,12 @@ local function heal(player,amount)
     return true
 end
 
-local function eat(player,entity,kind,component,field,duration)
-    local tag="noita_hideout_effect_"..kind
+local function eat(player,entity,food)
+    local regen=food.effect=="bread"
+    local component=regen and "VariableStorageComponent" or "GameEffectComponent"
+    local field=regen and "value_int" or "frames"
+    local duration=regen and food.seconds or food.seconds*60
+    local tag="noita_hideout_effect_"..food.effect
     local effect
     for _,child in ipairs(EntityGetAllChildren(player,tag) or {}) do
         if EntityHasTag(child,tag) then effect=child; break end
@@ -49,7 +56,7 @@ local function eat(player,entity,kind,component,field,duration)
     local fresh=not effect
     if fresh then
         local x,y=EntityGetTransform(player)
-        effect=EntityLoad("mods/noita_hideout/files/effect_"..kind..".xml",x,y)
+        effect=EntityLoad("mods/noita_hideout/files/effect_"..food.effect..".xml",x,y)
         if not effect or effect==0 then return end
     end
     local timer=EntityGetFirstComponentIncludingDisabled(effect,component)
@@ -57,8 +64,9 @@ local function eat(player,entity,kind,component,field,duration)
         if fresh then EntityKill(effect) end
         return
     end
-    ComponentSetValue2(timer,field,duration)
+    ComponentSetValue2(timer,field,math.max(duration,ComponentGetValue2(timer,field) or 0))
     if fresh then EntityAddChild(player,effect) end
+    if food.healHP then heal(player,food.healHP/25) end
     GameKillInventoryItem(player,entity)
     return true
 end
@@ -76,10 +84,6 @@ function NHProducts.use(player,entity)
         if not heal(player,0.2) then return end
         GameKillInventoryItem(player,entity)
         return true
-    elseif EntityHasTag(entity,"noita_hideout_bread") then
-        return eat(player,entity,"bread","VariableStorageComponent","value_int",120)
-    elseif EntityHasTag(entity,"noita_hideout_sugar_cube") then
-        return eat(player,entity,"sugar_cube","GameEffectComponent","frames",7200)
     elseif EntityHasTag(entity,"noita_hideout_grenade") then
         local controls=EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")
         if not controls then return end
@@ -113,5 +117,8 @@ function NHProducts.use(player,entity)
         ComponentSetValue2(velocity,"mVelocity",dx*180,dy*180)
         GameKillInventoryItem(player,entity)
         return true
+    end
+    for _,food in ipairs(foods) do
+        if EntityHasTag(entity,"noita_hideout_"..food.id) then return eat(player,entity,food) end
     end
 end

@@ -35,6 +35,7 @@ local function commit(state, changed)
     if not ok then return nil, err end
     state.revision, state.nextItemId = changed.revision, changed.nextItemId
     state.warehouse = changed.warehouse
+    state.summons = changed.summons
     state.safe = changed.safe
     state.pouches, state.issuedDoses = changed.pouches, changed.issuedDoses
     return true
@@ -115,20 +116,19 @@ function NHDoses.storePouch(s, player, id, preferred, container)
     return true
 end
 
-local function add_stored_dose(s,slot,remaining,container)
+local function add_stored_dose(s,slot,remaining,container,subtype)
     container=container or "safe"
     local rows=s[container]
     local index=NHStore.slotIndex(s,container,slot,"dose")
     local row=index and rows[index]
     if row then
-        if row.item.kind~="dose" or remaining~=NHStore.doseDurability
-            or (row.item.remaining or NHStore.doseDurability)~=remaining then return false end
+        if row.item.kind~="dose" or not NHStore.acceptsDose(row.item,remaining,subtype) then return false end
         row=copy(row)
-        row.item={kind="dose",remaining=remaining,count=(row.item.count or 1)+1}
+        row.item={kind="dose",subtype=subtype,remaining=remaining,count=(row.item.count or 1)+1}
         rows[index]=row
     else
         if not NHStore.freeSlot(s,container,slot,"dose") then return false end
-        table.insert(rows,{id=s.nextItemId,slot=slot,item={kind="dose",remaining=remaining,count=1}})
+        table.insert(rows,{id=s.nextItemId,slot=slot,item={kind="dose",subtype=subtype,remaining=remaining,count=1}})
         s.nextItemId=s.nextItemId+1
     end
     return true
@@ -141,25 +141,26 @@ local function take_stored_dose(s,slot,container)
     local row=index and rows[index]
     if not row or row.item.kind~="dose" then return end
     local remaining=row.item.remaining or NHStore.doseDurability
+    local subtype=row.item.subtype
     if (row.item.count or 1)>1 then
         row=copy(row)
-        row.item={kind="dose",remaining=remaining,count=row.item.count-1}
+        row.item={kind="dose",subtype=subtype,remaining=remaining,count=row.item.count-1}
         rows[index]=row
     else table.remove(rows,index) end
-    return remaining
+    return remaining,subtype
 end
 
 function NHDoses.moveDose(s,slot,to_safe,cell,container,pouchId)
     if not is_open_run(s) or not s.pouches[pouchId] then return nil,"Pouch unavailable." end
     local changed=draft(s)
     local pouch=edit_pouch(changed,pouchId)
-    local remaining
+    local remaining,subtype
     if to_safe then
-        remaining=NHStore.takePouchDose(pouch,cell or 1)
-        if not remaining or not add_stored_dose(changed,slot,remaining,container) then return nil,"Slot unavailable." end
+        remaining,subtype=NHStore.takePouchDose(pouch,cell or 1)
+        if not remaining or not add_stored_dose(changed,slot,remaining,container,subtype) then return nil,"Slot unavailable." end
     else
-        remaining=take_stored_dose(changed,slot,container)
-        if not remaining or not NHStore.putPouchDose(pouch,remaining,cell) then return nil,"Slot unavailable." end
+        remaining,subtype=take_stored_dose(changed,slot,container)
+        if not remaining or not NHStore.putPouchDose(pouch,remaining,cell,subtype) then return nil,"Slot unavailable." end
     end
     return commit(s,changed)
 end
@@ -167,8 +168,8 @@ end
 function NHDoses.moveSafeDose(s,source,target,container)
     if not is_open_run(s) or source==target then return nil,"Slot unavailable." end
     local changed=draft(s)
-    local remaining=take_stored_dose(changed,source,container)
-    if not remaining or not add_stored_dose(changed,target,remaining,container) then return nil,"Slot unavailable." end
+    local remaining,subtype=take_stored_dose(changed,source,container)
+    if not remaining or not add_stored_dose(changed,target,remaining,container,subtype) then return nil,"Slot unavailable." end
     return commit(s,changed)
 end
 
@@ -179,15 +180,15 @@ function NHDoses.moveCell(s,source,target,pouchId,targetPouchId)
     local from=edit_pouch(changed,pouchId)
     local to=pouchId==targetPouchId and from or edit_pouch(changed,targetPouchId)
     if not from or not to then return nil,"Pouch unavailable." end
-    local remaining=NHStore.takePouchDose(from,source)
-    if not remaining or not NHStore.putPouchDose(to,remaining,target) then return nil,"Slot unavailable." end
+    local remaining,subtype=NHStore.takePouchDose(from,source)
+    if not remaining or not NHStore.putPouchDose(to,remaining,target,subtype) then return nil,"Slot unavailable." end
     return commit(s,changed)
 end
 
 function NHDoses.remaining(s,entity)
     local token=token_of(entity)
     local record=token and s.issuedDoses and s.issuedDoses[token]
-    return record and (record.remaining or NHStore.doseDurability)
+    if record then return record.remaining or NHStore.doseDurability,record.subtype or "fire" end
 end
 
 local function show_remaining(entity,remaining)
@@ -198,8 +199,8 @@ end
 function NHDoses.withdraw(s, player, deliver, pouchEntity, safe_slot, cell, container, pouchId)
     if not is_open_run(s) then return nil,"Run already closed." end
     local changed=draft(s)
-    local remaining
-    if safe_slot then remaining=take_stored_dose(changed,safe_slot,container)
+    local remaining,subtype
+    if safe_slot then remaining,subtype=take_stored_dose(changed,safe_slot,container)
     else
         local pouch=edit_pouch(changed,pouchId)
         if not pouch then return nil,"Pouch unavailable." end
@@ -207,12 +208,12 @@ function NHDoses.withdraw(s, player, deliver, pouchEntity, safe_slot, cell, cont
             local owner=pouchEntity or NHNative.held(player)
             if NHDoses.isPouch(s,owner)~=pouchId or EntityGetRootEntity(owner)~=player then return nil,"Hold your injector pouch first." end
         end
-        remaining=NHStore.takePouchDose(pouch,cell or 1)
+        remaining,subtype=NHStore.takePouchDose(pouch,cell or 1)
     end
     if not remaining then return nil,"No dose available." end
     local x, y = EntityGetTransform(player)
     y = y - 4
-    local entity, err = NHNative.spawn("dose", x, y)
+    local entity, err = NHNative.spawn("dose", x, y,subtype)
     if not entity or entity == 0 then return nil, err or "Could not create a syringe." end
     local token = table.concat({s.profile, s.runSerial, s.nextItemId, GameGetFrameNum(), entity}, "/")
     local c = EntityAddComponent2(entity, "VariableStorageComponent", {
@@ -224,7 +225,7 @@ function NHDoses.withdraw(s, player, deliver, pouchEntity, safe_slot, cell, cont
     end
     changed.nextItemId = changed.nextItemId + 1
     changed.issuedDoses[token] = {x=x,y=y,safeSlot=safe_slot,container=container,
-        pouchId=not safe_slot and pouchId or nil,cell=cell,remaining=remaining}
+        pouchId=not safe_slot and pouchId or nil,cell=cell,remaining=remaining,subtype=subtype}
     show_remaining(entity,remaining)
     if deliver and not deliver(entity) then
         dispose(player, entity)
@@ -255,6 +256,7 @@ local function retire(s, player, entity, to_pouch, slot, cell, container, pouchI
     end
     local changed = draft(s)
     local remaining=changed.issuedDoses[token].remaining or NHStore.doseDurability
+    local subtype=changed.issuedDoses[token].subtype
     if not to_pouch and remaining>1 then
         local record=copy(changed.issuedDoses[token])
         record.remaining=remaining-1
@@ -266,8 +268,8 @@ local function retire(s, player, entity, to_pouch, slot, cell, container, pouchI
     end
     if to_pouch then
         if slot then
-            if not add_stored_dose(changed,slot,remaining,container) then return nil,"Slot unavailable." end
-        elseif not NHStore.putPouchDose(edit_pouch(changed,pouchId),remaining,cell) then return nil,"Slot unavailable." end
+            if not add_stored_dose(changed,slot,remaining,container,subtype) then return nil,"Slot unavailable." end
+        elseif not NHStore.putPouchDose(edit_pouch(changed,pouchId),remaining,cell,subtype) then return nil,"Slot unavailable." end
     end
     changed.issuedDoses[token]=nil
     local ok,err=commit(s,changed)
@@ -347,15 +349,15 @@ function NHDoses.reconcile(s, player)
             local remaining=origin.remaining or NHStore.doseDurability
             local recovered
             if origin.safeSlot then
-                recovered=add_stored_dose(candidate,origin.safeSlot,remaining,origin.container)
+                recovered=add_stored_dose(candidate,origin.safeSlot,remaining,origin.container,origin.subtype)
                 if not recovered then
                     local slot=NHStore.freeSlot(candidate,origin.container or "safe",nil,"dose")
-                    recovered=slot and add_stored_dose(candidate,slot,remaining,origin.container)
+                    recovered=slot and add_stored_dose(candidate,slot,remaining,origin.container,origin.subtype)
                 end
             else
                 local pouch=edit_pouch(candidate,origin.pouchId)
-                recovered=NHStore.putPouchDose(pouch,remaining,origin.cell)
-                    or NHStore.putPouchDose(pouch,remaining)
+                recovered=NHStore.putPouchDose(pouch,remaining,origin.cell,origin.subtype)
+                    or NHStore.putPouchDose(pouch,remaining,nil,origin.subtype)
             end
             if recovered then
                 candidate.issuedDoses[token]=nil

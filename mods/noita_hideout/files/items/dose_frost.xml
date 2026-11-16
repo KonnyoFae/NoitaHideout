@@ -1,0 +1,10 @@
+<Entity name="$nh_hideout_dose_frost" tags="noita_hideout_dose,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/dose_frost.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/dose_frost.png" offset_x="5" offset_y="3" />
+        <ItemComponent item_name="$nh_hideout_dose_frost" ui_description="$nh_hideout_dose_frost_desc"
+            ui_sprite="mods/noita_hideout/files/items/dose_frost.png" />
+        <UIInfoComponent name="$nh_hideout_dose_frost" />
+        <AbilityComponent ui_name="$nh_hideout_dose_frost" />
+    </Base>
+</Entity>

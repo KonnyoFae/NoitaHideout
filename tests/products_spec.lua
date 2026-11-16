@@ -20,8 +20,9 @@ function EntityLoad(path,x,y)
     elseif path=="mods/noita_hideout/files/effect_bread.xml" then
         e.tag="noita_hideout_effect_bread"
         e.VariableStorageComponent={value_int=120}
-    elseif path=="mods/noita_hideout/files/effect_sugar_cube.xml" then
-        e.tag="noita_hideout_effect_sugar_cube"
+    elseif path=="mods/noita_hideout/files/effect_sugar_cube.xml"
+        or path=="mods/noita_hideout/files/effect_food_mana.xml" or path=="mods/noita_hideout/files/effect_food_levitation.xml" then
+        e.tag="noita_hideout_effect_"..path:match("effect_(.+)%.xml")
         e.GameEffectComponent={frames=7200}
     elseif path==shotpath then
         e.ProjectileComponent={}
@@ -169,4 +170,22 @@ entities[speed].GameEffectComponent.frames=7
 assert(NHProducts.use(player,select_product("sugar_cube")))
 assert(#EntityGetAllChildren(player,"noita_hideout_effect_sugar_cube")==1)
 assert(entities[speed].GameEffectComponent.frames==7200 and entities[native].GameEffectComponent.frames==60)
+health.hp,health.max_hp=1,10
+assert(NHProducts.use(player,select_product("herb_flatbread")))
+regen=EntityGetAllChildren(player,"noita_hideout_effect_bread")[1]
+assert(entities[regen].VariableStorageComponent.value_int==180)
+assert(NHProducts.use(player,select_product("bread")) and entities[regen].VariableStorageComponent.value_int==180)
+for i=1,4 do second() end
+assert(math.abs(health.hp-1.04)<1e-8)
+assert(NHProducts.use(player,select_product("spiced_stew")))
+assert(math.abs(health.hp-1.84)<1e-8 and entities[regen].VariableStorageComponent.value_int==180)
+assert(#EntityGetAllChildren(player,"noita_hideout_effect_bread")==1)
+for _,dish in ipairs({{"spice_cake","food_levitation"},{"milk_omelet","food_mana"}}) do
+    assert(NHProducts.use(player,select_product(dish[1])))
+    local tag="noita_hideout_effect_"..dish[2]
+    local buff=EntityGetAllChildren(player,tag)[1]
+    entities[buff].GameEffectComponent.frames=5
+    assert(NHProducts.use(player,select_product(dish[1])))
+    assert(#EntityGetAllChildren(player,tag)==1 and entities[buff].GameEffectComponent.frames==7200)
+end
 print("Workshop products: physical items, healing, grenade shots, timed food effects and refresh passed.")

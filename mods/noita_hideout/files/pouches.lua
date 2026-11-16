@@ -45,7 +45,7 @@ function NHPouches.validate(s,whole,validDose)
         local total=0
         for slot,cell in pairs(p.cells) do
             assert(whole(slot) and slot>=1 and slot<=NHStore.pouchCapacity
-                and type(cell)=="table" and validDose(cell.remaining,cell.count),"Invalid pouch cell")
+                and type(cell)=="table" and validDose(cell.remaining,cell.count,cell.subtype),"Invalid pouch cell")
             total=total+cell.count
         end
         assert(total==p.doses,"Invalid injector count")

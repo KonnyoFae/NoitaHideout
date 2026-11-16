@@ -32,6 +32,7 @@ define("perk_slots","upgrade","特质栏","Perk slots",3,{{"water",250},{"slime"
 define("farmland","expansion","田地","Farmland",4,{{"farm_sand",150},{"water",100}})
 define("agri_equipment","expansion","农业设备","Farm equipment",1,{{"farm_sand",300},{"water",200}},
     {effect={"种植香料与激活草药","Grow spices and stimulating herbs"}})
+define("livestock","expansion","畜牧设备","Livestock pens",3,{{"farm_sand",200},{"water",150}})
 
 local farm_sand={alternatives={"sand","sandstone","sandstone_surface"}}
 local material_names={
@@ -133,6 +134,10 @@ local function description(s,entry,offset,lang)
     if entry.id=="safe" then return (NHStore.safeCapacity(s)+offset)..(zh and " 格" or " slots") end
     local level=NHStore.level(s,entry.id)+offset
     if entry.id=="farmland" then return level..(zh and " 块田地" or (level==1 and " field" or " fields")) end
+    if entry.id=="livestock" then
+        if zh then return level.." 鸡舍 + "..level.." 牛栏" end
+        return level..(level==1 and " coop + " or " coops + ")..level..(level==1 and " cowshed" or " cowsheds")
+    end
     if entry.id=="perk_slots" then return level..(zh and " 个特质栏位" or " perk slots") end
     if level==0 then return zh and "未解锁" or "Locked" end
     return entry.effect[zh and 1 or 2]

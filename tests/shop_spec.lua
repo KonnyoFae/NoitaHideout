@@ -113,4 +113,4 @@ gold=s.bankGold
 assert(not buy("water") and s.bankGold==gold)
 persist()
 assert(s.bankWalletNet==-135 and s.bankGold==gold)
-print("Shop: six fixed offers, exact savings debits, warehouse reservations, full-dose stacks and atomic purchase recovery passed.")
+print("Shop: material and supply offers, exact savings debits, warehouse reservations, full-dose stacks and atomic purchase recovery passed.")

@@ -1,0 +1,7 @@
+<Entity name="noita_hideout_food_mana" tags="noita_hideout_effect_food_mana">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="MANA_REGENERATION" frames="7200" />
+    <UIIconComponent name="$nh_hideout_milk_omelet" description="$nh_hideout_milk_omelet_desc"
+        icon_sprite_file="mods/noita_hideout/files/items/milk_omelet.png" is_perk="0"
+        display_in_hud="1" display_above_head="0" />
+</Entity>

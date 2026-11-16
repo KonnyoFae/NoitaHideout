@@ -6,6 +6,7 @@ dofile_once(files .. "home_wand_edit.lua")
 dofile_once(files .. "wand.lua")
 dofile_once(files .. "potion.lua")
 dofile_once(files .. "transfers.lua")
+NHCompanions.registerItems()
 dofile_once(files .. "products.lua")
 dofile_once(files .. "perks.lua")
 dofile_once(files .. "native_items.lua")
@@ -61,6 +62,10 @@ local error_translations = {
     ["Unknown crop."] = "无法识别这种作物。",
     ["Farm equipment is required."] = "种植这类作物需要先扩建农业设备。",
     ["A farm plot is required."] = "请先开垦一块田。",
+    ["Livestock equipment is required."] = "请先扩建畜牧设备。",
+    ["No matching pen is free."] = "这种幼畜的栏舍已满。",
+    ["Livestock collection changed."] = "栏舍已变化，请重新选择。",
+    ["No livestock produce is ready."] = "畜产尚未备好。",
     ["Crop is still growing."] = "作物尚未成熟。",
     ["Missing catalyst."] = "物料库中缺少所需的催化样品。",
     ["Invalid gold transfer."] = "无法识别这笔存取操作。",
@@ -263,10 +268,10 @@ local function update_workshop(player,frame,farm_time)
     return true
 end
 
-local function find_stimulant(player)
+local function find_stimulant(player,tag,component)
     for _, child in ipairs(EntityGetAllChildren(player) or {}) do
-        if EntityHasTag(child, "noita_hideout_stimulant") then
-            local effect = EntityGetFirstComponentIncludingDisabled(child, "GameEffectComponent")
+        if EntityHasTag(child,tag) then
+            local effect = EntityGetFirstComponentIncludingDisabled(child,component)
             if effect then return effect end
         end
     end
@@ -276,13 +281,18 @@ local function use_dose(player, item)
     local frame = GameGetFrameNum()
     if last_dose_frame == frame then return end
     last_dose_frame = frame
-    local effect = find_stimulant(player)
+    local remaining,subtype=NHDoses.remaining(state,item)
+    if not remaining then report("This syringe is no longer available."); return end
+    local d=NHInjectors.get(subtype)
+    local healing=d.id=="healing"
+    local component=healing and "VariableStorageComponent" or "GameEffectComponent"
+    local effect = find_stimulant(player,d.tag,component)
     local created
     if not effect then
         local x, y = EntityGetTransform(player)
-        created = EntityLoad(files .. "stimulant.xml", x, y)
+        created = EntityLoad(files .. d.effect..".xml", x, y)
         if created and created ~= 0 then
-            effect = EntityGetFirstComponentIncludingDisabled(created, "GameEffectComponent")
+            effect = EntityGetFirstComponentIncludingDisabled(created,component)
         end
         if not effect or effect == 0 then
             if created and created ~= 0 then EntityKill(created) end
@@ -295,7 +305,7 @@ local function use_dose(player, item)
         report(reason)
         return
     end
-    ComponentSetValue2(effect, "frames", 3600)
+    ComponentSetValue2(effect,healing and "value_int" or "frames",healing and 60 or 3600)
     if created then EntityAddChild(player, created) end
     mouse_release = true
     feedback(tr("已注射，剩余耐久 ","Injected. Durability ") .. reason .. "/" .. NHStore.doseDurability)
@@ -315,7 +325,10 @@ end
 local function item_label(entry)
     local item = entry.item
     if item.kind == "potion" then return NHPotion.label(item, lang) end
-    if item.kind == "dose" then return tr("耐火激活剂","Fire injector") end
+    if item.kind == "dose" then
+        local d=NHInjectors.get(item.subtype)
+        return tr(d.zh,d.en)
+    end
     if item.kind == "spell" then
         local id=item.card.id
         local name=item.name and item.name:match("^%$action_") and translated(item.name)
@@ -325,6 +338,7 @@ local function item_label(entry)
     local name = item.name or ""
     if name ~= "" then name = GameTextGetTranslatedOrNot(name) end
     if item.kind=="medkit" then return name.." ("..(item.remaining or 3).."/3)" end
+    if item.kind=="summon_card" then return name.." ("..item.remaining.."/"..NHCompanions.durability..")" end
     if item.kind~="wand" then return name~="" and name or item.kind end
     if not name or name == "" then name = tr("魔杖", "Wand") end
     return name .. " (" .. #(item.cards or {}) .. tr(" 个法术)", " spells)")
@@ -334,8 +348,9 @@ local function stored_view(entry)
     local item=entry.item
     local potion=item.kind=="potion" and item or nil
     return {id=entry.id,kind=item.kind,name=item_label(entry),potion=potion,
-        icon=potion and NHPotion.inventoryIcon(potion) or item.icon or (item.sprite and item.sprite.image_file),
-        remaining=item.remaining,count=item.count,dockSlot=NHPotion.dockSlot(item)}
+        icon=potion and NHPotion.inventoryIcon(potion) or (item.kind=="dose" and NHInjectors.get(item.subtype).icon)
+            or item.icon or (item.sprite and item.sprite.image_file),
+        remaining=item.remaining,count=item.count,subtype=item.subtype,dockSlot=NHPotion.dockSlot(item)}
 end
 
 local function pouch_name(id)
@@ -410,6 +425,7 @@ local function inventory_view()
         local ready,reason=NHStore.canBuyGood(state,good)
         if not bank_synced then ready,reason=false,"Waiting for wallet settlement." end
         model.shopGoods[#model.shopGoods+1]={id=good.id,category=good.category,name=tr(good.zh,good.en),
+            pen=good.animal and ready and reason or nil,
             quantity=good.quantity,price=good.price,ready=ready,
             reason=not ready and ((lang=="zh" and error_translations[reason]) or reason) or nil}
     end
@@ -450,7 +466,7 @@ local function inventory_view()
         for key in pairs(recipe.resources or {}) do resources[#resources+1]=key end
         table.sort(resources)
         for _,key in ipairs(resources) do
-            local kind=NHEssences.types[key] or NHFarm.crops[key]
+            local kind=NHEssences.types[key] or NHFarm.crops[key] or NHLivestock.resources[key]
             table.insert(view.inputs,{name=tr(kind.zh,kind.en),amount=recipe.resources[key],available=state.resources[key] or 0})
         end
         if recipe.storedIngredient then
@@ -515,7 +531,7 @@ local function native_slots(player)
                         local slot = grid[y*columns+x+(not full and kind~="wand" and 4 or 0)]
                         if slot then
                             slot.entity,slot.kind = id,kind
-                            if kind=="dose" then slot.remaining=NHDoses.remaining(state,id) end
+                            if kind=="dose" then slot.remaining,slot.subtype=NHDoses.remaining(state,id) end
                             if kind=="pouch" then slot.pouchId=NHDoses.isPouch(state,id) end
                             slot.icon = ComponentGetValue2(item,"ui_sprite")
                             if kind=="potion" then
@@ -612,7 +628,23 @@ local function workshop_action(player,action,index)
         feedback(string.format(message,amount))
     elseif action=="shop_buy" and type(index)=="table" then
         if not bank_synced then report("Waiting for wallet settlement."); return end
-        commit_edit(NHStore.buyGood,"购买成功，商品已入库。","Purchased and delivered to storage.",index)
+        if NHLivestock.species[index.id] then
+            local now=NHFarm.observe(state,GameGetFrameNum())
+            commit_edit(function(draft) return NHStore.buyGood(draft,index,now) end,
+                "购买成功，幼畜已送入栏舍。","Purchased and delivered to the pen.")
+        else commit_edit(NHStore.buyGood,"购买成功，商品已入库。","Purchased and delivered to storage.",index) end
+    elseif action=="collect_livestock" and type(index)=="table" then
+        local now=NHFarm.observe(state,GameGetFrameNum())
+        local cards
+        if commit_edit(function(draft)
+            local changed,result=NHLivestock.collect(draft,index,now)
+            if changed then cards=result end
+            return changed,result
+        end) then
+            local msg=tr("畜产已入库。","Animal produce stored.")
+            if #cards>0 then msg=msg.." "..NHCompanions.rewardText(cards,lang,state) end
+            feedback(msg)
+        end
     elseif action=="buy_upgrade" and type(index)=="table" then
         commit_edit(NHStore.buyUpgrade,"建设完成。","Construction complete.",index)
     elseif (action=="farm_plant" or action=="farm_harvest") and type(index)=="table" then
@@ -620,9 +652,17 @@ local function workshop_action(player,action,index)
         local now=NHFarm.observe(state,frame)
         local planting=action=="farm_plant"
         local edit=planting and NHFarm.plant or NHFarm.harvest
-        if commit_edit(function(draft) return edit(draft,index,now) end,
+        local rewards
+        if commit_edit(function(draft)
+            local ok,result=edit(draft,index,now)
+            if ok and not planting then rewards=result end
+            return ok,result
+        end,
             planting and "已播种。" or "已收获，农产已入库。",planting and "Crop planted." or "Harvest stored.") then
             NHFarm.observe(state,frame)
+            if rewards and #rewards>0 then
+                feedback(NHCompanions.rewardText(rewards,lang,state))
+            end
         end
     elseif action=="salvage" and type(index)=="table" then
         if index.mode=="essence" then
@@ -657,7 +697,8 @@ local function dispatch(player, action, index)
             return
         end
         if type(index)~="table" or action=="buy_upgrade" or action=="craft" or action=="salvage"
-            or action=="bank_transfer" or action=="shop_buy" or action=="farm_plant" or action=="farm_harvest" then
+            or action=="bank_transfer" or action=="shop_buy" or action=="farm_plant" or action=="farm_harvest"
+            or action=="collect_livestock" then
             workshop_action(player,action,index)
             return
         end
@@ -912,7 +953,7 @@ function OnWorldPostUpdate()
             local id=NHDoses.isPouch(state,item)
             if id then opened,popup=true,{id=id,entity=item} end
         elseif kind == "dose" then use_dose(player, item)
-        elseif item and NHProducts.use(player,item) then mouse_release=true end
+        elseif item and (NHCompanions.use(player,item,lang) or NHProducts.use(player,item)) then mouse_release=true end
     end
     if not active_run() then return end
     local model = opened and inventory_view() or {}

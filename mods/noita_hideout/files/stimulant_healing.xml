@@ -1,0 +1,8 @@
+<Entity name="noita_hideout_dose_healing" tags="noita_hideout_stimulant_healing">
+    <InheritTransformComponent />
+    <VariableStorageComponent name="regen_seconds" value_int="60" value_float="2" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/bread_regeneration.lua" execute_every_n_frame="60" />
+    <UIIconComponent name="$nh_hideout_dose_healing" description="$nh_hideout_dose_healing_desc"
+        icon_sprite_file="mods/noita_hideout/files/items/dose_healing.png" is_perk="0"
+        display_in_hud="1" display_above_head="0" />
+</Entity>

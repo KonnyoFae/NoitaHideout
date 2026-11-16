@@ -1,0 +1,6 @@
+<Entity tags="noita_hideout_companion,nh_companion_griffin">
+    <Base file="mods/noita_hideout/files/companions/base.xml">
+        <SpriteComponent image_file="mods/noita_hideout/files/companions/griffin.png" />
+    </Base>
+    <VariableStorageComponent _tags="nh_companion_clock" name="age_and_species" value_string="griffin" />
+</Entity>

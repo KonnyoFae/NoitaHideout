@@ -1,0 +1,10 @@
+<Entity name="$nh_hideout_spiced_stew" tags="noita_hideout_spiced_stew,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/spiced_stew.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/spiced_stew.png" offset_x="7" offset_y="5" />
+        <ItemComponent item_name="$nh_hideout_spiced_stew" ui_description="$nh_hideout_spiced_stew_desc"
+            ui_sprite="mods/noita_hideout/files/items/spiced_stew.png" />
+        <UIInfoComponent name="$nh_hideout_spiced_stew" />
+        <AbilityComponent ui_name="$nh_hideout_spiced_stew" />
+    </Base>
+</Entity>

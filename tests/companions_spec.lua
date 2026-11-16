@@ -1,0 +1,188 @@
+local settings,flags={},{}
+local fail_head=false
+function ModSettingGet(k) return settings[k] end
+function ModSettingSet(k,v)
+    if fail_head and k:match("_revision$") then return end
+    settings[k]=v
+end
+function HasFlagPersistent(k) return flags[k] end
+function AddFlagPersistent(k) flags[k]=true end
+dofile("mods/noita_hideout/files/store.lua")
+dofile("mods/noita_hideout/files/potion.lua")
+local state=assert(NHStore.load())
+NHStore.newRun(state)
+state.levels.farmland=1
+state.summons={farm=31,livestock=62,pending={}}
+assert(NHFarm.plant(state,{plot=1,token=0,crop="fiber"},0))
+local request={plot=1,token=1,crop="fiber"}
+local ok,awards=NHFarm.harvest(state,request,120*60)
+assert(ok and #awards==1 and awards[1]=="dryad" and state.resources.fiber==6)
+assert(state.warehouse[1].item.kind=="summon_card" and NHStore.category("summon_card")=="equipment")
+assert(not NHFarm.harvest(state,request,120*60) and #state.warehouse==1)
+local graze=NHCompanions.reward(state,"livestock",1)
+assert(#graze==1 and graze[1]=="griffin")
+assert(NHStore.commit(state))
+local before=assert(NHStore.load())
+local one=assert(NHStore.load())
+local batch=NHCompanions.reward(before,"livestock",40)
+local total=0
+for _=1,40 do total=total+#NHCompanions.reward(one,"livestock",1) end
+assert(total==#batch and before.summons.livestock==one.summons.livestock)
+
+-- Fill equipment storage with separate cards. A harvest still succeeds. Losing
+-- the commit head write while releasing an equipment slot cannot lose its award.
+local max=NHStore.warehouseCapacity(state,"equipment")
+while #state.warehouse<max do
+    state.summons.farm=31
+    NHCompanions.reward(state,"farm",1)
+end
+state.summons.farm=62
+local pending=NHCompanions.reward(state,"farm",1)
+assert(#pending==1 and state.summons.pending.flower_fairy==1 and #state.warehouse==max)
+assert(NHCompanions.rewardText(pending,"zh",state):find("腾出",1,true))
+assert(NHStore.commit(state))
+local changed={}
+for k,v in pairs(state) do changed[k]=v end
+changed.warehouse={}
+for i=2,#state.warehouse do changed.warehouse[i-1]=state.warehouse[i] end
+local nextId=state.nextItemId
+fail_head=true
+assert(not NHStore.commit(changed))
+assert(#changed.warehouse==max-1 and changed.nextItemId==nextId and state.summons.pending.flower_fairy==1)
+assert(assert(NHStore.load()).summons.pending.flower_fairy==1)
+fail_head=false
+assert(NHStore.commit(changed))
+assert(#changed.warehouse==max and changed.nextItemId==nextId+1 and not next(changed.summons.pending))
+state=assert(NHStore.load())
+assert(state.warehouse[max].item.species=="flower_fairy" and state.warehouse[max].slot==1)
+assert(NHStore.commit(state) and state.nextItemId==nextId+1)
+
+local entities,serial={},0
+local function create(x,y,tags)
+    serial=serial+1
+    entities[serial]={x=x,y=y,face=1,parent=0,tags=tags or {},components={}}
+    return serial
+end
+local player=create(0,0,{player_unit=true})
+local function put(id,kind,values,tag)
+    entities[id].components[kind..(tag or "")]=values
+    return values
+end
+local hp=put(player,"DamageModelComponent",{hp=1,max_hp=4})
+put(player,"GenomeDataComponent",{herd_id=3})
+local held,open,failed=false,false,false
+local spawned,shots,gifts={},{},{}
+function EntityGetTransform(id) local e=entities[id];return e.x,e.y,0,e.face,1 end
+function EntitySetTransform(id,x,y,_,sx) local e=entities[id];e.x,e.y,e.face=x,y,sx end
+function EntityGetParent(id) return entities[id].parent end
+function EntityAddChild(id,child) entities[child].parent=id end
+function EntityHasTag(id,tag) return entities[id] and entities[id].tags[tag] end
+function EntityAddTag(id,tag) entities[id].tags[tag]=true end
+function EntityGetIsAlive(id) return entities[id]~=nil end
+function EntityGetAllChildren(id,tag)
+    local out={}
+    for child,e in pairs(entities) do if e.parent==id and e.tags[tag] then out[#out+1]=child end end
+    return out
+end
+function EntityGetFirstComponentIncludingDisabled(id,kind,tag) return entities[id].components[kind..(tag or "")] end
+function ComponentGetValue2(c,key) return c[key] end
+function ComponentSetValue2(c,key,v,b) c[key]=v;if b then c.yVelocity=b end end
+function EntityKill(id) entities[id]=nil end
+function GameKillInventoryItem(who,id) assert(who==player and held==id);EntityKill(id) end
+function GameIsInventoryOpen() return open end
+function GamePrint() end
+function GameTextGetTranslatedOrNot(k) return k end
+function GameGetFrameNum() return 200 end
+function ProceduralRandomi() return 4 end
+function EntityLoad(path,x,y)
+    local name=path:match("([^/]+)%.xml$")
+    if failed then return 0 end
+    local id=create(x,y)
+    local e=entities[id]
+    if name:match("^card_") then
+        local species=name:sub(6)
+        e.tags.noita_hideout_summon_card=true
+        e.tags["nh_companion_"..species]=true
+        put(id,"ItemComponent",{uses_remaining=3})
+    elseif NHCompanions.species[name] then
+        e.tags.noita_hideout_companion=true
+        put(id,"VariableStorageComponent",{value_int=0,value_string=name},"nh_companion_clock")
+        for _,t in ipairs({"nh_trip","nh_position","nh_gifts"}) do
+            put(id,"VariableStorageComponent",{value_int=0,value_float=0},t)
+        end
+        spawned[#spawned+1]=id
+    elseif name:match("^effect_") then put(id,"GameEffectComponent",{frames=-1})
+    elseif name=="bolt" then put(id,"ProjectileComponent",{});put(id,"VelocityComponent",{})
+    else gifts[#gifts+1]=name end
+    return id
+end
+local targets={}
+local function target(x,herd,charm)
+    local id=create(x,0)
+    entities[id].herd,entities[id].charm=herd,charm
+    put(id,"GenomeDataComponent",{})
+    targets[#targets+1]=id
+end
+target(20,100,0);target(35,10,0);target(55,10,1);target(65,10,0)
+function EntityGetInRadiusWithTag() return targets end
+function EntityGetHerdRelation(_,id) return entities[id].herd end
+function EntityGetFirstHitboxCenter(id)
+    local x,y=EntityGetTransform(id)
+    return x==65 and x+3 or x,y
+end
+function GameGetGameEffectCount(id) return entities[id].charm end
+function RaytracePlatforms(_,_,tx) return tx==35 end
+function GameShootProjectile(who,_,_,tx,_,id)
+    assert(who==player and tx==68)
+    shots[#shots+1]=id
+end
+NHNative={held=function() return held end}
+local adapter
+NHTransfers={registerItem=function(kind,_,codec) assert(kind=="summon_card");adapter=codec end}
+NHCompanions.registerItems()
+local raw=assert(adapter.restore({kind="summon_card",species="flower_fairy",remaining=2},10,20))
+held=raw
+open=true
+assert(not NHCompanions.use(player,raw,"en"))
+open,failed=false,true
+assert(not NHCompanions.use(player,raw,"en") and adapter.capture(raw).remaining==2)
+failed=false
+assert(NHCompanions.use(player,raw,"en") and adapter.capture(raw).remaining==1)
+local pet=spawned[1]
+assert(NHCompanions.use(player,raw,"en") and #spawned==1 and adapter.capture(raw).remaining==1)
+local restored=assert(adapter.restore(adapter.capture(raw),0,0))
+assert(adapter.capture(restored).remaining==1 and adapter.capture(restored).species=="flower_fairy")
+assert(not adapter.restore({kind="summon_card",species="griffin",remaining=4},0,0))
+assert(not adapter.restore({kind="summon_card",species="missing",remaining=1},0,0))
+
+function dofile_once(path) dofile(path) end
+dofile("mods/noita_hideout/files/companions/behavior.lua")
+NHCompanions.update(pet)
+assert(#shots==1)
+local shot=entities[shots[1]].components.ProjectileComponent
+assert(shot.mWhoShot==player and shot.mShooterHerdId==3 and shot.damage==0.16)
+targets={}
+for _=1,119 do NHCompanions.update(pet) end
+assert(hp.hp>1 and #gifts==0 and entities[pet].components.VariableStorageComponentnh_trip.value_int==0)
+-- A large teleport brings the companion along without earning travel credit.
+entities[player].x=1010
+NHCompanions.update(pet)
+assert(math.abs(entities[pet].x-1010)<20 and entities[pet].components.VariableStorageComponentnh_trip.value_int==0)
+for cycle=1,3 do
+    entities[pet].components.VariableStorageComponentnh_gifts.value_int=4
+    for _=1,300 do entities[player].x=entities[player].x+2;NHCompanions.update(pet) end
+end
+assert(#gifts==2 and gifts[1]=="bandage")
+while EntityGetIsAlive(pet) do NHCompanions.update(pet) end
+assert(NHCompanions.use(player,raw,"en") and not EntityGetIsAlive(raw))
+EntityKill(spawned[2])
+for _,species in ipairs({"dryad","minotaur","griffin"}) do
+    held=assert(adapter.restore({kind="summon_card",species=species,remaining=3},0,0))
+    assert(NHCompanions.use(player,held,"en"))
+    local current=spawned[#spawned]
+    NHCompanions.update(current)
+    local aura=EntityGetAllChildren(player,"nh_companion_"..NHCompanions.species[species].effect)
+    assert(#aura==1 and entities[aura[1]].components.GameEffectComponent.frames==70)
+    EntityKill(current)
+end
+print("Summon rewards, atomic delivery, card durability, four companions, targeting, travel gifts, auras and expiration passed.")

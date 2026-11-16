@@ -1,0 +1,7 @@
+<Entity name="noita_hideout_dose_frost" tags="noita_hideout_stimulant_frost">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="PROTECTION_FREEZE" frames="3600" exclusivity_group="0" />
+    <UIIconComponent name="$nh_hideout_dose_frost" description="$nh_hideout_dose_frost_desc"
+        icon_sprite_file="data/ui_gfx/perk_icons/protection_freeze.png" is_perk="0"
+        display_in_hud="1" display_above_head="0" />
+</Entity>

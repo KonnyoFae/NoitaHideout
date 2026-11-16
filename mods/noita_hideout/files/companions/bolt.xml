@@ -1,0 +1,9 @@
+<Entity tags="projectile,projectile_player,teleportable_NOT">
+    <Base file="data/entities/base_projectile.xml">
+        <VelocityComponent gravity_y="0" air_friction="0" />
+    </Base>
+    <ProjectileComponent damage="0.2" speed_min="270" speed_max="270" lifetime="36"
+        never_hit_player="1" friendly_fire="0" collide_with_shooter_frames="-1"
+        on_death_explode="0" on_lifetime_out_explode="0" on_collision_die="1" />
+    <SpriteComponent image_file="data/projectiles_gfx/spark.xml" rect_animation="default" additive="1" />
+</Entity>

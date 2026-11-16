@@ -1,0 +1,7 @@
+<Entity>
+    <SpriteComponent offset_x="10" offset_y="13" z_index="0.42" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/companions/tick.lua" execute_every_n_frame="6" />
+    <VariableStorageComponent _tags="nh_trip" name="active_travel_frames" />
+    <VariableStorageComponent _tags="nh_position" name="previous_player_position" />
+    <VariableStorageComponent _tags="nh_gifts" name="gift_seed_and_count" />
+</Entity>

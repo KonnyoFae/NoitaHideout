@@ -103,10 +103,14 @@ end
 function EntitySetComponentsWithTagEnabled() end
 function EntityLoad(path,x,y)
     local file=path:match("([^/]+)%.xml$")
-    if file=="stimulant" and fail_effect then return 0 end
+    if file:match("^stimulant") and fail_effect then return 0 end
     next_id=next_id+1
     entities[next_id]={x=x,y=y,parent=0,tags={["noita_hideout_"..file]=true},comps={}}
-    if file=="stimulant" then EntityAddComponent2(next_id,"GameEffectComponent",{frames=3600})
+    if file=="stimulant_healing" then EntityAddComponent2(next_id,"VariableStorageComponent",{value_int=60,value_float=2})
+    elseif file:match("^stimulant") then EntityAddComponent2(next_id,"GameEffectComponent",{frames=3600})
+    elseif file:match("^dose_") then
+        EntityAddTag(next_id,"noita_hideout_dose")
+        EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png"})
     elseif file=="home_wand_edit" then EntityAddComponent2(next_id,"GameEffectComponent",{effect="EDIT_WANDS_EVERYWHERE",frames=3})
     else EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=""}) end
     return next_id
@@ -418,6 +422,7 @@ settings,flags={},{}
 new_world()
 local funded=state()
 funded.materials={sand=3000,slime=1800,water=2000,blood=100,lava=100,oil=500,gunpowder=300}
+funded.resources={active_herb=2,essence_fire=180}
 assert(NHStore.commit(funded))
 boot()
 local request={id="safe",level=0}
@@ -475,10 +480,10 @@ local alchemy=assert(has_project(catalog,"stable"))
 assert(alchemy.category=="alchemy" and alchemy.unlocked and not alchemy.ready and alchemy.reason)
 local reverse=assert(has_project(catalog,"reverse_stable"))
 assert(reverse.category=="alchemy" and reverse.unlocked and #reverse.inputs==1 and #reverse.outputs==2)
-local expected_category={medical="medical",injector="medical",injector_essence="medical",
+local expected_category={medical="medical",injector="medical",injector_lightning="medical",injector_frost="medical",injector_healing="medical",
     grenade="weapons",grenade_essence="weapons",pouch="equipment"}
 assert(not has_project(catalog,"medkit_essence"))
-for _,id in ipairs({"medical","injector","injector_essence","grenade","grenade_essence","pouch"}) do
+for _,id in ipairs({"medical","injector","injector_lightning","injector_frost","injector_healing","grenade","grenade_essence","pouch"}) do
     local locked=assert(has_project(catalog,id))
     assert(locked.category==expected_category[id] and not locked.unlocked and not locked.ready)
     assert(locked.facility_name and locked.reason:find(locked.facility_name,1,true))
@@ -488,7 +493,7 @@ end
 local first_product
 local products={
     {recipe="medical",kind="medkit",name="Medkit",ingredients={water=100,blood=50}},
-    {recipe="injector",kind="dose",name="Fire injector",ingredients={water=100,lava=25}},
+    {recipe="injector",kind="dose",name="Fire injector",stock="resources",ingredients={active_herb=2,essence_fire=180}},
     {recipe="grenade",kind="grenade",name="Magic grenade",ingredients={sand=100,slime=50}},
 }
 for n,expected in ipairs(products) do
@@ -507,7 +512,8 @@ for n,expected in ipairs(products) do
     local reserved=queued.order.output.slot
     assert(queued.order.recipe==expected.recipe and #queued.warehouse==n-1)
     for input,amount in pairs(expected.ingredients) do
-        assert((queued.materials[input] or 0)==before.materials[input]-amount)
+        local stock=expected.stock or "materials"
+        assert((queued[stock][input] or 0)==before[stock][input]-amount)
     end
     local working=tick()
     assert(working.order_name==expected.name and working.warehouse.supplies[reserved].kind=="reserved")
@@ -563,11 +569,12 @@ assert(state().resources.arcane_scrap==1 and not tick().warehouse.spell)
 do
     local key=NHEssences.byAction.HEAL_BULLET
     local profile=NHEssences.healingProfiles.HEAL_BULLET
-    for _,test in ipairs({{"grenade_essence","essence_high_energy",30},{"injector_essence","essence_fire",180}}) do
+    for _,test in ipairs({{"grenade_essence","essence_high_energy",30},{"injector","essence_fire",180}}) do
         local recipe=assert(has_project(tick().recipes,test[1]))
         assert(recipe.unlocked and not recipe.ready and recipe.reason=="Not enough workshop resources.")
-        assert(#recipe.inputs==1 and recipe.inputs[1].name==NHEssences.types[test[2]].en)
-        assert(recipe.inputs[1].available==0 and recipe.inputs[1].amount==test[3])
+        local i=#recipe.inputs
+        assert(i==(test[1]=="injector" and 2 or 1) and recipe.inputs[i].name==NHEssences.types[test[2]].en)
+        assert(recipe.inputs[i].available==0 and recipe.inputs[i].amount==test[3])
     end
     for expected,uses in ipairs({0,2,20}) do
         local view=stash_spell("HEAL_BULLET",uses)
@@ -1023,7 +1030,7 @@ local function testShop()
     assert(wallet.money==400 and not state().materials.water)
     tick(nil,"bank_transfer",{direction="deposit",amount=320})
     local view=tick()
-    assert(view.bankGold==320 and view.walletGold==80 and #view.shopGoods==6)
+    assert(view.bankGold==320 and view.walletGold==80 and #view.shopGoods==8)
     assert(has_project(view.shopGoods,"medkit").category=="supplies")
     entities[player].x=900
     buy("water")
@@ -1231,3 +1238,89 @@ local function testFarmController()
 end
 testFarmController()
 print("Controller: farmland expansion, field access, save/continue, harvesting and the bandage-to-medkit chain passed.")
+
+do
+    settings,flags={},{}
+    new_world()
+    local s=state()
+    local bag=s.pouches[s.starterPouchId]
+    for i,kind in ipairs({"lightning","frost","healing"}) do assert(NHStore.putPouchDose(bag,3,i+1,kind)) end
+    assert(NHStore.commit(s))
+    boot()
+    local effects={}
+    for i,kind in ipairs(NHInjectors.order) do
+        local d=NHInjectors.get(kind)
+        inventory_open=true
+        tick()
+        tick(nil,"open_container",{pouchId=s.starterPouchId,safeSlot=2})
+        local slot=tool()
+        slot.sourceCell=i
+        tick(nil,"take_dose",slot)
+        local syringe=assert(EntityGetWithTag("noita_hideout_"..d.filename)[1])
+        assert(select(2,NHDoses.remaining(state(),syringe))==kind)
+        inventory_open,held=false,syringe
+        tick()
+        tick() -- release the inventory's closing click before using the held item
+        tick(nil,nil,nil,true)
+        effects[kind]=assert(EntityGetWithTag(d.tag)[1],kind)
+        assert(EntityGetParent(effects[kind])==player and NHDoses.remaining(state(),syringe)==2)
+        local timer=kind=="healing" and "VariableStorageComponent" or "GameEffectComponent"
+        local field=kind=="healing" and "value_int" or "frames"
+        local component=EntityGetFirstComponentIncludingDisabled(effects[kind],timer)
+        ComponentSetValue2(component,field,1)
+        tick()
+        tick(nil,nil,nil,true)
+        assert(#EntityGetWithTag(d.tag)==1 and ComponentGetValue2(component,field)==(kind=="healing" and 60 or 3600))
+        tick()
+        tick(nil,nil,nil,true)
+        assert(not EntityGetIsAlive(syringe))
+    end
+    for _,effect in pairs(effects) do assert(EntityGetIsAlive(effect)) end
+    local health=EntityAddComponent2(player,"DamageModelComponent",{hp=1,max_hp=5})
+    function GetUpdatedEntityID() return effects.healing end
+    for tickNo=1,60 do
+        dofile("mods/noita_hideout/files/bread_regeneration.lua")
+        assert(math.abs(health.hp-(1+0.04*math.floor(tickNo/2)))<1e-8)
+    end
+    assert(not EntityGetIsAlive(effects.healing))
+    print("Controller: four distinct injectors, refresh, concurrent protection and 30 HP per healing dose passed.")
+end
+
+local function testLivestockController()
+    settings,flags={},{}
+    new_world()
+    local s=state()
+    s.materials={sand=200,water=150}
+    s.summons={livestock=100,pending={}} -- First cycle awards a card.
+    assert(NHStore.creditGold(s,400) and NHStore.commit(s))
+    boot()
+    inventory_open=true
+    local view=tick()
+    assert(not has_project(view.shopGoods,"chick").ready and #view.farm.pens==0)
+    tick(nil,"buy_upgrade",{id="livestock",level=0})
+    view=tick()
+    assert(has_project(view.shopGoods,"chick").pen==1 and has_project(view.shopGoods,"calf").pen==2)
+    tick(nil,"shop_buy",{id="chick",pen=1})
+    advance(600)
+    tick(nil,"shop_buy",{id="calf",pen=2})
+    assert(state().bankGold==40 and state().farm.pens[2].born>=600)
+    local young=tick().farm.pens[1]
+    assert(young.name=="Chick" and not young.grown and not young.canCollect)
+    entities[player].x=227+81
+    advance(300*60)
+    tick(nil,"collect_livestock",{pen=1,nextAt=young.nextAt})
+    assert(not state().resources.egg)
+    entities[player].x=227
+    local adult=tick().farm.pens[1]
+    assert(adult.name=="Hen" and adult.canCollect and adult.count==1)
+    tick(nil,"collect_livestock",{pen=1,nextAt=adult.nextAt})
+    assert(tick().status:find("Summon cards",1,true))
+    tick(nil,"collect_livestock",{pen=1,nextAt=adult.nextAt})
+    assert(state().resources.egg==2 and state().resources.meat==1)
+    assert(#state().warehouse==1 and state().warehouse[1].item.kind=="summon_card")
+    boot()
+    local farm=tick().farm
+    assert(farm.produce[1].stock==2 and not farm.pens[1].canCollect and not farm.pens[2].canCollect)
+end
+testLivestockController()
+print("Controller: pens, savings payments, staggered maturity, range checks and single collection passed.")

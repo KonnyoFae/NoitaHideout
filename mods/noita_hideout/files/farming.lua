@@ -1,3 +1,4 @@
+dofile("mods/noita_hideout/files/livestock.lua")
 NHFarm={crops={},order={}}
 
 local function crop(key,zh,en,amount,seconds,equipment)
@@ -27,18 +28,18 @@ function NHFarm.validate(state,whole)
             assert(not kind.equipment or NHStore.level(state,"agri_equipment")>0,"Farm equipment missing")
         else assert(plot.readyAt==nil,"Empty field has a harvest time") end
     end
+    NHLivestock.validate(state,whole)
 end
 
 local function horizon(farm)
-    local last=farm.time
+    local last=NHLivestock.horizon(farm)
     for _,plot in pairs(farm.plots) do
         if plot.crop then last=math.max(last,plot.readyAt) end
     end
     return last
 end
 
--- Plot deadlines share one absolute farming clock. It stops when the last
--- crop matures, so idle time cannot be applied to the next planting.
+-- Fields and livestock share a clock which stops when all output is ready.
 local world_key="noita_hideout_farm_clock"
 local clock_profile,clock_run,clock_ticket,last_frame,clock_time
 
@@ -118,12 +119,18 @@ function NHFarm.harvest(state,request,now)
     -- Retain the planting token after harvest to reject a replayed sowing
     -- request that referred to this field before its last crop was planted.
     state.farm.plots[request.plot]={token=plot.token}
-    return true
+    return true,NHCompanions.reward(state,"farm",1)
 end
 
 function NHFarm.view(state,lang,now)
     local view={plots={},crops={},equipment=NHStore.level(state,"agri_equipment")>0}
     now=math.max(now,state.farm.time)
+    view.pens=NHLivestock.view(state,lang,now)
+    view.produce={}
+    for _,id in ipairs({"egg","milk","meat"}) do
+        local resource=NHLivestock.resources[id]
+        table.insert(view.produce,{name=lang=="zh" and resource.zh or resource.en,stock=state.resources[id] or 0})
+    end
     for id=1,NHStore.level(state,"farmland") do
         local plot=state.farm.plots[id] or {token=0}
         local remaining=plot.crop and math.max(0,math.ceil((plot.readyAt-now)/60)) or 0

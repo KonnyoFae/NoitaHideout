@@ -19,12 +19,14 @@ local alchemy_mode="synthesis"
 local shop_category="materials"
 local selected_entry,salvage_target
 local farm_page,selected_plot,selected_crop="plots",nil,nil
+local livestock_page,selected_pen="pens",nil
 local work_tabs={
     {key="orders",id=212,zh="工坊",en="Workshop"},
     {key="expansion",id=218,zh="扩建",en="Build"},
     {key="upgrade",id=219,zh="升级",en="Upgrades"},
     {key="shop",id=220,zh="商店",en="Shop"},
     {key="farm",id=221,zh="种植",en="Farm"},
+    {key="livestock",id=223,zh="畜牧",en="Livestock"},
     {key="samples",id=213,zh="测试物资",en="Supplies"},
 }
 local recipe_tabs={
@@ -41,10 +43,15 @@ local alchemy_tabs={
 local shop_tabs={
     {key="materials",id=256,zh="物料",en="Materials"},
     {key="supplies",id=257,zh="消耗品",en="Consumables"},
+    {key="livestock",id=259,zh="幼畜",en="Youngstock"},
 }
 local farm_tabs={
     {key="plots",id=410,zh="田地",en="Plots"},
     {key="stock",id=411,zh="农产库存",en="Harvest stock"},
+}
+local livestock_tabs={
+    {key="pens",id=440,zh="栏舍",en="Pens"},
+    {key="produce",id=441,zh="畜产库存",en="Produce"},
 }
 local white = { 0.96, 0.93, 0.84 }
 local gold = { 1.00, 0.83, 0.47 }
@@ -146,8 +153,9 @@ local function item_details(slot,model,tr)
         return details
     end
     if slot.kind=="dose" then
-        return {tr("耐火激活剂","Fire injector"),tr("耐久 ","Durability ")..(slot.remaining or model.maxUses).."/"..model.maxUses
-            ..tr("   数量 ","   Count ")..(slot.count or 1)}
+        local d=NHInjectors.get(slot.subtype)
+        return {tr(d.zh,d.en),tr("耐久 ","Durability ")..(slot.remaining or model.maxUses).."/"..model.maxUses
+            ..tr("   数量 ","   Count ")..(slot.count or 1),tr(d.zhEffect,d.enEffect)}
     end
     return {slot.name or slot.kind}
 end
@@ -328,6 +336,51 @@ local function draw_farm(farm,y,tr,button,label,value_row,dispatch)
     end
 end
 
+local function draw_livestock(farm,y,tr,button,label,value_row,dispatch)
+    if livestock_page=="produce" then
+        for i,entry in ipairs(farm.produce) do
+            value_row(y+(i-1)*13,entry.name,compact(entry.stock),entry.stock>0 and green or muted,
+                string.format("%.0f",entry.stock))
+        end
+        return
+    end
+    if #farm.pens==0 then
+        if button(442,6,y,tr("去扩建畜牧设备","Build livestock pens")) then tab,selected_entry="expansion","livestock" end
+        return
+    end
+    local pen=selected_pen and farm.pens[selected_pen]
+    if not pen then
+        for i,p in ipairs(farm.pens) do
+            local text=p.title.."   "..(p.name or tr("空闲","Empty"))
+            if p.count and p.count>0 then text=text.." ×"..p.count end
+            if button(450+i,6,y+(i-1)*13,text,p.canCollect and green or white) then selected_pen=i end
+        end
+        return
+    end
+    if button(443,6,y,tr("< 栏舍","< Pens")) then selected_pen=nil; return end
+    label(y+14,pen.title.." · "..(pen.name or tr("空闲","Empty")),white)
+    value_row(y+28,pen.product.." / "..tr("肉","Meat"),pen.amount.." / "..pen.meat,white,
+        tr("成年后每轮产量","Yield per adult cycle"))
+    value_row(y+41,tr("产出间隔","Cycle time"),time_text(pen.period),white)
+    if not pen.name then
+        value_row(y+56,tr("成长时间","Growth time"),time_text(pen.growth),white)
+        if button(444,6,y+70,tr("购买","Buy ")..pen.young) then
+            tab,shop_category,selected_entry="shop","livestock",pen.species
+        end
+    elseif not pen.grown then
+        value_row(y+56,tr("距离成年","Time to adulthood"),time_text(pen.remaining),white)
+    else
+        value_row(y+56,tr("暂存轮数","Batches ready"),pen.count.." / "..NHLivestock.maxBatches,pen.count>0 and green or white)
+        if pen.count<NHLivestock.maxBatches then value_row(y+69,tr("下次产出","Next batch"),time_text(pen.remaining),white)
+        else label(y+69,tr("栏舍暂存已满","Pen storage full"),muted) end
+        if pen.canCollect then
+            if button(445,6,y+84,tr("领取全部畜产","Collect all produce"),green) then
+                dispatch("collect_livestock",{pen=pen.id,nextAt=pen.nextAt})
+            end
+        elseif pen.count>0 then label(y+84,tr("畜产库存已满","Produce storage full"),muted) end
+    end
+end
+
 local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local left,width=layout.middle,layout.bench
     if not model.debug and tab=="samples" then tab="orders" end
@@ -349,6 +402,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local alchemy=crafting and recipe_category=="alchemy"
     local shopping=tab=="shop"
     local farming=tab=="farm"
+    local ranching=tab=="livestock"
     local menu=model.progression[tab]
     if crafting then
         menu={}
@@ -392,6 +446,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         category_nav,body=position_tabs(shop_tabs,body)
     elseif farming and not salvage then
         category_nav,body=position_tabs(farm_tabs,body)
+    elseif ranching and not salvage then
+        category_nav,body=position_tabs(livestock_tabs,body)
     end
     local function available(item)
         if crafting then return item.ready and item.unlocked~=false and not model.order_active end
@@ -401,6 +457,10 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     local body_height=62
     if salvage then
         body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)+(per_card and 13 or 0)
+    elseif ranching then
+        if livestock_page=="produce" then body_height=13*#model.farm.produce+5
+        elseif selected_pen and model.farm.pens[selected_pen] then body_height=100
+        else body_height=13*math.max(1,#model.farm.pens)+5 end
     elseif farming then
         local farm=model.farm
         local plot=selected_plot and farm.plots[selected_plot]
@@ -414,7 +474,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         if show_outputs then body_height=body_height+13+12*#outputs end
         if selected.note then body_height=body_height+13 end
         if model.order_active and selected.unlocked==false then body_height=body_height+13 end
-    elseif shopping and selected then body_height=wrap_savings and 112 or 99
+    elseif shopping and selected then
+        body_height=(wrap_savings and 112 or 99)+(NHLivestock.species[selected.id] and 39 or 0)
     elseif selected then body_height=80+12*#selected.costs
     elseif menu then
         body_height=5+13*math.max(1,math.min(#menu,entries_per_page))
@@ -452,14 +513,16 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
     for _,t in ipairs(nav) do
         if button(t.id,t.x,t.y,t.name,t.key==tab and gold or muted) then
             tab,selected_entry,salvage_target=t.key,nil,nil
+            selected_pen=nil
             selected_plot,selected_crop=nil,nil
             return hover
         end
     end
     for _,t in ipairs(category_nav or {}) do
-        local current=farming and farm_page or (shopping and shop_category or recipe_category)
+        local current=ranching and livestock_page or farming and farm_page or (shopping and shop_category or recipe_category)
         if button(t.id,t.x,t.y,t.name,t.key==current and gold or muted) then
-            if farming then farm_page,selected_plot,selected_crop=t.key,nil,nil
+            if ranching then livestock_page,selected_pen=t.key,nil
+            elseif farming then farm_page,selected_plot,selected_crop=t.key,nil,nil
             elseif shopping then shop_category=t.key else recipe_category=t.key end
             selected_entry=nil
             return hover
@@ -542,6 +605,8 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             end
         else label(y+26,tr("库存已满","Storage full"),muted) end
         if button(261,6,y+38,tr("取消","Cancel")) then salvage_target=nil end
+    elseif ranching then
+        draw_livestock(model.farm,body,tr,button,label,value_row,dispatch)
     elseif farming then
         draw_farm(model.farm,body,tr,button,label,value_row,dispatch)
     elseif crafting and selected then
@@ -604,7 +669,9 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
         label(body+14,selected.name,white)
         value_row(body+27,tr("数量","Quantity"),string.format("%.0f",selected.quantity),white)
         local destination=selected.category=="materials" and tr("物料","Materials") or tr("消耗品","Supplies")
-        value_row(body+40,tr("入库","Warehouse"),destination,white)
+        local animal=NHLivestock.species[selected.id]
+        if animal then destination=tr(animal.pen[1],animal.pen[2]) end
+        value_row(body+40,animal and tr("送往","Destination") or tr("入库","Warehouse"),destination,white)
         value_row(body+53,tr("价格","Price"),string.format("%.0f",selected.price),gold)
         local confirm_y=body+83
         if wrap_savings then
@@ -612,9 +679,16 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my)
             label(body+79,savings,white)
             confirm_y=confirm_y+13
         else value_row(body+66,tr("存款余额","Savings"),savings,white) end
+        if animal then
+            local resource=NHLivestock.resources[animal.product]
+            value_row(confirm_y,tr("成长时间","Growth time"),time_text(animal.growth/60),white)
+            value_row(confirm_y+13,tr("产出间隔","Cycle time"),time_text(animal.period/60),white)
+            value_row(confirm_y+26,tr(resource.zh,resource.en).." / "..tr("肉","Meat"),animal.amount.." / "..animal.meat,white)
+            confirm_y=confirm_y+39
+        end
         if available(selected) then
             if button(258,6,confirm_y,tr("确认购买","Confirm purchase"),green) then
-                dispatch("shop_buy",{id=selected.id})
+                dispatch("shop_buy",{id=selected.id,pen=selected.pen})
             end
         else label(confirm_y,selected.reason,gold) end
     elseif selected then
@@ -713,7 +787,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             local v = model.secure_loot[n] or {}
             slot(i-1,25,"valuable",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id)
             slots[#slots].safeSlot,slots[#slots].dockSlot,slots[#slots].view=n,v.dockSlot,v
-            slots[#slots].remaining,slots[#slots].count=v.remaining,v.count
+            slots[#slots].remaining,slots[#slots].count,slots[#slots].subtype=v.remaining,v.count,v.subtype
         end
     end
     local popupY = standalone and 0 or -66
@@ -730,10 +804,11 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         end
         for i=1,model.pouchCapacity do
             local cell=model.cells[i]
-            slot(i-1,popupY+23,"dose",cell and "dose",cell and tr("耐火激活剂","Fire injector") or tr("空格","Empty slot"))
+            local d=cell and NHInjectors.get(cell.subtype)
+            slot(i-1,popupY+23,"dose",cell and "dose",d and tr(d.zh,d.en) or tr("空格","Empty slot"),d and d.icon)
             local v=slots[#slots]
             v.cell,v.pouchId=i,model.pouchId
-            if cell then v.remaining,v.count=cell.remaining,cell.count end
+            if cell then v.remaining,v.count,v.subtype=cell.remaining,cell.count,cell.subtype end
         end
     end
 
@@ -888,6 +963,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                     slot(i%cols,grid_y+math.floor(i/cols)*qh,"warehouse",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id,left,top)
                     local target=slots[#slots]
                     target.view=v
+                    target.subtype=v.subtype
                     target.safeSlot,target.remaining,target.count,target.dockSlot=n,v.remaining,v.count,v.dockSlot
                 end
             end
@@ -955,6 +1031,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             return "move_dock",source,target.safeSlot
         end
         local canStack = source.kind=="dose" and target.kind=="dose"
+            and (source.subtype or "fire")==(target.subtype or "fire")
             and (source.remaining or model.maxUses)==model.maxUses and (target.remaining or model.maxUses)==model.maxUses
         if from_store and source.kind=="dose" and source.key==target.key
             and source.safeSlot~=target.safeSlot and (not target.kind or canStack) then

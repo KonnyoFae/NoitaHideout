@@ -1,10 +1,12 @@
--- The timer is saved on the food effect so a continued game resumes its pulses.
+-- The effect keeps its timer across save/continue. Food defaults to a four-second pulse.
 local effect=GetUpdatedEntityID()
 local owner=EntityGetParent(effect)
 local timer=EntityGetFirstComponentIncludingDisabled(effect,"VariableStorageComponent")
 if not owner or owner==0 or not timer then EntityKill(effect); return end
 local seconds=ComponentGetValue2(timer,"value_int")-1
-if seconds>=0 and seconds%4==0 then
+local interval=ComponentGetValue2(timer,"value_float")
+if not interval or interval<1 then interval=4 end
+if seconds>=0 and seconds%interval==0 then
     local damage=EntityGetFirstComponentIncludingDisabled(owner,"DamageModelComponent")
     if damage then
         local hp=ComponentGetValue2(damage,"hp")
