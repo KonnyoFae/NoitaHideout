@@ -184,7 +184,7 @@ print("Native inventory drag, spell row, exact slot, upgrade pages and close can
 model.near,model.warehouse=true,{}
 model.warehouse_capacity={wand=48,spell=48,containers=48,supplies=48,equipment=48,collection=48,materials=16}
 model.debug=true
-local profile={safeCapacity=2,levels={},materials={water=500,sand=350,soil=150,slime=200},resources={},warehouse={}}
+local profile={safeCapacity=2,levels={},materials={water=500,sand=350,soil=150,slime=200,gunpowder_unstable=80,gunpowder=60},resources={},warehouse={}}
 model.progression=NHStore.progressMenu(profile,"en")
 model.recipes={
     {id="stable",category="alchemy",alchemyMode="synthesis",name="Teleportatium",output=500,duration=120,ready=true,inputs={{name="Slime",available=300,amount=250}}},
@@ -761,6 +761,17 @@ action,param=render(model,241)
 assert(action=="buy_upgrade" and param.id=="warehouse_wand" and param.level==0)
 render(model,243)
 render(model)
+do
+    local station
+    for _,entry in ipairs(model.progression.expansion) do if entry.id=="grenade" then station=entry end end
+    local stockDetail="Combined stock, in preferred order\nAlchemical gunpowder  80\nRegular gunpowder  60"
+    station.costs[1].detail=stockDetail
+    assert(buttons[248].name=="Grenade station")
+    render(model,248)
+    render(model)
+    assert(drawn["140 / 150"] and tips["Gunpowder (total)"]==stockDetail)
+    render(model,240)
+end
 render(model,243)
 render(model)
 assert(buttons[244].name=="Salvage bench" and not green_button(244))

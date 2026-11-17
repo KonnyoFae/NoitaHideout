@@ -717,11 +717,9 @@ for i=1,#NHStore.recipes do
     if recipe.reversible then table.insert(NHStore.recipes,reverseRecipe(recipe)) end
 end
 
--- One-way workshop separation. Consume unstable powder first so that ordinary
--- gunpowder stays available for the grenade station.
 table.insert(NHStore.recipes,{
     id="separate_gunpowder",category="alchemy",alchemyMode="decomposition",zh="分解火药",en="Separate gunpowder",
-    inputs={{name="gunpowder",alternatives={"gunpowder_unstable","gunpowder"},amount=200}},
+    inputs={{name="gunpowder",amount=200}},
     materials={magic_liquid_hp_regeneration=100,purifying_powder=100},count=200,durationFrames=90*60,
 })
 
@@ -832,13 +830,18 @@ function NHStore.buyGood(state,request,now)
     return true
 end
 
-local function ingredientSources(input)
-    return input.alternatives or {input.name}
+-- Only recipe costs share these stocks. Stored materials and outputs keep their own IDs.
+local gunpowderGroup={alternatives={"gunpowder_unstable","gunpowder"},labelZh="火药",labelEn="Gunpowder"}
+local defaultIngredientGroups={gunpowder=gunpowderGroup,gunpowder_unstable=gunpowderGroup}
+
+function NHStore.ingredientSources(input)
+    local group=input.alternatives and input or defaultIngredientGroups[input.name] or input
+    return group.alternatives or {input.name},input.labelZh or group.labelZh,input.labelEn or group.labelEn
 end
 
 function NHStore.ingredientStock(state,input)
     local total=0
-    for _,name in ipairs(ingredientSources(input)) do
+    for _,name in ipairs(NHStore.ingredientSources(input)) do
         total=total+math.min(state.materials[name] or 0,max_safe_integer-total)
     end
     return total
@@ -873,8 +876,8 @@ local function batchPayment(stock,inputs,held,freeSlots)
     local payment,alternative={},false
     for name,amount in pairs(held or {}) do payment[name]=amount end
     for _,input in ipairs(inputs) do
-        local sources=ingredientSources(input)
-        if input.alternatives then
+        local sources=NHStore.ingredientSources(input)
+        if #sources>1 then
             alternative=true
             if freeSlots then sources=smallestFirst(stock,sources,payment) end
         end

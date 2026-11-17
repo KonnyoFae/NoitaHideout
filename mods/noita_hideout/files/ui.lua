@@ -1029,7 +1029,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
             label(y,tr("物料  库存 / 所需","Materials  stock / cost"),muted)
             for _,input in ipairs(selected.costs) do
                 y=y+12
-                cost(y,input.name,input.available,input.amount)
+                cost(y,input.name,input.available,input.amount,input.detail)
             end
             y=y+13
         end

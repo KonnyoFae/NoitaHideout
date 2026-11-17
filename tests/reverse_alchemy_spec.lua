@@ -192,6 +192,25 @@ for _,name in ipairs({"gunpowder","gunpowder_unstable"}) do
     completeBatch(split)
 end
 
+-- Either material ID on a recipe uses the same pool. A catalyst still has
+-- to exist as its own material and cannot also pay for an ingredient.
+local powderBatch={
+    inputs={{name="gunpowder_unstable",amount=100},{name="gunpowder",amount=100}},
+    catalysts={{name="gunpowder_unstable",amount=1}},materials={gunpowder=50},
+}
+s.materials={gunpowder=201}
+assert(NHStore.ingredientStock(s,powderBatch.inputs[1])==201)
+local ready,reason=NHStore.canStartBatch(s,powderBatch)
+assert(not ready and reason=="Missing catalyst.")
+s.materials={gunpowder=120,gunpowder_unstable=80}
+assert(not NHStore.canStartBatch(s,powderBatch))
+s.materials.gunpowder_unstable=81
+local paid,_,payment,delivery,held=NHStore.canStartBatch(s,powderBatch)
+assert(paid)
+sameStock(payment,{gunpowder=120,gunpowder_unstable=81},"powder payment")
+sameStock(held,{gunpowder_unstable=1},"powder catalyst")
+sameStock(delivery,{gunpowder=50,gunpowder_unstable=1},"powder delivery")
+
 -- Visually similar explosives are not substitutes for the final missing unit.
 local short={gunpowder=100,gunpowder_unstable=99,gunpowder_explosive=500,gunpowder_tnt=500,gunpowder_unstable_big=500}
 s.materials={}

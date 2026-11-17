@@ -500,7 +500,8 @@ for _,recipe in ipairs(NHStore.recipes) do
         assert(entry.duration==math.ceil(NHStore.productionFrames(recipe)/60))
         assert(#entry.inputs==#recipe.inputs and #entry.outputs>0)
         for i,input in ipairs(recipe.inputs) do
-            local name=input.alternatives and (input.labelEn or NHPotion.materialName(input.name)).." (total)" or NHPotion.materialName(input.name,"en")
+            local sources,_,labelEn=NHStore.ingredientSources(input)
+            local name=#sources>1 and (labelEn or NHPotion.materialName(input.name)).." (total)" or NHPotion.materialName(input.name,"en")
             assert(entry.inputs[i].name==name and entry.inputs[i].amount==input.amount)
         end
         local shown={}
@@ -1106,7 +1107,7 @@ local function testPowderSeparation()
     settings,flags={},{}
     new_world()
     local profile=state()
-    profile.materials={gunpowder_unstable=80,gunpowder=140}
+    profile.materials={gunpowder_unstable=80,gunpowder=140,oil=100}
     assert(NHStore.commit(profile))
     function CellFactory_GetAllLiquids() return {"magic_liquid_hp_regeneration"} end
     function CellFactory_GetAllSands() return {"purifying_powder","gunpowder","gunpowder_unstable"} end
@@ -1115,10 +1116,17 @@ local function testPowderSeparation()
     local view=tick()
     local split=assert(has_project(view.recipes,"separate_gunpowder"))
     assert(split.alchemyMode=="decomposition" and split.ready and split.inputs[1].available==220)
+    assert(split.inputs[1].name=="Gunpowder (total)")
     assert(split.inputs[1].detail:find("Alchemical gunpowder  80 / 80\nRegular gunpowder  140 / 120",1,true))
+    local station=assert(has_project(view.progression.expansion,"grenade"))
+    local powder=station.costs[1]
+    assert(station.canBuy and powder.name==split.inputs[1].name and powder.available==220 and powder.amount==150)
+    assert(powder.detail:find("Alchemical gunpowder  80\nRegular gunpowder  140",1,true))
     assert(view.materials[1].name=="Regular gunpowder" and view.materials[2].name=="Alchemical gunpowder")
     tick(nil,"craft",{id=split.id})
     assert(state().materials.gunpowder==20 and not state().materials.gunpowder_unstable)
+    station=assert(has_project(tick().progression.expansion,"grenade"))
+    assert(not station.canBuy and station.costs[1].available==20)
     advance(split.duration*60)
     local stock={}
     for _,material in ipairs(tick().materials) do stock[material.key]=material end

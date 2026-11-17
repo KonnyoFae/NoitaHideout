@@ -49,7 +49,7 @@ local material_groups={
 }
 local material_names={
     water={"水","Water"},sand={"沙","Sand"},slime={"黏液","Slime"},oil={"油","Oil"},
-    gunpowder={"火药","Gunpowder"},arcane_scrap={"奥术碎片","Arcane scrap"},
+    arcane_scrap={"奥术碎片","Arcane scrap"},
     fiber={"纤维","Fiber"},sugar={"糖分","Sugar"},
     empty_container={"仓库空容器","Empty containers in storage"},container_scrap={"容器碎片","Container scrap"},
     farm_sand={"沙与砂岩（合计）","Sand and sandstone (total)"},
@@ -89,10 +89,22 @@ end
 
 local function costs(s,entry,level,empty_count,lang)
     local result={}
+    local zh=lang=="zh"
     local function add(key,amount)
-        local available=key=="empty_container" and empty_count or inventory(s,key)[key] or 0
-        if material_groups[key] then available=NHStore.ingredientStock(s,material_groups[key]) end
-        result[#result+1]={key=key,name=material_names[key][lang=="zh" and 1 or 2],amount=amount,available=available}
+        local stock=inventory(s,key)
+        local available=key=="empty_container" and empty_count or stock[key] or 0
+        local alternatives,name
+        if stock==s.materials and key~="empty_container" then
+            local input=material_groups[key] or {name=key}
+            local sources,labelZh,labelEn=NHStore.ingredientSources(input)
+            if #sources>1 then
+                alternatives=sources
+                available=NHStore.ingredientStock(s,input)
+                if labelZh then name=zh and labelZh.."（合计）" or labelEn.." (total)" end
+            end
+        end
+        result[#result+1]={key=key,name=name or material_names[key][zh and 1 or 2],amount=amount,
+            available=available,alternatives=alternatives}
     end
     for _,part in ipairs(entry.cost) do add(part[1],part[2]*(level+1)) end
     if entry.category and level>=1 then add("empty_container",level) end
@@ -210,8 +222,7 @@ function NHStore.buyUpgrade(s,request,now)
     for _,part in ipairs(payment) do
         if part.key~="empty_container" then
             local stock=inventory(s,part.key)
-            local group=material_groups[part.key]
-            local sources=group and group.alternatives or {part.key}
+            local sources=part.alternatives or {part.key}
             local required=part.amount
             for _,key in ipairs(sources) do
                 local available=stock[key] or 0

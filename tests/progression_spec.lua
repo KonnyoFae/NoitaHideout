@@ -118,4 +118,29 @@ local function testLivestockCapacity()
     assert(not next(s.materials) and not next(s.resources))
 end
 testLivestockCapacity()
+
+settings,flags={},{}
+s=assert(NHStore.load())
+s.materials={oil=100,gunpowder_unstable=149,gunpowder_tnt=500}
+local station=quote("grenade")
+local powder=station.costs[1]
+assert(powder.key=="gunpowder" and powder.name=="Gunpowder (total)" and powder.available==149)
+assert(#powder.alternatives==2 and powder.alternatives[1]=="gunpowder_unstable" and powder.alternatives[2]=="gunpowder")
+assert(not station.canBuy and not buy("grenade") and s.materials.oil==100 and s.materials.gunpowder_unstable==149)
+s.materials.gunpowder_unstable=150
+assert(quote("grenade").canBuy and buy("grenade"))
+assert(not s.materials.gunpowder_unstable and not s.materials.oil and s.materials.gunpowder_tnt==500)
+
+s.materials={sand=1200,oil=149,gunpowder=210,gunpowder_unstable=90,gunpowder_explosive=500}
+assert(not quote("dragon_nest").canBuy and not buy("dragon_nest"))
+assert(s.materials.sand==1200 and s.materials.gunpowder==210 and s.materials.gunpowder_unstable==90)
+s.materials.oil=450
+local nest=quote("dragon_nest")
+assert(nest.canBuy and nest.costs[2].amount==100 and nest.costs[2].available==300)
+assert(buy("dragon_nest") and NHStore.commit(s))
+s=assert(NHStore.load())
+assert(not s.materials.gunpowder_unstable and s.materials.gunpowder==200 and s.materials.gunpowder_explosive==500)
+nest=quote("dragon_nest")
+assert(nest.canBuy and nest.costs[2].amount==200 and nest.costs[2].available==200)
+assert(buy("dragon_nest",1) and not s.materials.gunpowder and s.materials.gunpowder_explosive==500)
 print("Progression costs, stale confirmations, independent capacities, order reservations and legacy stock passed.")

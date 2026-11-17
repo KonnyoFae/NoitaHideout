@@ -427,7 +427,24 @@ local function inventory_view()
         if pouch.location=="safe" then model.secure_loot[pouch.slot]=view
         elseif pouch.location=="warehouse" then warehouse_slot("pouch",pouch.slot,view) end
     end
+    local function source_detail(sources,payment)
+        local lines={payment and tr("库存 / 本批扣料","Stock / used this batch")
+            or tr("可混用，按优先顺序列出","Combined stock, in preferred order")}
+        for _,key in ipairs(sources) do
+            local amount=string.format("%.0f",state.materials[key] or 0)
+            if payment then amount=amount..string.format(" / %.0f",payment[key] or 0) end
+            lines[#lines+1]=NHPotion.materialName(key,lang).."  "..amount
+        end
+        return table.concat(lines,"\n")
+    end
     model.progression=NHStore.progressMenu(state,lang)
+    for _,projects in pairs(model.progression) do
+        for _,project in ipairs(projects) do
+            for _,cost in ipairs(project.costs) do
+                if cost.alternatives then cost.detail=source_detail(cost.alternatives) end
+            end
+        end
+    end
     model.warehouse_capacity={}
     for _,category in ipairs({"wand","spell","containers","supplies","equipment","collection","materials"}) do
         model.warehouse_capacity[category]=NHStore.warehouseCapacity(state,category)
@@ -482,17 +499,11 @@ local function inventory_view()
         for _,input in ipairs(recipe.inputs) do
             local name=NHPotion.materialName(input.name,lang)
             local detail
-            if input.alternatives then
-                local group=input.labelZh and tr(input.labelZh,input.labelEn) or NHPotion.materialName(input.name)
+            local sources,labelZh,labelEn=NHStore.ingredientSources(input)
+            if #sources>1 then
+                local group=labelZh and tr(labelZh,labelEn) or NHPotion.materialName(input.name)
                 name=group..tr("（合计）"," (total)")
-                local lines={payment and tr("库存 / 本批扣料","Stock / used this batch")
-                    or tr("可混用，按优先顺序列出","Combined stock, in preferred order")}
-                for _,key in ipairs(input.alternatives) do
-                    local amount=string.format("%.0f",state.materials[key] or 0)
-                    if payment then amount=amount..string.format(" / %.0f",payment[key] or 0) end
-                    lines[#lines+1]=NHPotion.materialName(key,lang).."  "..amount
-                end
-                detail=table.concat(lines,"\n")
+                detail=source_detail(sources,payment)
             end
             table.insert(view.inputs,{name=name,amount=input.amount,detail=detail,available=NHStore.ingredientStock(state,input)})
         end
@@ -527,7 +538,7 @@ local function inventory_view()
                 available=state.materials[sample.name] or 0,held=held and held[sample.name] or 0})
         end
         for name,amount in pairs(recipe.materials or {}) do
-            table.insert(view.outputs,{key=name,name=NHPotion.materialName(name),amount=amount})
+            table.insert(view.outputs,{key=name,name=NHPotion.materialName(name,lang),amount=amount})
         end
         table.sort(view.outputs,function(a,b) return a.key<b.key end)
         if recipe.emptyContainers then
