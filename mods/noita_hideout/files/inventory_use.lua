@@ -5,13 +5,14 @@ local foods={}
 for _,food in ipairs(dofile("mods/noita_hideout/files/cooking.lua")) do foods[food.id]=true end
 
 function M.supports(kind)
-    return foods[kind] or kind=="bandage" or kind=="dose" or kind=="summon_card"
+    return foods[kind] or kind=="bandage" or kind=="dose" or kind=="summon_card" or kind=="remote_terminal"
         or NHMedkits.types[kind]~=nil or NHSurgeryKits.types[kind]~=nil or NHThrowables.types[kind]~=nil
 end
 
 local function maxUses(kind)
     if kind=="dose" then return NHStore.doseDurability end
     if kind=="summon_card" then return NHCompanions.durability end
+    if kind=="remote_terminal" then return NHEquipment.remoteTerminal.uses end
     local kit=NHMedkits.types[kind] or NHSurgeryKits.types[kind]
     return kit and kit.uses
 end

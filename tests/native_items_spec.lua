@@ -26,7 +26,7 @@ assert(content == first_registration)
 local cols = {}
 for cell in content:match("nh_hideout_pouch,([^\n]+)"):gmatch("[^,]+") do cols[#cols + 1] = cell end
 assert(#cols == 11 and cols[1] == "Injector pouch" and cols[9] == "针剂包")
-for _,kind in ipairs({"pouch","card_wallet"}) do
+for _,kind in ipairs({"pouch","card_wallet","remote_terminal"}) do
     local row=assert(content:match("\nnh_hideout_"..kind.."_desc,([^\n]+)"))
     assert(row:find("Right-click",1,true) and row:find("右键",1,true))
 end

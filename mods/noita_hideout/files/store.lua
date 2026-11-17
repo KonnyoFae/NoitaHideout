@@ -100,6 +100,7 @@ end
 -- Each item kind resolves to one warehouse grid for both live items and saved rows.
 NHStore.itemCategories={wand="wand",spell="spell",potion="containers",pouch="equipment",summon_card="collection"}
 NHStore.itemCategories.card_wallet="equipment"
+NHStore.itemCategories.remote_terminal="equipment"
 function NHStore.category(kind)
     return NHStore.itemCategories[kind] or "supplies"
 end
@@ -206,6 +207,8 @@ local function validate(s)
             assert(NHStore.validBandageCount(item.count),"Invalid bandage count.")
         elseif NHThrowables.types[item.kind] then
             assert(NHThrowables.validCount(NHThrowables.count(item)),"Invalid throwable count.")
+        elseif item.kind=="remote_terminal" then
+            assert(NHEquipment.validRemoteUses(item.remaining) and (item.count==nil or item.count==1),"Invalid remote terminal.")
         end
     end
     for _,rows in ipairs({s.safe,s.warehouse}) do
@@ -685,6 +688,10 @@ for _,kind in ipairs({"pouch","card_wallet"}) do
             noteEn=d.capacity.." slots. Delivered empty to equipment storage."}
     end
 end
+local terminal=NHEquipment.remoteTerminal
+NHStore.recipes[#NHStore.recipes+1]={id="remote_terminal",category="equipment",zh=terminal.zh,en=terminal.en,
+    inputs={},resources={essence_displacement=10},goldCost=100,durationFrames=30*60,
+    item=NHEquipment.remoteItem(),noteZh=terminal.noteZh,noteEn=terminal.noteEn}
 for _,food in ipairs(dofile("mods/noita_hideout/files/cooking.lua")) do
     NHStore.recipes[#NHStore.recipes+1]={id=food.id,category="food",facility=food.facility,zh=food.zh,en=food.en,
         durationFrames=food.workSeconds*60,inputs={},resources=food.resources,item=farmItem(food.id),noteZh=food.noteZh,noteEn=food.noteEn}
@@ -921,6 +928,7 @@ function NHStore.canStartBatch(state,recipe)
     if recipe.facility and NHStore.level(state,recipe.facility)==0 then return false,"Facility is locked." end
     if recipe.unlockFlag and not HasFlagPersistent(recipe.unlockFlag) then return false,"Spell not unlocked in this save." end
     if state.order then return false,"Another order is active." end
+    if recipe.goldCost and state.bankGold<recipe.goldCost then return false,"Not enough stored gold." end
     for key,amount in pairs(recipe.resources or {}) do
         if (state.resources[key] or 0)<amount then return false,"Not enough workshop resources." end
     end
@@ -978,6 +986,10 @@ function NHStore.startOrder(state,id)
     if not ready then return false,slot end
     if recipe.emptyContainers then
         local ok,reason=NHStore.spendEmptyContainers(state,recipe.emptyContainers)
+        if not ok then return false,reason end
+    end
+    if recipe.goldCost then
+        local ok,reason=NHStore.spendGold(state,recipe.goldCost)
         if not ok then return false,reason end
     end
     -- The paid order owns its item, including a spell's nested native card fields.

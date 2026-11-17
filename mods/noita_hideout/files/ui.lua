@@ -206,6 +206,11 @@ local function item_details(slot,model,tr)
         end
         return details
     end
+    if slot.kind=="remote_terminal" then
+        local device=NHEquipment.remoteTerminal
+        return {slot.name,tr("剩余连接次数 ","Connections left ")..slot.remaining.."/"..device.uses,
+            tr("每次连接消耗 1 点耐久，关闭物品栏即断开。","One charge per connection. Close the inventory to disconnect.")}
+    end
     local surgery=NHSurgeryKits.types[slot.kind]
     if surgery then
         return {slot.name,tr("清除负面状态","Clears harmful conditions"),
@@ -1205,8 +1210,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             local src=drag.source
             if src.key=="dose" then warehouse_tab="supplies"
             elseif src.key=="card_cell" or (src.key=="valuable" and src.kind=="summon_card") then warehouse_tab="collection"
-            elseif src.key=="valuable" and src.kind=="card_wallet" then warehouse_tab="equipment"
-            elseif src.key=="valuable" and src.kind=="pouch" then warehouse_tab="equipment"
+            elseif src.key=="valuable" and NHStore.category(src.kind)=="equipment" then warehouse_tab="equipment"
             elseif src.key=="native" and src.kind~="other" and (warehouse_tab~="materials" or src.kind~="potion") then
                 warehouse_tab=NHStore.category(src.kind)
             end
@@ -1214,7 +1218,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         GuiZSetForNextWidget(gui,-79)
         GuiImageNinePiece(gui,70,left,top,width*scale,height*scale,1)
         tint(gold)
-        if GuiButton(gui,71,left+6*scale,top+3*scale,(folded and "[+] " or "[-] ")..tr("仓库","Stash"),scale) and not drag then
+        local stash_name=model.remote_linked and tr("仓库 · 远程","Stash · Remote") or tr("仓库","Stash")
+        if GuiButton(gui,71,left+6*scale,top+3*scale,(folded and "[+] " or "[-] ")..stash_name,scale) and not drag then
             folded,loading=not folded,nil
             return
         end
@@ -1392,9 +1397,9 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             end
             if source.key=="card_cell" and target.key=="native" and not target.entity and target.lane=="tool" then return "take_card",target end
         end
-        if source.kind=="card_wallet" and from_store and to_store and not target.kind
+        if (source.kind=="card_wallet" or source.kind=="remote_terminal") and from_store and to_store and not target.kind
             and (target.key=="valuable" or warehouse_tab=="equipment") and (source.key~=target.key or source.safeSlot~=target.safeSlot) then
-            return "move_wallet",source,target.safeSlot
+            return source.kind=="card_wallet" and "move_wallet" or "move_terminal",source,target.safeSlot
         end
         if model.mode=="case" and source.kind=="perk" and not target.kind then
             if from_store and target.key=="perk" then return "equip_stored_perk",source end
@@ -1472,7 +1477,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     end
     for i,v in ipairs(slots) do
         local placement=drop(v)
-        if placement=="place" or placement=="move_pouch" or placement=="move_wallet" or placement=="move_wallet_card"
+        if placement=="place" or placement=="move_pouch" or placement=="move_wallet" or placement=="move_terminal" or placement=="move_wallet_card"
             or placement=="move_stored_card" or placement=="equip_stored_perk" or placement=="store_equipped_perk" then tint(green) end
         GuiImage(gui,1000+i,v.x,v.y,tile,1,scale)
         if v.kind=="reserved" then GuiText(gui,v.x+5*scale,v.y+3*scale,"...",scale)
@@ -1482,8 +1487,9 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         local kit=NHMedkits.types[v.kind]
         if (v.kind=="bandage" or NHThrowables.types[v.kind]) and (v.count or 1)>1 then
             caption="×"..compact(v.count)
-        elseif kit and v.key~="native" then
-            caption=(v.remaining or kit.uses).."/"..kit.uses
+        elseif (kit or v.kind=="remote_terminal") and v.key~="native" then
+            local maxUses=kit and kit.uses or NHEquipment.remoteTerminal.uses
+            caption=(v.remaining or maxUses).."/"..maxUses
         elseif v.kind=="dose" or v.kind=="summon_card" then
             local durability=v.kind=="summon_card" and NHCompanions.durability or model.maxUses
             local remaining=v.remaining or durability
@@ -1493,7 +1499,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         if caption then
             GuiZSetForNextWidget(gui,-84)
             local captionScale=0.8*scale
-            if kit then captionScale=math.min(captionScale,(qw-1)*scale/GuiGetTextDimensions(gui,caption)) end
+            if kit or v.kind=="remote_terminal" then captionScale=math.min(captionScale,(qw-1)*scale/GuiGetTextDimensions(gui,caption)) end
             GuiText(gui,v.x,v.y+(v.key=="warehouse" and qh-7 or qh-1)*scale,caption,captionScale)
         end
     end
@@ -1558,8 +1564,9 @@ function NHUI.draw(model, dispatch)
             draw_surgery(model.surgery,tr,x+5,y+1,w-10,1)
             return
         end
-        if not model.near then return end
-        local caption = model.at_station and tr("圣山存取点 · 打开物品栏","Hideout access · Open inventory")
+        if not model.near and not model.remote_linked then return end
+        local caption = model.remote_linked and tr("远程已连接 · 打开物品栏","Remote link active · Open inventory")
+            or model.at_station and tr("圣山存取点 · 打开物品栏","Hideout access · Open inventory")
             or tr("打开物品栏：仓库和工坊", "Open inventory for stash and workshop")
         local text_w = GuiGetTextDimensions(gui, caption)
         local x = math.floor((sw - text_w) / 2)

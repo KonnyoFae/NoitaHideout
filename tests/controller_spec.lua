@@ -2145,3 +2145,124 @@ local function testInventoryRightClick()
 end
 testInventoryRightClick()
 print("Controller: right-click uses the exact stored or carried item, respects payment, and retains world aim.")
+
+local function testRemoteTerminal()
+    settings,flags={},{}
+    new_world()
+    local saved=state()
+    saved.resources.essence_displacement,saved.bankGold=10,100
+    local backup={id=saved.nextItemId,slot=1,item=NHEquipment.remoteItem()}
+    backup.item.remaining=1
+    saved.nextItemId=saved.nextItemId+1
+    table.insert(saved.safe,backup)
+    assert(NHStore.commit(saved))
+    boot()
+    inventory_open=true
+    local recipe=assert(has_project(tick().recipes,"remote_terminal"))
+    assert(recipe.category=="equipment" and recipe.ready and recipe.inputs[1].essence=="essence_displacement"
+        and recipe.inputs[1].amount==10 and recipe.inputs[2].amount==100 and recipe.inputs[2].available==100)
+    local reserve={kind="remote_terminal",container="safe",slot=1,storedId=backup.id,remaining=1}
+    tick(nil,"move_terminal",{source="safe",from=1,entity=backup.id,destination="warehouse",safeSlot=1})
+    local parked=assert(tick().warehouse.equipment[1])
+    assert(parked.id==backup.id and parked.remaining==1)
+    tick(nil,"move_terminal",{source="warehouse",from=1,entity=parked.id,destination="safe",safeSlot=1})
+    tick(nil,"use_inventory",reserve)
+    assert(state().safe[1].item.remaining==1 and not tick().remote_linked)
+    tick(nil,"craft",{id=recipe.id})
+    local ready=advance(recipe.duration*60)
+    local function retrieve(view)
+        local record=view.warehouse.equipment[1]
+        tick(nil,"secure_withdraw",{kind="remote_terminal",container="warehouse",storedId=record.id,
+            safeSlot=1,parent=quick,lane="tool",xslot=0,yslot=0})
+        for _,slot in ipairs(tick().native_slots) do
+            if slot.kind=="remote_terminal" then slot.container="native"; return slot end
+        end
+        error("Terminal did not arrive in the native inventory")
+    end
+    local function charges(id)
+        return ComponentGetValue2(EntityGetFirstComponentIncludingDisabled(id,"ItemComponent"),"uses_remaining")
+    end
+    local terminal=retrieve(ready)
+    assert(charges(terminal.entity)==20)
+    inventory_open=false
+    EntitySetTransform(player,1000,-85)
+    held=terminal.entity
+    tick()
+    local pending=tick(nil,nil,nil,"right")
+    assert(pending.remote_linked and not pending.open and not pending.near and charges(held)==19)
+    tick(nil,nil,nil,"right")
+    tick()
+    tick(nil,nil,nil,"right")
+    assert(charges(held)==19)
+    inventory_open=true
+    assert(tick().near and tick().remote_linked)
+    tick(nil,"use_inventory",terminal)
+    assert(charges(held)==19 and #EntityGetWithTag("noita_hideout_home_wand_edit")==0)
+    local pouch=state().starterPouchId
+    local deposit={pouchId=pouch,source="safe",destination="warehouse",from=2,safeSlot=2}
+    local withdraw={pouchId=pouch,source="warehouse",destination="safe",from=2,safeSlot=2}
+    -- Keep transferring after the terminal itself is put away.
+    tick(nil,"place",{container="warehouse",safeSlot=1,entity=held,parent=quick,lane="tool",xslot=0,yslot=0})
+    assert(not EntityGetIsAlive(terminal.entity) and tick().warehouse.equipment[1].remaining==19)
+    tick(nil,"move_pouch",deposit)
+    assert(starter().location=="warehouse" and tick().near)
+    inventory_open=false
+    assert(not tick().remote_linked)
+    inventory_open=true
+    assert(not tick().near)
+    tick(nil,"move_pouch",withdraw)
+    assert(starter().location=="warehouse")
+
+    -- A failed profile write gives no access. The final stored charge opens a full session.
+    fail_commit=true
+    tick(nil,"use_inventory",reserve)
+    fail_commit=false
+    assert(not advance(61).remote_linked and state().safe[1].item.remaining==1)
+    tick(nil,"use_inventory",reserve)
+    assert(tick().remote_linked and not NHStore.safeIndex(state(),1))
+    tick(nil,"move_pouch",withdraw)
+    assert(starter().location=="safe")
+    terminal=retrieve(tick())
+    assert(charges(terminal.entity)==19)
+    inventory_open=false
+    tick()
+    inventory_open=true
+    assert(not tick().near)
+    tick(nil,"use_inventory",terminal)
+    assert(tick().remote_linked and charges(terminal.entity)==18)
+    boot()
+    assert(not tick().near and not tick().remote_linked)
+
+    -- The throw edge is captured before the engine switches the inventory on.
+    inventory_open=false
+    held=terminal.entity
+    tick()
+    tick()
+    local post=OnWorldPostUpdate
+    OnWorldPostUpdate=function() inventory_open=true; post() end
+    local linked=tick(nil,nil,nil,"right")
+    OnWorldPostUpdate=post
+    assert(linked.near and linked.remote_linked and charges(held)==17)
+    entities[player].tags.player_unit=nil
+    tick()
+    entities[player].tags.player_unit=true
+    assert(not tick().near and not tick().remote_linked)
+
+    inventory_open=false
+    tick()
+    tick()
+    ComponentSetValue2(EntityGetFirstComponentIncludingDisabled(held,"ItemComponent"),"uses_remaining",1)
+    pending=tick(nil,nil,nil,"right")
+    assert(pending.remote_linked and not EntityGetIsAlive(terminal.entity))
+    inventory_open=true
+    assert(tick().near)
+    tick(nil,"move_pouch",deposit)
+    assert(starter().location=="warehouse")
+    OnPlayerDied()
+    new_world()
+    EntitySetTransform(player,1000,-85)
+    inventory_open=true
+    assert(not tick().near and not tick().remote_linked)
+end
+testRemoteTerminal()
+print("Controller: remote crafting, one paid inventory session, repeated field transfers and disconnect passed.")

@@ -35,6 +35,9 @@ function NHNative.registerTranslations()
         {"nh_hideout_food_regen","Food regeneration","食物再生"},
         {"nh_hideout_food_regen_desc","Restores 1 HP every 4 seconds.","每 4 秒恢复 1 点生命。"},
     }
+    local terminal=equipment.remoteTerminal
+    labels[#labels+1]={terminal.name:sub(2),terminal.en,terminal.zh}
+    labels[#labels+1]={terminal.name:sub(2).."_desc",terminal.noteEn,terminal.noteZh}
     for _,kind in ipairs({"pouch","card_wallet"}) do
         for _,d in ipairs(equipment[kind]) do
             local key=d.name:sub(2)

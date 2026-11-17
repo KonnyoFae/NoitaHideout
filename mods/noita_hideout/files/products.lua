@@ -18,7 +18,8 @@ local function item_uses(entity,product)
 end
 
 local foods=dofile("mods/noita_hideout/files/cooking.lua")
-local products={}
+local remoteCharge={field="remaining",valid=NHEquipment.validRemoteUses,error="Invalid terminal charge."}
+local products={"remote_terminal"}
 local throwable_counts={}
 for _,kind in ipairs(NHThrowables.order) do
     products[#products+1]=kind
@@ -32,12 +33,13 @@ for _,kind in ipairs(products) do
     local id=kind
     local icon=items..id..".png"
     NHProducts.icons[id]=icon
-    local product=healing_items[id] or throwable_counts[id]
+    local product=healing_items[id] or throwable_counts[id] or (id=="remote_terminal" and remoteCharge)
     local surgery=NHSurgeryKits.types[id]
     if surgery then
         product={field="remaining",valid=function(n) return n==surgery.uses end,error="Invalid surgery kit."}
     end
     NHTransfers.registerItem(id,function(entity) return EntityHasTag(entity,"noita_hideout_"..id) end,{
+        warehouseCategory=id=="remote_terminal" and "equipment" or nil,
         capture=function(entity)
             local record={kind=id,name="$nh_hideout_"..id,icon=icon}
             if product then
@@ -64,6 +66,16 @@ for _,kind in ipairs(products) do
             return entity
         end,
     })
+end
+
+function NHProducts.spendRemoteCharge(player,entity)
+    if not entity or entity==0 or not EntityGetIsAlive(entity) or EntityGetRootEntity(entity)~=player
+        or not EntityHasTag(entity,"noita_hideout_remote_terminal") then return false end
+    local item,uses=item_uses(entity,remoteCharge)
+    if not remoteCharge.valid(uses) then return false end
+    if uses==1 then GameKillInventoryItem(player,entity)
+    else ComponentSetValue2(item,"uses_remaining",uses-1) end
+    return true
 end
 
 local function heal(player,fixedHP,percent,pay)

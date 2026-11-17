@@ -321,3 +321,28 @@ local function testInventoryProducts()
 end
 testInventoryProducts()
 print("Inventory products: rejected charges have no effect and unheld stacks use the saved world aim.")
+
+do
+    function EntityGetIsAlive(id) return entities[id]~=nil end
+    local adapter=adapters.remote_terminal.adapter
+    local fresh=NHEquipment.remoteItem()
+    assert(adapter.warehouseCategory=="equipment" and fresh.remaining==20)
+    local terminal=assert(adapter.restore(fresh,2,5))
+    assert(adapters.remote_terminal.match(terminal) and not NHProducts.spendRemoteCharge(player,terminal))
+    EntityAddChild(player,terminal)
+    assert(NHProducts.spendRemoteCharge(player,terminal))
+    local worn=assert(adapter.capture(terminal))
+    assert(worn.remaining==19 and worn.kind==fresh.kind and worn.icon==fresh.icon and worn.name==fresh.name)
+    EntityKill(terminal)
+    terminal=assert(adapter.restore(worn,10,-5))
+    assert(adapter.capture(terminal).remaining==19)
+    EntityAddChild(player,terminal)
+    selected=terminal
+    for uses=19,1,-1 do
+        assert(adapter.capture(terminal).remaining==uses and NHProducts.spendRemoteCharge(player,terminal))
+    end
+    assert(not NHProducts.spendRemoteCharge(player,terminal))
+    for _,invalid in ipairs({-1,0,21,0.5,"2"}) do
+        assert(not adapter.restore({kind=fresh.kind,remaining=invalid},0,0))
+    end
+end

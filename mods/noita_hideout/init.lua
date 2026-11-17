@@ -33,6 +33,8 @@ local lang, status, last_error = "en", "", nil
 local model_cache, next_attempt = nil, 0
 local last_dose_frame = -1
 local right_use
+-- A paid link belongs to this player and lasts through one opening of the native inventory.
+local remote_owner,remote_inventory_opened
 local inventory_aim={x=1,y=0}
 local next_room_check,pending_visit=0,nil
 local bank_synced=false
@@ -234,7 +236,16 @@ local function near_home(player)
 end
 
 local function near_hideout(player)
-    return near_home(player) or mountain_storage.inRange(player)
+    return near_home(player) or mountain_storage.inRange(player) or (remote_owner==player and GameIsInventoryOpen())
+end
+
+local function track_remote(player,inventory_open)
+    if not remote_owner then return end
+    if remote_owner~=player or (remote_inventory_opened and not inventory_open) then
+        remote_owner,remote_inventory_opened=nil,nil
+    elseif inventory_open then
+        remote_inventory_opened=true
+    end
 end
 
 local function active_run()
@@ -336,7 +347,7 @@ end
 local function item_label(entry)
     local item = entry.item
     if item.kind == "potion" then return NHPotion.label(item, lang) end
-    if item.kind=="card_wallet" then
+    if item.kind=="card_wallet" or item.kind=="remote_terminal" then
         local d=NHEquipment.get(item.kind,item.tier)
         return tr(d.zh,d.en)
     end
@@ -480,11 +491,8 @@ local function inventory_view()
         if kit and kit.healPercent then view.medkit=kit end
         if recipe.item and recipe.item.kind=="dose" then
             view.icon=NHInjectors.get(recipe.item.subtype).icon
-        elseif recipe.item and (recipe.category=="medical" or recipe.category=="weapons") then
+        elseif recipe.item and (recipe.category=="medical" or recipe.category=="weapons" or recipe.category=="equipment") then
             view.icon=recipe.item.icon
-        elseif recipe.category=="equipment" then
-            local d=NHEquipment.get(recipe.item.kind,recipe.item.tier)
-            if d then view.icon=d.icon end
         end
         if recipe.category=="spell" then
             local card=recipe.item
@@ -520,6 +528,9 @@ local function inventory_view()
             local kind=NHEssences.types[key] or NHFarm.crops[key] or NHLivestock.resources[key]
             table.insert(view.inputs,{name=tr(kind.zh,kind.en),amount=recipe.resources[key],available=state.resources[key] or 0,
                 essence=NHEssences.types[key] and key})
+        end
+        if recipe.goldCost then
+            table.insert(view.inputs,{name=tr("存钱罐金币","Piggy bank gold"),amount=recipe.goldCost,available=state.bankGold})
         end
         if recipe.storedIngredient then
             local kind=recipe.storedIngredient
@@ -601,6 +612,7 @@ local function native_slots(player)
                         if slot then
                             slot.entity,slot.kind = id,kind
                             if kind=="dose" then slot.remaining,slot.subtype=NHDoses.remaining(state,id) end
+                            if kind=="remote_terminal" then slot.remaining=ComponentGetValue2(item,"uses_remaining") end
                             if kind=="pouch" then slot.pouchId=NHDoses.isPouch(state,id) end
                             if kind=="card_wallet" then
                                 local row=NHCardWallets.carried(state,player,id)
@@ -677,9 +689,31 @@ local function matches_wallet(player,id)
     return popup and popup.kind=="card_wallet" and popup.id==id and popup_accessible(player)
 end
 
+local function connect_remote(player,pay)
+    if remote_owner==player then return end
+    if near_home(player) or mountain_storage.inRange(player) then
+        GamePrint(tr("附近已有藏身处存取点。","A local hideout access point is in range."))
+        return
+    end
+    if not pay() then return end
+    remote_owner,remote_inventory_opened=player,GameIsInventoryOpen()
+    model_cache,last_error,status=nil,nil,""
+    GamePrint(remote_inventory_opened and tr("已连接远程藏身处。","Remote hideout connected.")
+        or tr("已连接远程藏身处，打开物品栏即可存取。","Remote hideout connected. Open your inventory to access storage."))
+end
+
 local function use_carried(player,entity,slot)
     local kind=NHNative.kind(entity) or NHTransfers.item_kind(entity)
-    if kind=="pouch" then
+    if kind=="remote_terminal" then
+        connect_remote(player,function()
+            local draft=active_draft()
+            if not draft then return false end
+            local ok,reason=NHTransfers.reconcile(draft,player)
+            if not ok then report(reason); return false end
+            if draft.revision~=state.revision then state,model_cache=draft,nil end
+            return NHProducts.spendRemoteCharge(player,entity)
+        end)
+    elseif kind=="pouch" then
         local id=NHDoses.isPouch(state,entity)
         if id then opened,popup=true,{id=id,entity=entity} end
     elseif kind=="card_wallet" then
@@ -711,6 +745,7 @@ local function use_inventory(player,source)
     if source.container=="native" then
         local slot=matching_slot(player,source)
         if slot and slot.entity==source.entity and slot.kind==source.kind and EntityGetRootEntity(slot.entity)==player then
+            if slot.kind=="remote_terminal" and slot.remaining~=source.remaining then return end
             use_carried(player,slot.entity,slot)
         end
         return
@@ -734,7 +769,9 @@ local function use_inventory(player,source)
         if not inventory_access(player,source) then return false end
         return commit_edit(function(draft) return NHInventoryUse.spend(draft,player,source) end)
     end
-    if item.kind=="dose" then
+    if item.kind=="remote_terminal" then
+        connect_remote(player,pay)
+    elseif item.kind=="dose" then
         local left=(item.remaining or NHStore.doseDurability)-1
         inject(player,item.subtype,function()
             if pay() then return true,left end
@@ -916,7 +953,7 @@ local function dispatch(player, action, index)
             if ok then status="" else transfer_error(reason) end
             return
         end
-        if action=="move_stored_card" or action=="move_wallet" then
+        if action=="move_stored_card" or action=="move_wallet" or action=="move_terminal" then
             local from,to=index.source,index.destination
             if not case_open or not GameIsInventoryOpen() or (from~="safe" and from~="warehouse")
                 or (to~="safe" and to~="warehouse") or ((from=="warehouse" or to=="warehouse") and not near_hideout(player)) then return end
@@ -925,11 +962,12 @@ local function dispatch(player, action, index)
                     return NHCompanions.moveCard(draft,from,index.from,to,index.safeSlot,index.entity)
                 end)
             else
+                local kind=action=="move_wallet" and "card_wallet" or "remote_terminal"
                 local moved=commit_edit(function(draft)
-                    local at=NHStore.slotIndex(draft,from,index.from,"card_wallet")
+                    local at=NHStore.slotIndex(draft,from,index.from,kind)
                     local row=at and draft[from][at]
-                    if not row or row.id~=index.entity or row.item.kind~="card_wallet"
-                        or not NHStore.freeSlot(draft,to,index.safeSlot,"card_wallet") then return false,"Inventory slot changed." end
+                    if not row or row.id~=index.entity or row.item.kind~=kind
+                        or not NHStore.freeSlot(draft,to,index.safeSlot,kind) then return false,"Inventory slot changed." end
                     table.remove(draft[from],at)
                     row.slot=index.safeSlot
                     table.insert(draft[to],row)
@@ -1058,6 +1096,7 @@ end
 function OnWorldInitialized()
     NHSurgery.reset()
     right_use=nil
+    remote_owner,remote_inventory_opened=nil,nil
     inventory_aim.x,inventory_aim.y=1,0
     NHClock.reset()
     mountain_storage.reset()
@@ -1106,7 +1145,9 @@ function OnWorldPreUpdate()
     local player = current_player()
     if player then set_home(player,false) end
     NHHomeWandEdit.update(player,player and (not state or active_run()) and near_home(player))
-    local menu=GameIsInventoryOpen() or opened
+    local inventory_open=GameIsInventoryOpen()
+    track_remote(player,inventory_open)
+    local menu=inventory_open or opened
     right_use=NHNative.prepareRightUse(player,menu,menu and NHUI.useTarget() or nil)
     if type(right_use)=="number" then right_use=NHNative.heldUseSlot(player,right_use) end
     if player and not menu then
@@ -1134,6 +1175,8 @@ end
 
 function OnWorldPostUpdate()
     local player = current_player()
+    local inventory_open=GameIsInventoryOpen()
+    track_remote(player,inventory_open)
     local used=right_use
     right_use=nil
     surgery_feedback(NHSurgery.update(player))
@@ -1151,7 +1194,6 @@ function OnWorldPostUpdate()
     local farm_time=NHFarm.observe(state,frame)
     if not update_workshop(traveler,frame,farm_time) then return end
     if not player then opened,case_open=false,nil; return end
-    local inventory_open = GameIsInventoryOpen()
     local restored
     if used and (used.container=="held" or used.container=="native") then
         restored=NHNative.recoverUseSlot(player,used,place_in_slot)
@@ -1163,7 +1205,6 @@ function OnWorldPostUpdate()
         if not ok then invalidate(); report(err); return end
     end
     local at_station = mountain_storage.inRange(player)
-    local nearby = at_station or near_home(player)
     local was_open,was_case_open = opened,case_open
     if popup and not popup_accessible(player) then
         popup=nil
@@ -1171,6 +1212,9 @@ function OnWorldPostUpdate()
     end
     if inventory_open then
         opened,case_open=true,true
+        -- A held right click can reach us just as the engine opens the inventory.
+        if used and used.container=="held" and used.owner==player and (NHNative.held(player)==used.entity or restored)
+            and NHTransfers.item_kind(used.entity)=="remote_terminal" then use_carried(player,used.entity,used) end
     elseif case_open then
         close_panel()
     elseif popup then
@@ -1180,6 +1224,7 @@ function OnWorldPostUpdate()
         elseif restored then use_carried(player,used.entity,used) end
     end
     if not active_run() then return end
+    local nearby=at_station or near_home(player) or (remote_owner==player and inventory_open)
     -- Discoveries made outside the hideout can unlock vanilla spells without changing its inventory.
     if case_open and (not was_case_open or (nearby and model_cache and not model_cache.near)) then model_cache=nil end
     local model = opened and inventory_view() or {}
@@ -1212,6 +1257,7 @@ function OnWorldPostUpdate()
     model.mode = case_open and "case" or (popup and "container" or "closed")
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
     model.at_station=at_station
+    model.remote_linked=remote_owner==player
     model.surgery=NHSurgery.view()
 
     if case_open then NHPerks.view(state,player,model) end
@@ -1224,6 +1270,7 @@ end
 
 function OnPlayerDied()
     NHSurgery.reset()
+    remote_owner,remote_inventory_opened=nil,nil
     NHHomeWandEdit.update(nil,false)
     popup=nil
     opened, case_open = false, nil

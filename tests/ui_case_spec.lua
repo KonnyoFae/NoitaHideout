@@ -1650,6 +1650,35 @@ end
 testRightUse()
 print("UI: exact right-click sources, moving cursor, stale stacks, occlusion, left drag and inventory surgery HUD passed.")
 
+do
+    local m={open=false,lang="en",near=false,remote_linked=true}
+    render(m)
+    assert(drawn["Remote link active · Open inventory"])
+    m.open,m.near,m.mode,m.status=true,true,"case",""
+    m.capacity,m.maxUses,m.revision=2,3,1
+    m.secure_loot={{id=91,kind="remote_terminal",name="Remote hideout terminal",remaining=18}}
+    m.native_slots,m.warehouse={},{}
+    m.warehouse_capacity={wand=48,spell=48,containers=48,supplies=48,equipment=48,collection=48,materials=16}
+    m.progression,m.recipes,m.shopGoods={expansion={},upgrade={}},{},{}
+    render(m)
+    assert(buttons[71].name:find("Stash · Remote",1,true) and drawn["18/20"])
+    pointer={x=tiles[1001].x+2,y=tiles[1001].y+2}
+    render(m)
+    assert(drawn["Connections left 18/20"])
+    local target=assert(NHUI.useTarget())
+    assert(target.kind=="remote_terminal" and target.remaining==18 and target.storedId==91)
+    render(m,79)
+    render(m)
+    pointer={x=tiles[1001].x+2,y=tiles[1001].y+2,pressed=true,down=true}
+    render(m)
+    pointer={x=tiles[1003].x+2,y=tiles[1003].y+2,released=true}
+    local move,request=render(m)
+    assert(move=="move_terminal" and request.source=="safe" and request.destination=="warehouse" and request.entity==91)
+    m.open,m.near,m.remote_linked=false,false,false
+    render(m)
+    assert(not drawn["Remote link active · Open inventory"] and not NHUI.useTarget())
+end
+
 local function testContainerGrid(capacity,isWallet,standalone)
     local kind=isWallet and "card_wallet" or "pouch"
     local sample=isWallet and {species="dryad",remaining=79,count=1} or {subtype="frost",remaining=2,count=1}
