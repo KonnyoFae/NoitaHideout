@@ -457,7 +457,7 @@ local function inventory_view()
         if kit and kit.healPercent then view.medkit=kit end
         if recipe.item and recipe.item.kind=="dose" then
             view.icon=NHInjectors.get(recipe.item.subtype).icon
-        elseif recipe.category=="medical" and recipe.item then
+        elseif recipe.item and (recipe.category=="medical" or recipe.category=="weapons") then
             view.icon=recipe.item.icon
         elseif recipe.category=="equipment" then
             local d=NHEquipment.get(recipe.item.kind,recipe.item.tier)

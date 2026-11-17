@@ -190,7 +190,7 @@ model.recipes={
     {id="stable",category="alchemy",alchemyMode="synthesis",name="Teleportatium",output=500,duration=120,ready=true,inputs={{name="Slime",available=300,amount=250}}},
     {id="medical",category="medical",name="Medkit",icon="mods/noita_hideout/files/items/medkit.png",output=1,duration=5,ready=true,inputs={{name="Slime",available=300,amount=100}}},
     {id="injector",category="medical",name="Fire injector",output=1,duration=120,ready=false,reason="Need stock",inputs={}},
-    {id="grenade",category="weapons",name="Magic grenade",output=1,duration=120,ready=false,unlocked=false,reason="Build the station",inputs={}},
+    {id="grenade",category="weapons",name="Magic grenade",icon="mods/noita_hideout/files/items/grenade.png",output=8,duration=10,ready=false,unlocked=false,reason="Build the station",inputs={}},
     {id="pouch",category="equipment",name="Injector pouch",output=1,duration=120,ready=true,
         inputs={{name="Slime",amount=50,available=100},{name="Empty container",amount=1,available=2}}},
     {id="reverse_stable",category="alchemy",alchemyMode="decomposition",name="Decompose Teleportatium",duration=120,ready=true,
@@ -629,8 +629,10 @@ render(model,240)
 render(model,252)
 render(model)
 assert(drawn["Magic grenade"] and not green_button(244))
+assert(drawn["mods/noita_hideout/files/items/grenade.png"])
 render(model,244)
 assert(not render(model,214) and drawn["Build the station"])
+assert(drawn["mods/noita_hideout/files/items/grenade.png"])
 model.order_active=true
 assert(not render(model,214) and drawn["Making: Medkit"] and drawn["Build the station"] and drawn["0:05"])
 model.order_active=false

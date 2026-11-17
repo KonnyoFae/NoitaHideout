@@ -1,7 +1,7 @@
 <Entity name="$nh_hideout_sand_knife" tags="noita_hideout_sand_knife,item_pickup,item_physics,teleportable_NOT">
     <Base file="mods/noita_hideout/files/items/base.xml">
         <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/sand_knife.png" />
-        <SpriteComponent image_file="mods/noita_hideout/files/items/sand_knife.png" offset_x="7" offset_y="6" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/sand_knife.png" offset_x="8" offset_y="8" />
         <ItemComponent item_name="$nh_hideout_sand_knife" uses_remaining="1" ui_description="$nh_hideout_sand_knife_desc"
             ui_sprite="mods/noita_hideout/files/items/sand_knife.png" />
         <UIInfoComponent name="$nh_hideout_sand_knife" />

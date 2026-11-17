@@ -492,7 +492,7 @@ local catalog=tick().recipes
 assert(#catalog==#NHStore.recipes)
 for _,recipe in ipairs(NHStore.recipes) do
     local entry=assert(has_project(catalog,recipe.id),recipe.id)
-    if recipe.category=="medical" and recipe.item.kind~="dose" then
+    if recipe.category=="weapons" or (recipe.category=="medical" and recipe.item.kind~="dose") then
         assert(entry.icon=="mods/noita_hideout/files/items/"..recipe.item.kind..".png",recipe.id)
     end
     if recipe.category=="alchemy" then

@@ -645,7 +645,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         if shopping then return item.ready end
         return item.canBuy
     end
-    local preview=crafting and selected and selected.category=="medical" and selected.icon
+    local preview=crafting and selected and (selected.category=="medical" or selected.category=="weapons") and selected.icon
     local body_height=62
     if tab=="samples" and not salvage then body_height=82
     elseif salvage then

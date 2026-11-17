@@ -3,6 +3,6 @@
         <VelocityComponent gravity_y="60" />
         <ProjectileComponent speed_min="270" speed_max="270" angular_velocity="0.18" />
     </Base>
-    <SpriteComponent image_file="mods/noita_hideout/files/items/sand_knife.png" offset_x="7" offset_y="6" />
+    <SpriteComponent image_file="mods/noita_hideout/files/items/sand_knife.png" offset_x="8" offset_y="8" />
     <VariableStorageComponent _tags="nh_throwable_impact" value_string="sand_knife" value_bool="0" />
 </Entity>
