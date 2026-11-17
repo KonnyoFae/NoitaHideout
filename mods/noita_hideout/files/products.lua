@@ -1,5 +1,5 @@
 -- Physical workshop products use the same capture/restore journal as ordinary equipment.
-NHProducts={}
+NHProducts={icons={}}
 local items="mods/noita_hideout/files/items/"
 local healing_items={
     bandage={field="count",default=1,legacySingle=true,valid=NHStore.validBandageCount,healHP=5,error="Invalid bandage count."},
@@ -30,6 +30,8 @@ for _,kind in ipairs(NHSurgeryKits.order) do products[#products+1]=kind end
 for _,food in ipairs(foods) do products[#products+1]=food.id end
 for _,kind in ipairs(products) do
     local id=kind
+    local icon=items..id..".png"
+    NHProducts.icons[id]=icon
     local product=healing_items[id] or throwable_counts[id]
     local surgery=NHSurgeryKits.types[id]
     if surgery then
@@ -37,7 +39,7 @@ for _,kind in ipairs(products) do
     end
     NHTransfers.registerItem(id,function(entity) return EntityHasTag(entity,"noita_hideout_"..id) end,{
         capture=function(entity)
-            local record={kind=id,name="$nh_hideout_"..id,icon=items..id..".png"}
+            local record={kind=id,name="$nh_hideout_"..id,icon=icon}
             if product then
                 local _,uses=item_uses(entity,product)
                 if not product.valid(uses) then return nil,product.error end

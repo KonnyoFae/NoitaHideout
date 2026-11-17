@@ -645,6 +645,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         if shopping then return item.ready end
         return item.canBuy
     end
+    local preview=crafting and selected and selected.category=="medical" and selected.icon
     local body_height=62
     if tab=="samples" and not salvage then body_height=82
     elseif salvage then
@@ -669,7 +670,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         elseif not plot then body_height=13*math.max(1,#farm.plots)+5
         else body_height=(plot.crop and 42 or 28)+13*#farm.crops+2 end
     elseif crafting and selected then
-        body_height=68+12*#selected.inputs
+        body_height=68+12*#selected.inputs+(preview and 5 or 0)
         if spells then body_height=body_height+13 end
         if catalyst_count>0 then body_height=body_height+13+12*catalyst_count end
         if show_outputs then body_height=body_height+13+12*#outputs end
@@ -688,11 +689,19 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
     local height=workshop_folded and 20 or layout.panelHeight
     local top=sh-5-height*scale
     panels[#panels+1]={x=left,y=top,w=width*scale,h=height*scale,slot={key="panel"}}
-    local function label(y,value,color)
-        local txt,short=fit(value,(width-12)*scale,scale)
+    local function label(y,value,color,x)
+        x=x or 6
+        local txt,short=fit(value,(width-x-6)*scale,scale)
         tint(color or white)
-        GuiText(gui,left+6*scale,top+y*scale,txt,scale)
+        GuiText(gui,left+x*scale,top+y*scale,txt,scale)
         if short then GuiTooltip(gui,value,"") end
+    end
+    local function recipe_icon(id,y,path,size)
+        if not path then return 6 end
+        local w,h=GuiGetImageDimensions(gui,path)
+        if w<=0 or h<=0 then return 6 end
+        GuiImage(gui,id,left+6*scale,top+y*scale,path,1,size*scale/math.max(w,h))
+        return 8+size
     end
     local function button(id,x,y,value,color,tip,detail)
         local txt,short=fit(value,(width-x-5)*scale,scale)
@@ -909,9 +918,11 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
             end
         end
         if button(240,6,body,back) then selected_entry=nil; return finish() end
-        label(body+14,show_outputs and selected.name or selected.name.." ×"..selected.output,available(selected) and green or white)
-        value_row(body+27,tr("预计用时","Craft time"),time_text(selected.duration),white)
-        local y=body+40
+        local x=recipe_icon(610,body+14,preview,16)
+        label(body+(preview and 17 or 14),show_outputs and selected.name or selected.name.." ×"..selected.output,available(selected) and green or white,x)
+        local y=body+(preview and 32 or 27)
+        value_row(y,tr("预计用时","Craft time"),time_text(selected.duration),white)
+        y=y+13
         if spells then
             local spell_type=selected.spellType=="static_projectile" and tr("静态投射物","Static projectile") or tr("投射物","Projectile")
             label(y,spell_type..tr(" → 法术仓库"," → Spell storage"),muted)
@@ -1067,14 +1078,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
                 local color=available(item) and green or white
                 if item.planned or item.maxed or item.unlocked==false then color=muted end
                 if spells and not spell_family then color=NHEssences.types[item.id].color end
-                local x=6
-                if crafting and item.icon then
-                    local iw,ih=GuiGetImageDimensions(gui,item.icon)
-                    if iw>0 and ih>0 then
-                        GuiImage(gui,600+i,left+x*scale,top+row_y*scale,item.icon,1,10*scale/math.max(iw,ih))
-                        x=x+12
-                    end
-                end
+                local x=crafting and recipe_icon(600+i,row_y,item.icon,10) or 6
                 if button(243+i,x,row_y,item.name,color,item.actionId and item.name,item.actionId) then
                     if spells and not spell_family then spell_family=item.id else selected_entry=item.id end
                     return finish()

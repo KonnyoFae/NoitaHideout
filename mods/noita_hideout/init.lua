@@ -363,7 +363,7 @@ local function stored_view(entry)
     local wallet=item.kind=="card_wallet" and NHEquipment.get(item.kind,item.tier)
     return {id=entry.id,kind=item.kind,name=item_label(entry),potion=potion,capacity=wallet and wallet.capacity,
         icon=potion and NHPotion.inventoryIcon(potion) or (item.kind=="dose" and NHInjectors.get(item.subtype).icon)
-            or (wallet and wallet.icon) or item.icon or (item.sprite and item.sprite.image_file),
+            or (wallet and wallet.icon) or item.icon or (item.sprite and item.sprite.image_file) or NHProducts.icons[item.kind],
         remaining=NHMedkits.remaining(item),count=item.count or ((item.kind=="bandage" or item.kind=="grenade") and 1 or nil),
         subtype=item.subtype,species=item.species,dockSlot=NHPotion.dockSlot(item)}
 end
@@ -457,6 +457,8 @@ local function inventory_view()
         if kit and kit.healPercent then view.medkit=kit end
         if recipe.item and recipe.item.kind=="dose" then
             view.icon=NHInjectors.get(recipe.item.subtype).icon
+        elseif recipe.category=="medical" and recipe.item then
+            view.icon=recipe.item.icon
         elseif recipe.category=="equipment" then
             local d=NHEquipment.get(recipe.item.kind,recipe.item.tier)
             if d then view.icon=d.icon end

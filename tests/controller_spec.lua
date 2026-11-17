@@ -492,6 +492,9 @@ local catalog=tick().recipes
 assert(#catalog==#NHStore.recipes)
 for _,recipe in ipairs(NHStore.recipes) do
     local entry=assert(has_project(catalog,recipe.id),recipe.id)
+    if recipe.category=="medical" and recipe.item.kind~="dose" then
+        assert(entry.icon=="mods/noita_hideout/files/items/"..recipe.item.kind..".png",recipe.id)
+    end
     if recipe.category=="alchemy" then
         assert(entry.category=="alchemy" and entry.alchemyMode==recipe.alchemyMode,recipe.id)
         assert(entry.duration==math.ceil(NHStore.productionFrames(recipe)/60))
@@ -1175,6 +1178,7 @@ local function testLegacyMedkitOrder()
     advance(60)
     local delivered=state()
     assert(not delivered.order and delivered.warehouse[1].item.kind=="medkit")
+    assert(tick().warehouse.supplies[1].icon=="mods/noita_hideout/files/items/medkit.png")
     assert(delivered.resources.essence_healing==25)
     GameTextGetTranslatedOrNot=previous
 end

@@ -1,7 +1,7 @@
 <Entity name="$nh_hideout_field_surgery_kit" tags="noita_hideout_field_surgery_kit,item_pickup,item_physics,teleportable_NOT">
     <Base file="mods/noita_hideout/files/items/base.xml">
         <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/field_surgery_kit.png" />
-        <SpriteComponent image_file="mods/noita_hideout/files/items/field_surgery_kit.png" offset_x="8" offset_y="5" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/field_surgery_kit.png" offset_x="8" offset_y="8" />
         <ItemComponent item_name="$nh_hideout_field_surgery_kit" uses_remaining="1" ui_description="$nh_hideout_field_surgery_kit_desc"
             ui_sprite="mods/noita_hideout/files/items/field_surgery_kit.png" />
         <UIInfoComponent name="$nh_hideout_field_surgery_kit" />

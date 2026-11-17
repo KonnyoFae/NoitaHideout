@@ -188,7 +188,7 @@ local profile={safeCapacity=2,levels={},materials={water=500,sand=350,soil=150,s
 model.progression=NHStore.progressMenu(profile,"en")
 model.recipes={
     {id="stable",category="alchemy",alchemyMode="synthesis",name="Teleportatium",output=500,duration=120,ready=true,inputs={{name="Slime",available=300,amount=250}}},
-    {id="medical",category="medical",name="Medkit",output=1,duration=5,ready=true,inputs={{name="Slime",available=300,amount=100}}},
+    {id="medical",category="medical",name="Medkit",icon="mods/noita_hideout/files/items/medkit.png",output=1,duration=5,ready=true,inputs={{name="Slime",available=300,amount=100}}},
     {id="injector",category="medical",name="Fire injector",output=1,duration=120,ready=false,reason="Need stock",inputs={}},
     {id="grenade",category="weapons",name="Magic grenade",output=1,duration=120,ready=false,unlocked=false,reason="Build the station",inputs={}},
     {id="pouch",category="equipment",name="Injector pouch",output=1,duration=120,ready=true,
@@ -585,6 +585,7 @@ render(model,240)
 render(model,251)
 render(model)
 assert(drawn.Medkit and drawn["Fire injector"] and not drawn.Teleportatium and not buttons[254] and not buttons[255])
+assert(drawn["mods/noita_hideout/files/items/medkit.png"])
 assert(green_button(244) and not green_button(245))
 render(model,245)
 assert(not render(model,214) and drawn["Need stock"])
@@ -592,6 +593,7 @@ render(model,240)
 render(model,244)
 action,param=render(model,214)
 assert(action=="craft" and param.id=="medical" and drawn["0:05"])
+assert(drawn["mods/noita_hideout/files/items/medkit.png"])
 do
     local recipe={id="injector_essence",category="medical",name="Fire injector (fire essence)",output=1,duration=120,
         ready=false,reason="Not enough workshop resources.",inputs={{name="Fire essence",available=5,amount=6}}}
