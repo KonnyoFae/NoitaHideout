@@ -1,0 +1,5 @@
+<Entity tags="noita_hideout_mountain_storage,teleportable_NOT">
+    <SpriteComponent image_file="data/buildings_gfx/chest_steel.png"
+        offset_x="9" offset_y="6" />
+    <LightComponent r="164" g="203" b="188" radius="34" />
+</Entity>

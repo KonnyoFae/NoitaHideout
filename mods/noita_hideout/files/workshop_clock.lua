@@ -42,6 +42,6 @@ function NHClock.mountainAt(player)
     if dx<ComponentGetValue2(hitbox,"aabb_min_x") or dx>ComponentGetValue2(hitbox,"aabb_max_x")
         or dy<ComponentGetValue2(hitbox,"aabb_min_y") or dy>ComponentGetValue2(hitbox,"aabb_max_y") then return end
     if BiomeMapGetName(ax,ay)=="$biome_holymountain" then
-        return math.floor(ax)..","..math.floor(ay)
+        return math.floor(ax)..","..math.floor(ay),ax,ay
     end
 end

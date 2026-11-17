@@ -34,7 +34,7 @@ assert(#NHFarm.view(s,"zh",0).plots==0)
 assert(not NHFarm.plant(s,request(1,"fiber"),0))
 s.materials={sand=40,sandstone=70,sandstone_surface=200,water=500,mud=500,soil_dead=500,soil_dark=500}
 local project=expansion("farmland")
-assert(project.costs[1].name=="Soil" and project.costs[1].available==0 and project.costs[1].amount==150)
+assert(project.costs[1].name=="Soil (total)" and project.costs[1].available==0 and project.costs[1].amount==150)
 assert(not project.canBuy and not build("farmland") and s.materials.water==500)
 s.materials.soil,s.materials.soil_lush,s.materials.soil_lush_dark=100,30,320
 s.materials.water=99

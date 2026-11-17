@@ -1559,7 +1559,8 @@ function NHUI.draw(model, dispatch)
             return
         end
         if not model.near then return end
-        local caption = tr("打开物品栏：仓库和工坊", "Open inventory for stash and workshop")
+        local caption = model.at_station and tr("圣山存取点 · 打开物品栏","Hideout access · Open inventory")
+            or tr("打开物品栏：仓库和工坊", "Open inventory for stash and workshop")
         local text_w = GuiGetTextDimensions(gui, caption)
         local x = math.floor((sw - text_w) / 2)
         local y = sh - 20

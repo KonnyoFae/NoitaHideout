@@ -188,11 +188,21 @@ local short_names = {
     [unstable] = {"不稳定传送液", "Unstable teleportatium"},
     [stable] = {"稳定传送液", "Teleportatium"},
     slime = {"黏液", "Slime"},
-    gunpowder = {"普通火药", "Regular gunpowder"},
-    gunpowder_unstable = {"炼金火药", "Alchemical gunpowder"},
     magic_liquid_hp_regeneration = {"生命基质", "Healthium"},
     purifying_powder = {"净化粉末", "Purifying powder"},
 }
+
+-- The base game gives several distinct warehouse stocks the same display name.
+local variant_names={
+    gunpowder={"普通火药","Regular gunpowder"},gunpowder_unstable={"炼金火药","Alchemical gunpowder"},
+    sand_surface={"地表沙","Surface sand"},sand_petrify={"石化沙","Petrified sand"},
+    sandstone_surface={"地表砂岩","Surface sandstone"},
+    soil_lush={"肥沃泥土","Lush soil"},soil_lush_dark={"深色肥沃泥土","Dark lush soil"},
+    water_fading={"短效水","Fading water"},water_temp={"临时水","Temporary water"},
+    slime_green={"绿色黏液","Green slime"},slime_yellow={"黄色黏液","Yellow slime"},
+    blood_fading={"短效血液","Fading blood"},
+}
+for name,label in pairs(variant_names) do short_names[name]=label end
 
 function NHPotion.label(record, lang)
     local names = {}
@@ -291,9 +301,8 @@ function NHPotion.contentsColor(record)
 end
 
 function NHPotion.materialName(name,lang)
-    -- The two workshop ingredients share the same vanilla display name.
-    if lang and (name=="gunpowder" or name=="gunpowder_unstable") then
-        return short_names[name][lang=="zh" and 1 or 2]
+    if lang and variant_names[name] then
+        return variant_names[name][lang=="zh" and 1 or 2]
     end
     local id=CellFactory_GetType(name)
     if id and id>=0 then

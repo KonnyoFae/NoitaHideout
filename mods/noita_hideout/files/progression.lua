@@ -30,30 +30,23 @@ define("perk_pack","expansion","特质打包台","Perk packing",1,{{"slime",200}
     {effect={"封装附近未拾取的免疫特质","Pack nearby immunity perks"}})
 define("safe","upgrade","随身安全箱","Secure case",4,{{"sand",250},{"slime",150}})
 define("perk_slots","upgrade","特质栏","Perk slots",3,{{"water",250},{"slime",100}})
-define("farmland","expansion","田地","Farmland",4,{{"farm_soil",150},{"water",100}})
-define("agri_equipment","expansion","农业设备","Farm equipment",1,{{"farm_sand",300},{"water",200}},
+define("farmland","expansion","田地","Farmland",4,{{"soil",150},{"water",100}})
+define("agri_equipment","expansion","农业设备","Farm equipment",1,{{"sand",300},{"water",200}},
     {effect={"种植香料与激活草药","Grow spices and stimulating herbs"}})
-define("livestock","expansion","畜牧设备","Livestock pens",3,{{"farm_sand",200},{"water",150}},
+define("livestock","expansion","畜牧设备","Livestock pens",3,{{"sand",200},{"water",150}},
     {housing={"鸡、牛容量各","Chicken and cattle capacity (each)"}})
 define("beehive","expansion","蜂箱","Beehive",3,{{"fiber",12},{"slime",75},{"sugar",8}},
     {housing={"女王蜂容量","Queen bee capacity"}})
-define("dragon_nest","expansion","龙巢","Dragon nest",3,{{"farm_sand",400},{"gunpowder",100},{"oil",150}},
+define("dragon_nest","expansion","龙巢","Dragon nest",3,{{"sand",400},{"gunpowder",100},{"oil",150}},
     {housing={"龙容量","Dragon capacity"}})
-define("gel_pool","expansion","凝胶池","Gel pool",3,{{"slime",250},{"water",150},{"farm_soil",100}},
+define("gel_pool","expansion","凝胶池","Gel pool",3,{{"slime",250},{"water",150},{"soil",100}},
     {housing={"凝胶容量","Gel capacity"}})
 
-local material_groups={
-    farm_sand={alternatives={"sand","sandstone","sandstone_surface"}},
-    -- All three powders display as soil in the base game.
-    farm_soil={alternatives={"soil","soil_lush","soil_lush_dark"}},
-}
 local material_names={
-    water={"水","Water"},sand={"沙","Sand"},slime={"黏液","Slime"},oil={"油","Oil"},
+    oil={"油","Oil"},
     arcane_scrap={"奥术碎片","Arcane scrap"},
     fiber={"纤维","Fiber"},sugar={"糖分","Sugar"},
     empty_container={"仓库空容器","Empty containers in storage"},container_scrap={"容器碎片","Container scrap"},
-    farm_sand={"沙与砂岩（合计）","Sand and sandstone (total)"},
-    farm_soil={"泥土","Soil"},
 }
 local function inventory(s,key)
     if key=="arcane_scrap" or key=="container_scrap" or NHFarm.crops[key] then return s.resources end
@@ -89,27 +82,36 @@ end
 
 local function costs(s,entry,level,empty_count,lang)
     local result={}
+    local payment={materials={},resources={}}
+    local funded=true
     local zh=lang=="zh"
     local function add(key,amount)
         local stock=inventory(s,key)
         local available=key=="empty_container" and empty_count or stock[key] or 0
         local alternatives,name
         if stock==s.materials and key~="empty_container" then
-            local input=material_groups[key] or {name=key}
-            local sources,labelZh,labelEn=NHStore.ingredientSources(input)
+            local input={name=key}
+            local sources,labelZh,labelEn=NHStore.ingredientSources(input,entry.group)
             if #sources>1 then
                 alternatives=sources
-                available=NHStore.ingredientStock(s,input)
+                available=NHStore.ingredientStock(s,input,entry.group)
                 if labelZh then name=zh and labelZh.."（合计）" or labelEn.." (total)" end
             end
         end
         result[#result+1]={key=key,name=name or material_names[key][zh and 1 or 2],amount=amount,
             available=available,alternatives=alternatives}
+        if key=="empty_container" then
+            payment.shells=amount
+            if available<amount then funded=false end
+        else
+            local account=stock==s.materials and payment.materials or payment.resources
+            if not NHStore.allocateIngredient(stock,alternatives or {key},amount,account) then funded=false end
+        end
     end
     for _,part in ipairs(entry.cost) do add(part[1],part[2]*(level+1)) end
     if entry.category and level>=1 then add("empty_container",level) end
     if entry.category and level>=2 then add("container_scrap",level-1) end
-    return result
+    return result,funded and payment or nil
 end
 
 function NHStore.level(s,id)
@@ -185,14 +187,14 @@ function NHStore.progressMenu(s,lang)
         elseif maxed then row.next=zh and "已满级" or "Max level"
         else
             row.next=description(s,entry,1,lang)
-            row.costs=costs(s,entry,level,empty_count,lang)
+            local payment
+            row.costs,payment=costs(s,entry,level,empty_count,lang)
+            row.canBuy=payment~=nil
             if entry.id=="agri_equipment" and NHStore.level(s,"farmland")==0 then
                 row.canBuy=false
                 row.next=(zh and "先开垦一块田 · " or "Requires farmland · ")..row.next
             end
-            for _,part in ipairs(row.costs) do
-                if part.available<part.amount then row.canBuy=false end
-            end
+            if row.canBuy then row.materialPayment=payment.materials end
         end
         table.insert(result[entry.group],row)
     end
@@ -205,36 +207,18 @@ function NHStore.buyUpgrade(s,request,now)
     local level=NHStore.level(s,entry.id)
     if level~=request.level or level>=entry.max then return false,"Upgrade level changed." end
     if entry.id=="agri_equipment" and NHStore.level(s,"farmland")==0 then return false,"A farm plot is required." end
-    local payment=costs(s,entry,level,NHStore.emptyContainerCount(s))
-    local shells
-    for _,part in ipairs(payment) do
-        if part.available<part.amount then return false,"Not enough construction resources." end
-        if part.key=="empty_container" then shells=part.amount end
-    end
+    local _,payment=costs(s,entry,level,NHStore.emptyContainerCount(s))
+    if not payment then return false,"Not enough construction resources." end
     if entry.id=="safe" then
         local ok,reason=NHStore.expandSafe(s,NHStore.safeCapacity(s)+1)
         if not ok then return false,reason end
     end
-    if shells then
-        local ok,reason=NHStore.spendEmptyContainers(s,shells)
+    if payment.shells then
+        local ok,reason=NHStore.spendEmptyContainers(s,payment.shells)
         if not ok then return false,reason end
     end
-    for _,part in ipairs(payment) do
-        if part.key~="empty_container" then
-            local stock=inventory(s,part.key)
-            local sources=part.alternatives or {part.key}
-            local required=part.amount
-            for _,key in ipairs(sources) do
-                local available=stock[key] or 0
-                local spent=math.min(required,available)
-                if spent>0 then
-                    stock[key]=available>spent and available-spent or nil
-                    required=required-spent
-                end
-                if required==0 then break end
-            end
-        end
-    end
+    NHStore.deductStock(s.materials,payment.materials)
+    NHStore.deductStock(s.resources,payment.resources)
     s.levels[entry.id]=level+1
     if entry.id=="gel_pool" and level==0 then
         NHLivestock.deliver(s,"gel_pool",NHLivestock.freePen(s,"gel_pool"),now,true)

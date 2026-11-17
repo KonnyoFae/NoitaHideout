@@ -2,6 +2,7 @@ local files = "mods/noita_hideout/files/"
 dofile_once(files .. "store.lua")
 dofile_once(files .. "bank.lua")
 dofile_once(files .. "workshop_clock.lua")
+local mountain_storage=dofile(files .. "mountain_storage.lua")
 dofile_once(files .. "home_wand_edit.lua")
 dofile_once(files .. "wand.lua")
 dofile_once(files .. "potion.lua")
@@ -232,6 +233,10 @@ local function near_home(player)
     return home_x and (x - home_x)^2 + (y - home_y)^2 <= 80^2
 end
 
+local function near_hideout(player)
+    return near_home(player) or mountain_storage.inRange(player)
+end
+
 local function active_run()
     return state and run_id and state.closedThrough < run_id
 end
@@ -270,7 +275,8 @@ local function update_workshop(player,frame,farm_time)
     local elapsed=NHClock.observe(state,frame)
     if frame>=next_room_check and not pending_visit then
         next_room_check=frame+10
-        local key=NHClock.mountainAt(player)
+        local key,ax,ay=NHClock.mountainAt(player)
+        mountain_storage.update(player,ax,ay)
         if key and not state.checkpoints[key] then pending_visit=key end
     end
     -- World globals carry sub-checkpoint progress through save/continue.
@@ -428,7 +434,7 @@ local function inventory_view()
         elseif pouch.location=="warehouse" then warehouse_slot("pouch",pouch.slot,view) end
     end
     local function source_detail(sources,payment)
-        local lines={payment and tr("库存 / 本批扣料","Stock / used this batch")
+        local lines={payment and tr("库存 / 本次扣料","Stock / payment")
             or tr("可混用，按优先顺序列出","Combined stock, in preferred order")}
         for _,key in ipairs(sources) do
             local amount=string.format("%.0f",state.materials[key] or 0)
@@ -441,7 +447,7 @@ local function inventory_view()
     for _,projects in pairs(model.progression) do
         for _,project in ipairs(projects) do
             for _,cost in ipairs(project.costs) do
-                if cost.alternatives then cost.detail=source_detail(cost.alternatives) end
+                if cost.alternatives then cost.detail=source_detail(cost.alternatives,project.materialPayment) end
             end
         end
     end
@@ -499,13 +505,13 @@ local function inventory_view()
         for _,input in ipairs(recipe.inputs) do
             local name=NHPotion.materialName(input.name,lang)
             local detail
-            local sources,labelZh,labelEn=NHStore.ingredientSources(input)
+            local sources,labelZh,labelEn=NHStore.ingredientSources(input,recipe.category)
             if #sources>1 then
                 local group=labelZh and tr(labelZh,labelEn) or NHPotion.materialName(input.name)
                 name=group..tr("（合计）"," (total)")
                 detail=source_detail(sources,payment)
             end
-            table.insert(view.inputs,{name=name,amount=input.amount,detail=detail,available=NHStore.ingredientStock(state,input)})
+            table.insert(view.inputs,{name=name,amount=input.amount,detail=detail,available=NHStore.ingredientStock(state,input,recipe.category)})
         end
         local resources={}
         for key in pairs(recipe.resources or {}) do resources[#resources+1]=key end
@@ -650,14 +656,14 @@ end
 local function popup_accessible(player)
     if not popup then return false end
     if popup.kind=="card_wallet" then
-        return (not popup.slot or (GameIsInventoryOpen() and (popup.container=="safe" or near_home(player))))
+        return (not popup.slot or (GameIsInventoryOpen() and (popup.container=="safe" or near_hideout(player))))
             and NHCardWallets.get(state,player,popup)~=nil
     end
     local pouch=state.pouches[popup.id]
     if not pouch then return false end
     if popup.slot then
         return pouch.location==popup.container and pouch.slot==popup.slot and GameIsInventoryOpen()
-            and (popup.container=="safe" or near_home(player))
+            and (popup.container=="safe" or near_hideout(player))
     end
     return EntityGetIsAlive(popup.entity) and NHDoses.isPouch(state,popup.entity)==popup.id
         and EntityGetRootEntity(popup.entity)==player
@@ -695,7 +701,7 @@ end
 
 local function inventory_access(player,source)
     if not active_run() then return false end
-    if source.container=="warehouse" then return near_home(player) end
+    if source.container=="warehouse" then return near_hideout(player) end
     if source.container=="pouch" then return matches_popup(player,source.pouchId) end
     if source.container=="card_wallet" then return matches_wallet(player,source.walletId) end
     return source.container=="safe"
@@ -763,7 +769,7 @@ local function transfer_error(err, item)
 end
 
 local function workshop_action(player,action,index)
-    if not case_open or not GameIsInventoryOpen() or not near_home(player) then return end
+    if not case_open or not GameIsInventoryOpen() or not near_hideout(player) then return end
     if action=="bank_transfer" and type(index)=="table" then
         local draft=active_draft()
         if not draft then return end
@@ -852,7 +858,7 @@ local function dispatch(player, action, index)
         end
         local container=index.container or "safe"
         if container~="safe" and container~="warehouse" and container~="docks" then return end
-        if container~="safe" and not (case_open and GameIsInventoryOpen() and near_home(player)) then return end
+        if container~="safe" and not (case_open and GameIsInventoryOpen() and near_hideout(player)) then return end
         if action=="equip_stored_perk" or action=="store_equipped_perk" then
             if not case_open or not GameIsInventoryOpen() or (container~="safe" and container~="warehouse") then return end
             local move=action=="equip_stored_perk" and NHPerks.equipStored or NHPerks.storeEquipped
@@ -913,7 +919,7 @@ local function dispatch(player, action, index)
         if action=="move_stored_card" or action=="move_wallet" then
             local from,to=index.source,index.destination
             if not case_open or not GameIsInventoryOpen() or (from~="safe" and from~="warehouse")
-                or (to~="safe" and to~="warehouse") or ((from=="warehouse" or to=="warehouse") and not near_home(player)) then return end
+                or (to~="safe" and to~="warehouse") or ((from=="warehouse" or to=="warehouse") and not near_hideout(player)) then return end
             if action=="move_stored_card" then
                 commit_edit(function(draft)
                     return NHCompanions.moveCard(draft,from,index.from,to,index.safeSlot,index.entity)
@@ -952,7 +958,7 @@ local function dispatch(player, action, index)
             local from,to=index.source,index.destination
             if not case_open or not GameIsInventoryOpen() or not index.safeSlot
                 or (from~="warehouse" and from~="safe") or (to~="warehouse" and to~="safe")
-                or ((from=="warehouse" or to=="warehouse") and not near_home(player)) then return end
+                or ((from=="warehouse" or to=="warehouse") and not near_hideout(player)) then return end
             local moved=commit_edit(function(draft)
                 local pouch=NHPouches.at(draft,from,index.from)
                 if not pouch or pouch.id~=index.pouchId or not NHStore.freeSlot(draft,to,index.safeSlot,"pouch") then
@@ -1054,6 +1060,7 @@ function OnWorldInitialized()
     right_use=nil
     inventory_aim.x,inventory_aim.y=1,0
     NHClock.reset()
+    mountain_storage.reset()
     NHFarm.resetClock()
     NHHomeWandEdit.reset()
     bank_synced=false
@@ -1155,7 +1162,8 @@ function OnWorldPostUpdate()
         if ok then NHPerks.update(state,player) end
         if not ok then invalidate(); report(err); return end
     end
-    local nearby = near_home(player)
+    local at_station = mountain_storage.inRange(player)
+    local nearby = at_station or near_home(player)
     local was_open,was_case_open = opened,case_open
     if popup and not popup_accessible(player) then
         popup=nil
@@ -1203,6 +1211,7 @@ function OnWorldPostUpdate()
     end
     model.mode = case_open and "case" or (popup and "container" or "closed")
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
+    model.at_station=at_station
     model.surgery=NHSurgery.view()
 
     if case_open then NHPerks.view(state,player,model) end

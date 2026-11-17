@@ -833,21 +833,32 @@ end
 -- Only recipe costs share these stocks. Stored materials and outputs keep their own IDs.
 local gunpowderGroup={alternatives={"gunpowder_unstable","gunpowder"},labelZh="火药",labelEn="Gunpowder"}
 local defaultIngredientGroups={gunpowder=gunpowderGroup,gunpowder_unstable=gunpowderGroup}
+-- Construction and finished goods use physical supplies. Alchemy keeps the
+-- material IDs of its reactions and returns, except for explicit substitutes.
+local bulkSupplies={
+    sand={alternatives={"sand","sandstone","sandstone_surface","sand_surface","sand_petrify","sand_blue"},
+        labelZh="砂石",labelEn="Sand and sandstone"},
+    soil={alternatives={"soil","soil_lush","soil_lush_dark"},labelZh="泥土",labelEn="Soil"},
+    water={alternatives={"water","water_fading","water_temp"},labelZh="清水",labelEn="Fresh water"},
+    slime={alternatives={"slime","slime_green","slime_yellow"},labelZh="黏液",labelEn="Slime"},
+    blood={alternatives={"blood","blood_fading"},labelZh="血液",labelEn="Blood"},
+}
 
-function NHStore.ingredientSources(input)
-    local group=input.alternatives and input or defaultIngredientGroups[input.name] or input
+function NHStore.ingredientSources(input,category)
+    local group=input.alternatives and input or defaultIngredientGroups[input.name]
+        or (category and category~="alchemy" and bulkSupplies[input.name]) or input
     return group.alternatives or {input.name},input.labelZh or group.labelZh,input.labelEn or group.labelEn
 end
 
-function NHStore.ingredientStock(state,input)
+function NHStore.ingredientStock(state,input,category)
     local total=0
-    for _,name in ipairs(NHStore.ingredientSources(input)) do
+    for _,name in ipairs(NHStore.ingredientSources(input,category)) do
         total=total+math.min(state.materials[name] or 0,max_safe_integer-total)
     end
     return total
 end
 
-local function allocateIngredient(stock,sources,needed,payment)
+function NHStore.allocateIngredient(stock,sources,needed,payment)
     for _,name in ipairs(sources) do
         local allocated=payment[name] or 0
         local take=math.min(needed,(stock[name] or 0)-allocated)
@@ -872,16 +883,16 @@ local function smallestFirst(stock,sources,payment)
     return sorted
 end
 
-local function batchPayment(stock,inputs,held,freeSlots)
+local function batchPayment(stock,recipe,held,freeSlots)
     local payment,alternative={},false
     for name,amount in pairs(held or {}) do payment[name]=amount end
-    for _,input in ipairs(inputs) do
-        local sources=NHStore.ingredientSources(input)
+    for _,input in ipairs(recipe.inputs) do
+        local sources=NHStore.ingredientSources(input,recipe.category)
         if #sources>1 then
             alternative=true
             if freeSlots then sources=smallestFirst(stock,sources,payment) end
         end
-        if not allocateIngredient(stock,sources,input.amount,payment) then return nil end
+        if not NHStore.allocateIngredient(stock,sources,input.amount,payment) then return nil end
     end
     return payment,alternative
 end
@@ -921,11 +932,11 @@ function NHStore.canStartBatch(state,recipe)
         -- Remove the sample from available stock while the batch runs.
         -- The paid order records every particle owed, even after a reload.
         for _,sample in ipairs(recipe.catalysts) do
-            if not allocateIngredient(state.materials,{sample.name},sample.amount,held) then return false,"Missing catalyst." end
+            if not NHStore.allocateIngredient(state.materials,{sample.name},sample.amount,held) then return false,"Missing catalyst." end
             delivery[sample.name]=(delivery[sample.name] or 0)+sample.amount
         end
     end
-    local payment,alternative=batchPayment(state.materials,recipe.inputs,held)
+    local payment,alternative=batchPayment(state.materials,recipe,held)
     if not payment then return false,"Not enough bulk ingredients." end
     if recipe.emptyContainers and NHStore.emptyContainerCount(state)<recipe.emptyContainers then
         return false,"Not enough empty containers."
@@ -947,13 +958,13 @@ function NHStore.canStartBatch(state,recipe)
     end
     if NHStore.canStockMaterials(state,delivery,payment) then return true,nil,payment,delivery,held end
     if alternative then
-        local swapped=batchPayment(state.materials,recipe.inputs,held,true)
+        local swapped=batchPayment(state.materials,recipe,held,true)
         if swapped and NHStore.canStockMaterials(state,delivery,swapped) then return true,nil,swapped,delivery,held end
     end
     return false,"Material storage is full."
 end
 
-local function deductStock(stock,costs)
+function NHStore.deductStock(stock,costs)
     for key,amount in pairs(costs) do
         local remaining=stock[key]-amount
         stock[key]=remaining>0 and remaining or nil
@@ -976,8 +987,8 @@ function NHStore.startOrder(state,id)
         if (item.count or 1)>1 then item.count=item.count-1
         else table.remove(state.warehouse,ingredientIndex) end
     end
-    deductStock(state.materials,payment)
-    if recipe.resources then deductStock(state.resources,recipe.resources) end
+    NHStore.deductStock(state.materials,payment)
+    if recipe.resources then NHStore.deductStock(state.resources,recipe.resources) end
     state.order={id=state.finished+1,recipe=recipe.id,progress=0,required=NHStore.productionFrames(recipe),output=output,catalysts=held}
     return true
 end

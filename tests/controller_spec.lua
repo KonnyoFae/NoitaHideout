@@ -73,9 +73,8 @@ function EntityGetClosestWithTag(x,y,tag)
     return closest
 end
 function BiomeMapGetName(x,y)
-    for _,id in ipairs(EntityGetWithTag("workshop_aabb")) do
-        local area=entities[id]
-        if math.abs(x-area.x)<=120 and math.abs(y-area.y)<=120 then return area.biome end
+    for _,area in pairs(entities) do
+        if area.biome and math.abs(x-area.x)<=120 and math.abs(y-area.y)<=120 then return area.biome end
     end
     return "$biome_coalmine"
 end
@@ -856,6 +855,64 @@ entities[player].tags.player_unit=true
 assert(tick().order_remaining<50 and state().finished==1)
 print("Controller: timers, suspension, polymorph, Holy Mountain hitboxes, checkpoint deduplication and reverse alchemy passed.")
 
+do
+    settings,flags={},{}
+    new_world()
+    local tag="noita_hideout_mountain_storage"
+    local function altar(x,y,biome)
+        local id=mountain(x,y,biome)
+        local hitbox=EntityGetFirstComponentIncludingDisabled(id,"HitboxComponent")
+        hitbox.aabb_min_x,hitbox.aabb_min_y,hitbox.aabb_max_x,hitbox.aabb_max_y=-453,-44,531,166
+        return x-18,y+84,id
+    end
+    local x,y,firstRoom=altar(1100,2048,holy)
+    local secondX,secondY=altar(-35800,4096,holy)
+    local bossX,bossY=altar(1100,12288,"$biome_boss_arena")
+    local old=state()
+    old.checkpoints["1100,2048"]=true
+    assert(NHStore.commit(old))
+    boot()
+    local atLocker=stand(x,y)
+    assert(atLocker.near and atLocker.at_station and not atLocker.open and #EntityGetWithTag(tag)==1)
+    local first=EntityGetWithTag(tag)[1]
+    assert(entities[first].x==x and entities[first].y==y)
+    assert(#EntityGetWithTag("noita_hideout_home_wand_edit")==0)
+    inventory_open=true
+    tick()
+    local pouchId=state().starterPouchId
+    local deposit={pouchId=pouchId,source="safe",destination="warehouse",from=2,safeSlot=1}
+    local withdraw={pouchId=pouchId,source="warehouse",destination="safe",from=1,safeSlot=2}
+    tick(nil,"move_pouch",deposit)
+    assert(starter().location=="warehouse" and tick().warehouse.equipment[1].id==pouchId)
+    tick(nil,"open_container",{pouchId=pouchId,container="warehouse",safeSlot=1})
+    assert(tick().pouchId==pouchId)
+    entities[player].x=x+49
+    assert(not tick(nil,"move_pouch",withdraw).near and not tick().pouchId and starter().location=="warehouse")
+    -- The vanilla exit kills the wand-edit workshop, leaving workshop_aabb in place.
+    local editRoom=EntityLoad("workshop.xml",x,y)
+    EntityAddTag(editRoom,"workshop")
+    EntityKill(editRoom)
+    boot()
+    assert(stand(x+48,y).near and #EntityGetWithTag(tag)==1 and EntityGetIsAlive(first))
+    assert(stand(secondX,secondY).at_station and #EntityGetWithTag(tag)==2)
+    tick(nil,"move_pouch",withdraw)
+    assert(starter().location=="safe")
+    EntityKill(firstRoom)
+    boot()
+    assert(stand(x,y).at_station and #EntityGetWithTag(tag)==2)
+    entities[player].x=x+49
+    tick(nil,"move_pouch",deposit)
+    assert(starter().location=="safe")
+    assert(not stand(bossX,bossY).near and #EntityGetWithTag(tag)==2)
+    -- The secret room has a permanent co-op marker instead of a workshop hitbox.
+    local secret=EntityLoad("coop_respawn.xml",8000,3000)
+    EntityAddTag(secret,"coop_respawn")
+    entities[secret].biome=holy
+    assert(stand(8104,3034).at_station and #EntityGetWithTag(tag)==3)
+    assert(not state().checkpoints["8000,3000"] and #EntityGetWithTag("noita_hideout_home_wand_edit")==0)
+    print("Controller: local Holy Mountain lockers, shared transfers, saved rooms, revisit, parallel and secret altars passed.")
+end
+
 -- Drive both sides through the inventory callback. Account for the native
 -- wallet separately from the profile so a reload can expose a duplicate debit.
 local function testBank()
@@ -1121,7 +1178,7 @@ local function testPowderSeparation()
     local station=assert(has_project(view.progression.expansion,"grenade"))
     local powder=station.costs[1]
     assert(station.canBuy and powder.name==split.inputs[1].name and powder.available==220 and powder.amount==150)
-    assert(powder.detail:find("Alchemical gunpowder  80\nRegular gunpowder  140",1,true))
+    assert(powder.detail:find("Alchemical gunpowder  80 / 80\nRegular gunpowder  140 / 70",1,true))
     assert(view.materials[1].name=="Regular gunpowder" and view.materials[2].name=="Alchemical gunpowder")
     tick(nil,"craft",{id=split.id})
     assert(state().materials.gunpowder==20 and not state().materials.gunpowder_unstable)
@@ -1135,6 +1192,50 @@ local function testPowderSeparation()
 end
 testPowderSeparation()
 print("Controller: combined gunpowder stock, separated inputs and liquid/powder delivery passed.")
+
+do
+    local function testBulkSupplies()
+        settings,flags={},{}
+        new_world()
+        local profile=state()
+        profile.levels.grenade,profile.levels.medical=1,1
+        profile.materials={sandstone=180,sandstone_surface=25,sand_surface=33,sand_petrify=1,sand_blue=1,
+            water_fading=100,water_temp=100,water_swamp=500,slime_green=125,slime_yellow=125,blood_fading=50,
+            magic_liquid_unstable_teleportation=250,magic_liquid_mana_regeneration=1}
+        assert(NHStore.commit(profile))
+        boot()
+        inventory_open=true
+        local view=tick()
+        local warehouse=has_project(view.progression.expansion,"warehouse_wand")
+        local knife=has_project(view.recipes,"sand_knife")
+        assert(warehouse.canBuy and warehouse.costs[1].available==240 and warehouse.costs[2].available==200)
+        assert(knife.ready and knife.inputs[1].name==warehouse.costs[1].name and knife.inputs[1].available==240)
+        assert(warehouse.costs[1].detail:find("Stock / payment",1,true)
+            and warehouse.costs[1].detail:find("Surface sandstone  25 / 20",1,true))
+        assert(warehouse.materialPayment.sandstone==180 and warehouse.materialPayment.sandstone_surface==20)
+        local safe=has_project(view.progression.upgrade,"safe")
+        assert(not safe.canBuy and not safe.materialPayment and safe.costs[2].available==250)
+        assert(safe.costs[2].detail:find("Green slime  125\nYellow slime  125",1,true))
+        assert(has_project(view.recipes,"grenade").ready and has_project(view.recipes,"medical").ready)
+        local mana=has_project(view.recipes,"mana")
+        assert(not mana.ready and mana.inputs[1].available==0 and not mana.inputs[1].detail)
+        local stable=has_project(view.recipes,"stable")
+        assert(not stable.ready and stable.inputs[2].available==0 and not stable.inputs[2].detail)
+        tick(nil,"buy_upgrade",{id="warehouse_wand",level=0})
+        local stock=state().materials
+        assert(not stock.sandstone and stock.sandstone_surface==5 and not stock.water_fading and stock.water_temp==100)
+        knife=has_project(tick().recipes,"sand_knife")
+        assert(knife.ready and knife.inputs[1].available==40 and knife.inputs[1].detail:find("Surface sand  33 / 33",1,true))
+        tick(nil,"craft",{id="sand_knife"})
+        stock=state().materials
+        assert(not stock.sand_surface and not stock.sand_blue and not stock.sandstone_surface and not stock.sand_petrify)
+        advance(knife.duration*60)
+        tick(nil,"craft",{id="medical"})
+        stock=state().materials
+        assert(not stock.blood_fading and not stock.water_temp and stock.water_swamp==500)
+    end
+    testBulkSupplies()
+end
 
 local function testCatalyticWorkshop()
     settings,flags={},{}

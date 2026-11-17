@@ -8,7 +8,7 @@ dofile("mods/noita_hideout/files/store.lua")
 local byId={}
 for _,recipe in ipairs(NHStore.recipes) do byId[recipe.id]=recipe end
 local expected={
-    {id="grenade",seconds=10,materials={sand=64,slime=32}},
+    {id="grenade",seconds=10,materials={sand=16,sandstone=48,slime_green=12,slime_yellow=20}},
     {id="grenade_essence",seconds=10,cost=4,essence="essence_high_energy",spell="BOMB"},
     {id="fire_grenade",seconds=10,cost=6,essence="essence_fire",spell="FIREBALL"},
     {id="frost_grenade",seconds=10,cost=6,essence="essence_frost",spell="ICEBALL"},
