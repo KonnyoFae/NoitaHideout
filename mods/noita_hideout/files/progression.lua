@@ -1,46 +1,69 @@
 -- All purchases operate on the detached profile passed to NHStore.commit.
 local catalog = {}
 local definitions = {}
-local function define(id,group,zh,en,max,cost,options)
+local function define(id,section,zh,en,max,cost,options)
     local entry=options or {}
-    entry.id,entry.group,entry.zh,entry.en,entry.max,entry.cost=id,group,zh,en,max,cost
+    entry.id,entry.section,entry.zh,entry.en,entry.max,entry.cost=id,section,zh,en,max,cost
+    entry.group=section=="upgrade" and "upgrade" or "expansion"
     catalog[#catalog+1]=entry
     definitions[id]=entry
 end
 
 local stock_cost={{"sand",200},{"water",100}}
-define("warehouse_wand","expansion","魔杖库","Wand storage",4,stock_cost,{category="wand"})
-define("warehouse_spell","expansion","法术库","Spell storage",4,stock_cost,{category="spell"})
-define("warehouse_containers","expansion","容器库","Container storage",4,stock_cost,{category="containers"})
-define("warehouse_supplies","expansion","消耗品库","Supply storage",4,stock_cost,{category="supplies"})
-define("warehouse_equipment","expansion","装备库","Equipment storage",4,stock_cost,{category="equipment"})
-define("warehouse_collection","expansion","藏品库","Collection storage",4,stock_cost,{category="collection"})
-define("warehouse_materials","expansion","物料库","Material storage",4,{{"sand",250},{"slime",100}},{category="materials"})
-define("medical","expansion","医疗工位","Medical station",1,{{"water",250},{"slime",100}},
+define("warehouse_wand","inventory","魔杖库","Wand storage",4,stock_cost,{category="wand"})
+define("warehouse_spell","inventory","法术库","Spell storage",4,stock_cost,{category="spell"})
+define("warehouse_containers","inventory","容器库","Container storage",4,stock_cost,{category="containers"})
+define("warehouse_supplies","inventory","消耗品库","Supply storage",4,stock_cost,{category="supplies"})
+define("warehouse_equipment","inventory","装备库","Equipment storage",4,stock_cost,{category="equipment"})
+define("warehouse_collection","inventory","藏品库","Collection storage",4,stock_cost,{category="collection"})
+define("warehouse_materials","inventory","物料库","Material storage",4,{{"sand",250},{"slime",100}},{category="materials"})
+define("medical","workshop","医疗工位","Medical station",1,{{"water",250},{"slime",100}},
     {effect={"制造医疗物品","Craft medical supplies"}})
-define("injector","expansion","针剂工位","Injector station",1,{{"water",250},{"oil",100}},
+define("injector","workshop","针剂工位","Injector station",1,{{"water",250},{"oil",100}},
     {effect={"制造针剂","Craft injectors"}})
-define("grenade","expansion","手雷工位","Grenade station",1,{{"gunpowder",150},{"oil",100}},
-    {effect={"制造手雷和飞刀","Craft grenades and throwing knives"}})
-define("salvage","expansion","拆解台","Salvage bench",1,{{"sand",250},{"oil",100}},
+define("grenade","workshop","武器工位","Weapon station",1,{{"gunpowder",150},{"oil",100}},
+    {effect={"制造六种战术发射器","Craft six tactical launchers"}})
+define("salvage","workshop","拆解台","Salvage bench",1,{{"sand",250},{"oil",100}},
     {effect={"回收碎片、提取精华和合成法术","Recover scrap, extract essences and craft spells"}})
-define("support","expansion","支援站","Support station",0,{},
-    {planned=true,effect={"呼叫支援","Call for support"}})
-define("perk_pack","expansion","特质打包台","Perk packing",1,{{"slime",200},{"arcane_scrap",1}},
+local function supportStation(id,zh,en,essence,tiers)
+    define(id,"support",zh,en,3,nil,{essence=essence,tiers=tiers})
+end
+supportStation("support","轰炸支援站","Bombardment station","essence_high_energy",{
+    {"重炮追踪、徐进弹幕、布雷器","Tracked shell, creeping barrage and minelayer"},
+    {"重炮区域轰炸、导弹扫射、等离子扫射","Shell barrage, missile and plasma runs"},
+    {"导弹区域轰炸、磁轨炮狙击","Missile barrage and railgun snipe"}})
+supportStation("resupply","补给支援站","Supply station","essence_healing",{
+    {"基础补给箱、重机枪","Basic boxes and heavy machine gun"},{"进阶补给箱、连发榴弹、重等离子炮","Improved boxes, grenade launcher and heavy plasma"},
+    {"高级补给箱、导弹发射器、轨道炮与 BFG","Advanced boxes, missiles, railgun and BFG"}})
+supportStation("reinforcement","增援支援站","Reinforcement station","essence_creation",{
+    {"机枪无人机、机械士兵、机枪塔","Gun drone, soldier and MG turret"},
+    {"维修无人机、机械间谍、导弹机械蟹、链炮塔","Repair drone, spy, missile crab and chaingun turret"},
+    {"护盾无人机、激光无人机、机械刺客、机械僧侣、复活机器人","Shield drone, laser drone, assassin, monk and necrobot"}})
+supportStation("intel","情报支援站","Intelligence station","essence_force",{
+    {"探查、狂暴之环","Recon and berserk field"},
+    {"敌人雷达、活力之环、变形之环","Enemy radar, vitality and polymorph fields"},
+    {"高价值地点定位、巨大黑洞／白洞、核弹／超级核弹","Site locator, large holes and nuclear strikes"}})
+define("perk_pack","workshop","特质打包台","Perk packing",1,{{"slime",200},{"arcane_scrap",1}},
     {effect={"封装附近未拾取的免疫特质","Pack nearby immunity perks"}})
-define("safe","upgrade","随身安全箱","Secure case",4,{{"sand",250},{"slime",150}})
-define("perk_slots","upgrade","特质栏","Perk slots",3,{{"water",250},{"slime",100}})
-define("farmland","expansion","田地","Farmland",4,{{"soil",150},{"water",100}})
-define("agri_equipment","expansion","农业设备","Farm equipment",1,{{"sand",300},{"water",200}},
+define("safe","upgrade","随身安全箱","Secure case",10,{{"sand",250},{"slime",150}})
+define("perk_slots","upgrade","遗物链扩容","Relic chain capacity",3,{{"water",250},{"slime",100}})
+define("farmland","production","田地","Farmland",4,{{"soil",150},{"water",100}})
+define("agri_equipment","production","农业设备","Farm equipment",1,{{"sand",300},{"water",200}},
     {effect={"种植香料与激活草药","Grow spices and stimulating herbs"}})
-define("livestock","expansion","畜牧设备","Livestock pens",3,{{"sand",200},{"water",150}},
+define("livestock","production","畜牧设备","Livestock pens",3,{{"sand",200},{"water",150}},
     {housing={"鸡、牛容量各","Chicken and cattle capacity (each)"}})
-define("beehive","expansion","蜂箱","Beehive",3,{{"fiber",12},{"slime",75},{"sugar",8}},
+define("beehive","production","蜂箱","Beehive",3,{{"fiber",12},{"slime",75},{"sugar",8}},
     {housing={"女王蜂容量","Queen bee capacity"}})
-define("dragon_nest","expansion","龙巢","Dragon nest",3,{{"sand",400},{"gunpowder",100},{"oil",150}},
+define("dragon_nest","production","龙巢","Dragon nest",3,{{"sand",400},{"gunpowder",100},{"oil",150}},
     {housing={"龙容量","Dragon capacity"}})
-define("gel_pool","expansion","凝胶池","Gel pool",3,{{"slime",250},{"water",150},{"soil",100}},
+define("gel_pool","production","凝胶池","Gel pool",3,{{"slime",250},{"water",150},{"soil",100}},
     {housing={"凝胶容量","Gel capacity"}})
+
+define("dog_kennel","production","狗窝","Kennel",3,{{"sand",150},{"water",100},{"fiber",8}},
+    {housing={"犬容量","Hound capacity"}})
+
+define("cat_house","production","猫窝","Cattery",3,{{"sand",150},{"water",100},{"fiber",8}},
+    {housing={"猫容量","Cat capacity"}})
 
 local material_names={
     oil={"油","Oil"},
@@ -49,7 +72,7 @@ local material_names={
     empty_container={"仓库空容器","Empty containers in storage"},container_scrap={"容器碎片","Container scrap"},
 }
 local function inventory(s,key)
-    if key=="arcane_scrap" or key=="container_scrap" or NHFarm.crops[key] then return s.resources end
+    if key=="arcane_scrap" or key=="container_scrap" or NHFarm.crops[key] or NHEssences.types[key] or NHStore.alchemyResources[key] then return s.resources end
     return s.materials
 end
 
@@ -98,7 +121,10 @@ local function costs(s,entry,level,empty_count,lang)
                 if labelZh then name=zh and labelZh.."（合计）" or labelEn.." (total)" end
             end
         end
-        result[#result+1]={key=key,name=name or material_names[key][zh and 1 or 2],amount=amount,
+        local resource=NHEssences.types[key] or NHStore.alchemyResources[key]
+        if resource then name=zh and resource.zh or resource.en
+        elseif not name then name=material_names[key][zh and 1 or 2] end
+        result[#result+1]={key=key,name=name,amount=amount,
             available=available,alternatives=alternatives}
         if key=="empty_container" then
             payment.shells=amount
@@ -108,9 +134,18 @@ local function costs(s,entry,level,empty_count,lang)
             if not NHStore.allocateIngredient(stock,alternatives or {key},amount,account) then funded=false end
         end
     end
-    for _,part in ipairs(entry.cost) do add(part[1],part[2]*(level+1)) end
+    if entry.tiers then
+        local tier=level+1
+        add("nh_philosopher_stone",tier)
+        add("arcane_scrap",({1,5,15})[tier])
+        add("container_scrap",5)
+        add(entry.essence,100*tier)
+    else
+        for _,part in ipairs(entry.cost) do add(part[1],part[2]*(level+1)) end
+    end
     if entry.category and level>=1 then add("empty_container",level) end
     if entry.category and level>=2 then add("container_scrap",level-1) end
+    if entry.id=="safe" and level>=4 then add("container_scrap",level-3) end
     return result,funded and payment or nil
 end
 
@@ -169,8 +204,9 @@ local function description(s,entry,offset,lang)
         end
         return text
     end
-    if entry.id=="perk_slots" then return level..(zh and " 个特质栏位" or " perk slots") end
+    if entry.id=="perk_slots" then return (1+level)..(zh and " 个遗物插槽" or " relic sockets") end
     if level==0 then return zh and "未解锁" or "Locked" end
+    if entry.tiers then return entry.tiers[level][zh and 1 or 2] end
     return entry.effect[zh and 1 or 2]
 end
 
@@ -180,8 +216,8 @@ function NHStore.progressMenu(s,lang)
     local empty_count=NHStore.emptyContainerCount(s)
     for _,entry in ipairs(catalog) do
         local level=NHStore.level(s,entry.id)
-        local maxed=not entry.planned and level>=entry.max
-        local row={id=entry.id,name=zh and entry.zh or entry.en,level=level,planned=entry.planned or false,
+        local maxed=not entry.planned and (level>=entry.max or (entry.id=="safe" and NHStore.safeCapacity(s)>=12))
+        local row={id=entry.id,section=entry.section,name=zh and entry.zh or entry.en,level=level,planned=entry.planned or false,
             maxed=maxed,canBuy=not maxed and not entry.planned,costs={},current=description(s,entry,0,lang)}
         if entry.planned then row.next=(zh and "后续开放 · " or "Planned: ")..entry.effect[zh and 1 or 2]
         elseif maxed then row.next=zh and "已满级" or "Max level"
@@ -196,16 +232,16 @@ function NHStore.progressMenu(s,lang)
             end
             if row.canBuy then row.materialPayment=payment.materials end
         end
-        table.insert(result[entry.group],row)
+        if entry.id~="perk_pack" or (NHPerks and NHPerks.enabled) then table.insert(result[entry.group],row) end
     end
     return result
 end
 
 function NHStore.buyUpgrade(s,request,now)
     local entry=type(request)=="table" and definitions[request.id]
-    if not entry or entry.planned then return false,"Construction unavailable." end
+    if not entry or entry.planned or (entry.id=="perk_pack" and not (NHPerks and NHPerks.enabled)) then return false,"Construction unavailable." end
     local level=NHStore.level(s,entry.id)
-    if level~=request.level or level>=entry.max then return false,"Upgrade level changed." end
+    if level~=request.level or level>=entry.max or (entry.id=="safe" and NHStore.safeCapacity(s)>=12) then return false,"Upgrade level changed." end
     if entry.id=="agri_equipment" and NHStore.level(s,"farmland")==0 then return false,"A farm plot is required." end
     local _,payment=costs(s,entry,level,NHStore.emptyContainerCount(s))
     if not payment then return false,"Not enough construction resources." end

@@ -1,0 +1,7 @@
+<Entity name="$nh_hideout_flare_gun">
+    <Base file="mods/noita_hideout/files/projectiles/tube_round.xml">
+        <ProjectileComponent damage="0" />
+    </Base>
+    <SpriteComponent image_file="data/particles/charm.xml" emissive="1" />
+    <VariableStorageComponent _tags="nh_tube_payload" value_string="pheromone_splash" />
+</Entity>

@@ -1,0 +1,10 @@
+<Entity>
+    <AudioLoopComponent _tags="cycle_storm_drilling" file="data/audio/Desktop/projectiles.bank"
+        event_name="player_projectiles/digger/loop" auto_play="1" />
+    <ParticleEmitterComponent emitted_material_name="blood" create_real_particles="0" emit_real_particles="0"
+        emit_cosmetic_particles="1" render_back="0" is_emitting="1" fade_based_on_lifetime="1"
+        x_pos_offset_min="-3" x_pos_offset_max="3" y_pos_offset_min="-5" y_pos_offset_max="-3"
+        x_vel_min="-15" x_vel_max="15" y_vel_min="-32" y_vel_max="-15" gravity.y="48"
+        lifetime_min="0.3" lifetime_max="0.7" count_min="1" count_max="2"
+        emission_interval_min_frames="5" emission_interval_max_frames="10" />
+</Entity>

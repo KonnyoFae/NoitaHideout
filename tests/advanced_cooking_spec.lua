@@ -55,3 +55,29 @@ assert(state.resources.egg==5 and not state.resources.milk and state.resources.m
 assert(not NHStore.startOrder(state,"milk_omelet") and state.resources.egg==5)
 assert(NHStore.commit(state))
 print("Farm and ranch produce paid for all four advanced dishes across order reloads.")
+
+-- Repeat an order into a partly eaten stack across commits, even at capacity.
+state.resources.grain=10
+local function cook(id)
+    assert(NHStore.startOrder(state,id))
+    assert(NHStore.commit(state))
+    state=assert(NHStore.load())
+    local order=state.order
+    assert(NHStore.advanceProduction(state,{run=run,orderId=order.id,progress=order.required}))
+end
+cook("bread")
+local index=NHStore.slotIndex(state,"warehouse",state.warehouse[#state.warehouse].slot,"bread")
+state.warehouse[index].item.remaining=1
+while true do
+    local slot=NHStore.freeSlot(state,"warehouse",nil,"bandage")
+    if not slot then break end
+    table.insert(state.warehouse,{id=state.nextItemId,slot=slot,item={kind="bandage"}})
+    state.nextItemId=state.nextItemId+1
+end
+cook("bread")
+assert(state.warehouse[index].item.count==2 and state.warehouse[index].item.remaining==1)
+local use=dofile("mods/noita_hideout/files/inventory_use.lua")
+local row=state.warehouse[index]
+assert(use.spend(state,1,{container="warehouse",slot=row.slot,kind="bread",storedId=row.id,count=2,remaining=1}))
+assert(row.item.count==1 and row.item.remaining==2)
+assert(NHStore.commit(state))

@@ -1,9 +1,24 @@
 NHUI = {}
 
+local foods=dofile("mods/noita_hideout/files/cooking.lua").byId
+local bags=(NHLootBags or dofile("mods/noita_hideout/files/loot_bags.lua")).types
+local gunCatalog=NHGuns or dofile("mods/noita_hideout/files/guns.lua")
+local guns=gunCatalog.types
+local turrets=(NHTurrets or dofile("mods/noita_hideout/files/turrets.lua")).types
+local stormProducts=NHStormProducts or dofile("mods/noita_hideout/files/storm_products.lua")
 local gui
-local tab = "orders"
+local scrollMenu=dofile("mods/noita_hideout/files/menu_scroll.lua")
+local drawTravel=dofile("mods/noita_hideout/files/travel/hud.lua")
+local worldBars=dofile("mods/noita_hideout/files/world_status_bar.lua")
+local travelRoutes=dofile("mods/noita_hideout/files/travel/routes.lua")
+local tab = "shop"
+local homeWasOpen=false
 local warehouse_tab, folded = "wand", false
-local warehouse_pages = {}
+local dismantle_mode=false
+local sorted_stock={}
+local secure_folded=false
+local equipment_tab="gear"
+local bankRowHeight=13
 local bank_hold
 local warehouse_tabs_y=22
 local warehouse_tabs = {
@@ -17,20 +32,20 @@ local warehouse_tabs = {
     {id=83,key="collection",zh="藏品",en="Collection",shortEn="Cards"},
 }
 local workshop_folded=false
-local list_pages={}
-local entries_per_page=5
+local travelSession
 local recipe_category="alchemy"
 local spell_family
 local alchemy_mode="synthesis"
 local shop_category="materials"
+local expansion_section="inventory"
 local selected_entry,salvage_target
 local farm_page,selected_plot="plots",nil
 local livestock_page,selected_pen="pens",nil
 local work_tabs={
+    {key="shop",id=220,zh="转化",en="Convert"},
     {key="orders",id=212,zh="工坊",en="Workshop"},
     {key="expansion",id=218,zh="扩建",en="Build"},
     {key="upgrade",id=219,zh="升级",en="Upgrades"},
-    {key="shop",id=220,zh="商店",en="Shop"},
     {key="farm",id=221,zh="种植",en="Farm"},
     {key="livestock",id=223,zh="畜牧",en="Livestock"},
     {key="samples",id=213,zh="测试物资",en="Supplies"},
@@ -39,6 +54,7 @@ local recipe_tabs={
     {key="alchemy",id=250,zh="炼金",en="Alchemy"},
     {key="medical",id=251,zh="医疗",en="Medical"},
     {key="weapons",id=252,zh="武器",en="Weapons"},
+    {key="containers",id=266,zh="容器",en="Containers"},
     {key="equipment",id=253,zh="装备",en="Equipment"},
     {key="food",id=222,zh="食物",en="Food"},
     {key="spell",id=225,zh="法术",en="Spells"},
@@ -46,11 +62,21 @@ local recipe_tabs={
 local alchemy_tabs={
     {key="synthesis",id=254,zh="炼成",en="Synthesis"},
     {key="decomposition",id=255,zh="分解",en="Decomposition"},
+    {key="rubedo",id=267,zh="红化",en="Rubedo"},
+    {key="logistics",id=268,zh="后勤资源包",en="Logistics packs"},
 }
 local shop_tabs={
+    {key="storm_products",id=269,zh="产物转化",en="Storm products"},
+    {key="services",id=265,zh="服务",en="Services"},
     {key="materials",id=256,zh="物料",en="Materials"},
     {key="supplies",id=257,zh="消耗品",en="Consumables"},
     {key="livestock",id=259,zh="幼畜",en="Youngstock"},
+}
+local expansion_tabs={
+    {key="inventory",id=270,zh="库存",en="Storage"},
+    {key="workshop",id=271,zh="工坊",en="Workshop"},
+    {key="production",id=272,zh="生产",en="Production"},
+    {key="support",id=273,zh="支援",en="Support"},
 }
 local farm_tabs={
     {key="plots",id=410,zh="田地",en="Plots"},
@@ -88,8 +114,24 @@ end
 
 local drag, last_case_frame
 local last_inventory_layout
-local page = 1
+local case_columns,case_rows=4,3
+local visible_case_slots=case_columns*case_rows
+local equipment_tabs_y,equipment_grid_y=19,36
+local revealSafe
 local loading
+local transfer_slot
+function NHUI.showTransfer(container,kind,slot)
+    if container=="gear" then
+        secure_folded,equipment_tab=false,"gear"
+    elseif container=="safe" then
+        secure_folded,equipment_tab=false,"safe"
+        revealSafe=math.floor((slot-1)/case_columns)
+    else
+        folded,loading,dismantle_mode=false,nil,false
+        warehouse_tab=container=="docks" and "materials" or NHStore.category(kind)
+        transfer_slot=container=="warehouse" and slot or nil
+    end
+end
 local material_rows=4
 local function compact(n)
     local unit,suffix
@@ -113,13 +155,17 @@ local function slot_at(layout,x,y)
 end
 
 local function use_source(slot)
-    if not slot or not slot.kind or not NHNative.usableKind(slot.kind) then return end
+    if not slot or not slot.kind then return end
+    if slot.dismantle and not (slot.dismantle=="supplies" and bags[slot.kind]) then return end
+    if not (slot.key=="valuable" and slot.kind=="relic_chain") and not NHNative.usableKind(slot.kind) then return end
     local source={kind=slot.kind}
     if slot.key=="native" and slot.entity then
         source.container,source.entity,source.parent="native",slot.entity,slot.parent
         source.lane,source.xslot,source.yslot=slot.lane,slot.xslot,slot.yslot
     elseif (slot.key=="warehouse" or slot.key=="valuable") and slot.entity then
         source.container,source.slot,source.storedId=storage_key(slot.key),slot.safeSlot,slot.entity
+    elseif slot.key=="gear" and (NHShields.supply(slot.kind) or NHEquipment.links[slot.kind]) and slot.entity then
+        source.container,source.storedId="gear",slot.entity
     elseif slot.key=="dose" and slot.pouchId then
         source.container,source.pouchId,source.cell="pouch",slot.pouchId,slot.cell
     elseif slot.key=="card_cell" and slot.walletId then
@@ -129,7 +175,7 @@ local function use_source(slot)
     return source
 end
 
-function NHUI.useTarget()
+local function hovered_inventory_slot()
     local layout=last_inventory_layout
     if not layout or drag then return end
     local age=GameGetFrameNum()-layout.frame
@@ -138,7 +184,25 @@ function NHUI.useTarget()
     if sw~=layout.width or sh~=layout.height then return end
     local wx,wy=DEBUG_GetMouseWorld()
     local cx,cy,cw,ch=GameGetCameraBounds()
-    return use_source(slot_at(layout,(wx-cx)*sw/cw,(wy-cy)*sh/ch))
+    return slot_at(layout,(wx-cx)*sw/cw,(wy-cy)*sh/ch)
+end
+
+function NHUI.useTarget()
+    return use_source(hovered_inventory_slot())
+end
+
+local function quick_source(slot)
+    return slot and not slot.dismantle and slot.entity and slot.kind and slot.kind~="other"
+        and (slot.key=="native" or slot.key=="valuable" or slot.key=="warehouse" or slot.key=="docks")
+end
+
+function NHUI.quickTarget()
+    local slot=hovered_inventory_slot()
+    if quick_source(slot) then return slot end
+end
+
+function NHUI.shiftDown()
+    return InputIsKeyDown and (InputIsKeyDown(225) or InputIsKeyDown(229))
 end
 
 local function same_use(source,prepared)
@@ -184,6 +248,21 @@ local function cursor_tip(lines,mx,my,sw,sh,scale)
 end
 
 local function item_details(slot,model,tr)
+    local shield=NHShields.types[slot.kind]
+    if shield then
+        local charge=slot.view and slot.view.charge or shield.cells*NHShields.cell
+        return {tr(shield.zh,shield.en),string.format(tr("盾量 %.2f / %d 格","Charge %.2f / %d cells"),charge/NHShields.cell,shield.cells),
+            tr("盾上减伤 ","Shield resistance ")..shield.resist.."%",shield.poly and tr("装备时免疫变形","Polymorph immunity while equipped") or nil}
+    elseif NHFirearms.rigs[slot.kind] then
+        return {slot.name,string.format(tr("备弹 %d / %d","Reserve %d / %d"),(slot.view or slot).reserve or 0,NHFirearms.rigs[slot.kind].capacity)}
+    elseif NHFirearms.items[slot.kind] and NHFirearms.items[slot.kind].magazine then
+        local d=NHFirearms.items[slot.kind]
+        if d.fixed then return {tr(d.zh,d.en),tr(d.noteZh,d.noteEn)} end
+        return {tr(d.zh,d.en),string.format(tr("枪内 %d / %d","Loaded %d / %d"),(slot.view or slot).rounds or 0,d.magazine),tr(d.noteZh,d.noteEn),tr("单击已存放的枪以装配","Click a stored gun to fit attachments")}
+    elseif NHShields.supply(slot.kind) then
+        local d=NHShields.supply(slot.kind)
+        return {tr(d.zh,d.en),tr(d.noteZh,d.noteEn),string.format(tr("剩余耐久 %d / %d","Uses left %d / %d"),slot.remaining or d.uses,d.uses)}
+    end
     local record=slot.view and slot.view.potion
     if record then
         local used,capacity=NHPotion.fillLevel(record)
@@ -196,6 +275,17 @@ local function item_details(slot,model,tr)
         end
         return lines
     end
+    if slot.kind=="relic" and slot.view then return {slot.name,NHRelics.description(slot.view.relic,model.lang)} end
+    if slot.kind=="relic_chain" then
+        local lines={slot.name}
+        if slot.view and slot.view.relics then
+            for _,name in ipairs(slot.view.relics) do lines[#lines+1]=name end
+            if #slot.view.relics==0 then lines[#lines+1]=tr("未装入遗物","No relics socketed.") end
+        end
+        lines[#lines+1]=slot.key=="valuable" and tr("点击或右键打开，拖入遗物以激活","Click or right-click to open. Drag in a relic to activate it.")
+            or tr("移入安全箱后可打开遗物链，取出或激活遗物","Move to the secure case to open the chain and remove or activate relics.")
+        return lines
+    end
     if slot.kind=="pouch" or slot.kind=="card_wallet" then
         local details={slot.name,tr("点击或右键打开，拖动移动","Click or right-click to open. Drag to move.")}
         if slot.view and slot.view.capacity then
@@ -206,57 +296,95 @@ local function item_details(slot,model,tr)
         end
         return details
     end
-    if slot.kind=="remote_terminal" then
-        local device=NHEquipment.remoteTerminal
-        return {slot.name,tr("剩余连接次数 ","Connections left ")..slot.remaining.."/"..device.uses,
-            tr("每次连接消耗 1 点耐久，关闭物品栏即断开。","One charge per connection. Close the inventory to disconnect.")}
+    local turret=turrets[slot.kind]
+    local storm=stormProducts.types[slot.kind]
+    if storm then return {tr(storm.zh,storm.en).." ×"..(slot.count or 1),
+        tr("每组上限 ","Stack limit ")..stormProducts.stackLimit,
+        tr("在消耗品页转为藏身处资源","Convert to hideout resources in Supplies."),
+        tr("在产物转化页加工或出售资源","Process or sell resources in Storm products.")} end
+    if turret then return {tr(turret.zh,turret.en).." ×"..(slot.count or 1),tr(turret.noteZh,turret.noteEn)} end
+    local gun=guns[slot.kind]
+    if gun then return {tr(gun.zh,gun.en).." ×"..(slot.count or 1),
+        tr("当前弹量 ","Loaded ")..slot.remaining.."/"..gun.capacity,tr(gun.noteZh,gun.noteEn)} end
+    local bag=bags[slot.kind]
+    if bag and bag.guaranteedPack then
+        local pack=bags[bag.guaranteedPack]
+        return {tr(bag.zh,bag.en).." ×"..(slot.count or 1),
+            tr("右键开启，必得一个","Right-click for one ")..tr(pack.zh,pack.en),
+            tr("另得一件奖励","Plus one bonus item"),
+            tr("食品 %d%% · 遗物 %d%% · 塔罗牌 %d%%","Food %d%% · Relic %d%% · Tarot %d%%"):format(bag.food,bag.relic,bag.tarot)}
+    end
+    if bag and bag.loot then
+        local loot=bags[bag.loot]
+        return {tr(bag.zh,bag.en).." ×"..(slot.count or 1),tr("补满已装备护盾与弹挂","Refills equipped shield and ammo rig"),
+            tr("充能器、弹药盒各一件","One charger and one ammo box"),tr("随机掉落 · ","Bonus loot · ")..tr(loot.zh,loot.en)}
+    end
+    if bag then
+        return {tr(bag.zh,bag.en).." ×"..(slot.count or 1),tr("右键打开，奖励落在脚边","Right-click to open at your feet"),
+            tr("必得金币","Guaranteed gold").." · "..tr("补给 ","Supplies ")..bag.supply.."% · "..tr("塔罗牌 ","Tarot ")..bag.tarot.."%",
+            tr("法术 ","Spell ")..bag.spell.."% · "..tr("法杖 ","Wand ")..bag.wand.."% · "..tr("召唤卡 ","Card ")..bag.card.."%"}
+    end
+    local food=foods[slot.kind]
+    if food then
+        local lines={slot.name,tr("当前份剩余 ","Current portion ")..(slot.remaining or food.uses).."/"..food.uses
+            ..tr("   数量 ","   Count ")..(slot.count or 1)}
+        for _,note in ipairs(tr(food.notesZh,food.notesEn)) do lines[#lines+1]=note end
+        return lines
+    end
+    if NHEquipment.links[slot.kind] then
+        local device=NHEquipment.links[slot.kind]
+        return {slot.name,tr("剩余部署次数 ","Deployments left ")..(slot.remaining or device.uses).."/"..device.uses,
+            tr(device.noteZh,device.noteEn)}
     end
     local surgery=NHSurgeryKits.types[slot.kind]
     if surgery then
         return {slot.name,tr("清除负面状态","Clears harmful conditions"),
             string.format(tr("恢复最大生命的 %d%%","Restores %d%% of maximum HP"),surgery.healPercent),
-            string.format(tr("用时 %d 秒，受伤会中断","Takes %d s. Damage interrupts."),surgery.castFrames/60),
-            tr("完成时消耗一包","Consumes one kit on completion")}
+            string.format(tr("用时 %d 秒，受伤时仍可继续","Takes %d s, even while taking damage."),surgery.castFrames/60),
+            tr("剩余次数 ","Uses left ")..(slot.remaining or surgery.uses).."/"..surgery.uses.."  ×"..(slot.count or 1)}
     end
     local kit=NHMedkits.types[slot.kind]
     if kit then
-        local healing=kit.healPercent and string.format(tr("每次恢复最大生命值的 %d%%","Restores %d%% of maximum HP per use"),kit.healPercent)
-            or string.format(tr("每次最多恢复 %d 点生命","Restores up to %d HP per use"),kit.healHP)
-        return {slot.name,tr("剩余次数 ","Uses left ")..(slot.remaining or kit.uses).."/"..kit.uses,healing}
+        local healing=string.format(tr("用时 %g 秒，恢复最大生命的 %d%%","After %g s, restores %d%% of max HP"),kit.castFrames/60,kit.healPercent)
+        return {(slot.name or kit.zh)..((slot.count or 1)>1 and " ×"..slot.count or ""),tr("剩余次数 ","Uses left ")..(slot.remaining or kit.uses).."/"..kit.uses,healing}
     end
     if slot.kind=="summon_card" then
-        local species=NHCompanions.species[slot.species]
+        local species=NHCompanions.cardDefinition(slot.species)
         local lines={species and tr(species.zh,species.en) or slot.name,
-            tr("耐久 ","Durability ")..slot.remaining.."/"..NHCompanions.durability,
+            tr("耐久 ","Durability ")..slot.remaining.."/"..NHCompanions.cardCapacity(slot.species),
             tr("数量 ","Count ")..string.format("%.0f",slot.count or 1)}
-        if not species or not model.affinityPoints then return lines end
+        if NHTarot.types[slot.species] then lines[#lines+1]=tr(species.noteZh,species.noteEn); return lines end
+        if not species then return lines end
+        lines[#lines+1]=tr(species.combatZh,species.combatEn)
+        local immunity=NHCompanions.immunities.types[slot.species]
+        lines[#lines+1]=tr(immunity.zh,immunity.en)
+        if not model.affinityPoints then return lines end
         local points=model.affinityPoints(slot.species)
         local tier=NHAffinity.tier(points)
         local bonus=NHCompanions.bonuses[tier]
-        local affinity=tr("好感度 ","Affinity ")..points.."/100"
+        local affinity=tr("好感度 ","Affinity ")..points.."/"..NHAffinity.maxPoints
         local nextTier=NHAffinity.thresholds[tier+2]
         lines[#lines+1]=nextTier and (affinity..tr("   下一阶段 ","   Next at ")..nextTier) or affinity
-        if slot.species=="dryad" then
-            lines[#lines+1]=tr("毒泥免疫","Toxic sludge immunity")
-        elseif slot.species=="slime" then
-            lines[#lines+1]=tr("水下呼吸","Underwater breathing")
-        elseif slot.species=="minotaur" or slot.species=="dragon" then
-            lines[#lines+1]=slot.species=="dragon" and tr("火焰免疫","Fire immunity") or tr("近战免疫","Melee immunity")
-            if bonus.shieldRecharge>0 then
-                local rate=math.floor(100*bonus.shieldRecharge/NHCompanions.bonuses[3].shieldRecharge+0.5)
-                lines[#lines+1]=string.format(tr("飞弹护盾 · 原版充能速度的 %d%%","Projectile shield at %d%% of normal recharge"),rate)
-            end
-        elseif slot.species=="griffin" or slot.species=="bee" then
-            lines[#lines+1]=slot.species=="bee" and tr("提高移动速度","Faster movement") or tr("加快飞行上升速度","Faster levitation")
-            if bonus.flightPercent>0 then
-                lines[#lines+1]=string.format(tr("每秒恢复 %d%% 飞行能量","Restores %d%% flight fuel per second"),bonus.flightPercent)
-            end
+        lines[#lines+1]=tr("救援可保留金币 ","Gold kept on rescue: ")..points
+        if points>1000 then lines[#lines+1]=tr("随行产卡概率 +","Extra card chance +")..("%.2f%%"):format(NHAffinity.incomeBasisPoints(points)/100) end
+        if slot.species=="dryad" then lines[#lines+1]=tr("毒泥免疫","Toxic sludge immunity")
+        elseif slot.species=="bee" then lines[#lines+1]=tr("提高移动速度","Faster movement") end
+        if species.shield and bonus.shieldRecharge>0 then
+            local rate=math.floor(100*bonus.shieldRecharge/NHCompanions.bonuses[3].shieldRecharge+0.5)
+            lines[#lines+1]=tr("飞弹护盾 · 原版充能速度的 %d%%","Projectile shield at %d%% of normal recharge"):format(rate)
         end
-        local healSeconds=slot.species=="flower_fairy" and bonus.fairySeconds or (species.bonus=="regeneration" and bonus.regenSeconds)
-        if healSeconds and healSeconds>0 then
-            lines[#lines+1]=string.format(tr("每 %d 秒恢复 1 HP","Heals 1 HP every %d s"),healSeconds)
+        if species.role=="flight" then
+            lines[#lines+1]=tr("上升速度 +%d%%","Ascent speed +%d%%"):format(species.lift+bonus.lift)
+            lines[#lines+1]=tr("每秒恢复 %d%% 飞行能量","Restores %d%% flight fuel per second"):format(species.fuel+bonus.fuel)
+        elseif species.role=="melee" then
+            lines[#lines+1]=tr("领域半径 %d，每半秒造成 %d 近战伤害","Field radius %d, deals %d melee damage every 0.5 s"):format(species.radius,bonus.fieldDamage)
+            lines[#lines+1]=tr("近战减伤 %d%%，免疫击退","Melee resistance %d%%, knockback immunity"):format(bonus.meleeResist)
+        else
+            lines[#lines+1]=tr("每秒恢复最大生命的 %g%%","Heals %g%% of max HP per second"):format(bonus.heal)
+            lines[#lines+1]=tr("行动速度 +%d%%","Movement speed +%d%%"):format(bonus.speed)
+            lines[#lines+1]=tr("持续汇聚法力，法杖额外回复 %d 法力/秒","Mana regeneration, extra %d wand mana/s"):format(bonus.mana)
         end
-        lines[#lines+1]=string.format(tr("每结伴移动 %d 秒有 25%% 概率赠物","25%% gift chance per %d s of travel"),bonus.giftSeconds)
+        lines[#lines+1]=tr("每 %d 分钟赠送 %d 级礼物盒","Every %d min: tier %d gift box"):format(NHCompanions.giftMinutes(species),bonus.giftLevel)
         return lines
     end
     if slot.kind=="dose" then
@@ -267,9 +395,6 @@ local function item_details(slot,model,tr)
     local throwable=NHThrowables.types[slot.kind]
     if throwable then
         return {tr(throwable.zh,throwable.en).." ×"..(slot.count or 1),tr(throwable.noteZh,throwable.noteEn)}
-    end
-    if slot.kind=="bandage" and (slot.count or 1)>1 then
-        return {slot.name.." ×"..string.format("%.0f",slot.count)}
     end
     return {slot.name or slot.kind}
 end
@@ -282,10 +407,9 @@ local function home_layout(sw,scale,tile_width)
     local stash=math.min(230,math.floor(room*0.43))
     local secure=math.min(187,math.max(16+4*tile_width,room-bench-stash))
     stash=math.min(stash,room-bench-secure)
-    local left=5
-    local right=sw-5-secure*scale
-    local middle=(left+stash*scale+right-bench*scale)/2
-    return {left=left,stash=stash,middle=middle,bench=bench,secure=secure}
+    local stash_x=sw-5-stash*scale
+    local middle=(5+secure*scale+stash_x-bench*scale)/2
+    return {stashX=stash_x,stash=stash,middle=middle,bench=bench,secure=secure}
 end
 
 local function stash_tabs(width,scale,tr)
@@ -319,32 +443,6 @@ local function stash_tabs(width,scale,tr)
     return tabs,warehouse_tabs_y+15
 end
 
--- Keep the ends of a long page strip reachable and center the nearby numbers.
-local function warehouse_pager(x,y,width,scale,current,pages)
-    current=math.min(current,pages)
-    local selected=current
-    GuiZSetForNextWidget(gui,-79)
-    GuiImageNinePiece(gui,299,x,y,width*scale,14*scale,0.7)
-    local function button(id,offset,title,color)
-        tint(color)
-        return GuiButton(gui,id,x+offset*scale,y+2*scale,title,scale) and not drag
-    end
-    if button(300,4,"<",current>1 and gold or muted) then selected=math.max(1,current-1) end
-    if button(301,width-11,">",current<pages and gold or muted) then selected=math.min(pages,current+1) end
-    local pitch=GuiGetTextDimensions(gui,"["..pages.."]",scale)/scale+5
-    local count=math.min(pages,math.max(1,math.floor((width-32)/pitch)))
-    local start=math.max(1,math.min(pages-count+1,current-math.floor(count/2)))
-    for i=1,count do
-        local n=start+i-1
-        if count>=5 and i==1 then n=1 elseif count>=5 and i==count then n=pages end
-        local title=n==current and ("["..n.."]") or tostring(n)
-        local center=width/2+(i-(count+1)/2)*pitch
-        local offset=center-GuiGetTextDimensions(gui,title,scale)/(2*scale)
-        if button(301+i,offset,title,n==current and gold or white) then selected=n end
-    end
-    return selected
-end
-
 local function time_text(seconds)
     return string.format("%d:%02d",math.floor(seconds/60),seconds%60)
 end
@@ -356,36 +454,54 @@ local function transfer_batch(elapsed,limit)
     end
 end
 
-local function draw_shop_bank(model,left,top,width,scale,tr,dispatch,mx,my)
-    local x=left+6*scale
-    local right=left+(width-6)*scale
-    local title=tr("存款余额","Savings")
-    local amount=string.format("%.0f",model.bankGold)
-    local name_width=GuiGetTextDimensions(gui,title,scale)
-    local value_width=GuiGetTextDimensions(gui,amount,scale)
-    local value_scale=scale*math.min(1,(right-x-name_width-3*scale)/value_width)
-    tint(muted)
-    GuiText(gui,x,top,title,scale)
-    tint(gold)
-    GuiText(gui,right-GuiGetTextDimensions(gui,amount,value_scale),top,amount,value_scale)
+local bankUnits={"","k","M","B","T","P"}
+local function bank_amount(n)
+    if n<1000 then return string.format("%.0f",n) end
+    local unit,index=1,1
+    while index<#bankUnits and n>=unit*1000 do unit,index=unit*1000,index+1 end
+    local precision=n>=100*unit and 1 or n>=10*unit and 10 or 100
+    return tostring(math.floor(n/(unit/precision))/precision)..bankUnits[index]
+end
 
+local function open_shop()
+    tab,selected_entry,salvage_target,bank_hold="shop",nil,nil,nil
+end
+
+local function draw_shop_bank(model,left,top,width,scale,tr,dispatch,mx,my)
+    local title=tr("存款余额：","Savings:")
     local deposit,withdraw=tr("[存入]","[Deposit]"),tr("[取出]","[Withdraw]")
-    local total=GuiGetTextDimensions(gui,deposit,scale)+GuiGetTextDimensions(gui,withdraw,scale)
-    local button_scale=scale*math.min(1,(right-x-4*scale)/total)
-    local y=top+12*scale
+    local balance=model.bankGold or 0
+    local amount=bank_amount(balance)
+    local titleW=GuiGetTextDimensions(gui,title)
+    local depositW=GuiGetTextDimensions(gui,deposit)
+    local withdrawW=GuiGetTextDimensions(gui,withdraw)
+    -- Reserve a fixed balance cell so crossing 999 or 1M cannot interrupt a held transfer.
+    local balanceW=GuiGetTextDimensions(gui,"8.88M")
+    local gap=2
+    local rowScale=scale*math.min(1,(width-12)/(titleW+depositW+balanceW+withdrawW+3*gap))
+    local x=left+6*scale
+    local y=top
+    local depositX=x+(titleW+gap)*rowScale
+    local balanceX=depositX+(depositW+gap)*rowScale
+    local withdrawX=balanceX+(balanceW+gap)*rowScale
+    tint(muted)
+    GuiText(gui,x,y,title,rowScale)
+    tint(gold)
+    GuiText(gui,balanceX+(balanceW-GuiGetTextDimensions(gui,amount))*rowScale/2,y,amount,rowScale)
+    GuiTooltip(gui,title,string.format("%.0f",balance))
     local frame=GameGetFrameNum()
     local previous=bank_hold
     bank_hold=nil
     local function transfer(id,caption,direction,bx,source,destination)
         local limit=source and destination and not model.walletInfinite and math.min(source,NHStore.maxGold-destination) or 0
         tint(limit>0 and green or muted)
-        GuiButton(gui,id,bx,y,caption,button_scale)
+        GuiButton(gui,id,bx,y,caption,rowScale)
         local help=tr("点按转移 1 金币，按住加速","Click for 1 gold, hold to transfer faster")
         if model.walletInfinite then help=tr("无限金币钱包不支持存取","Transfers unavailable with infinite gold")
         elseif not model.walletGold then help=tr("当前钱包不可用","Wallet unavailable")
         else help=help.."\n"..tr("随身金币 ","Wallet ")..string.format("%.0f",model.walletGold) end
         GuiTooltip(gui,caption,help)
-        local w,h=GuiGetTextDimensions(gui,caption,button_scale)
+        local w,h=GuiGetTextDimensions(gui,caption,rowScale)
         if limit<=0 or drag or mx<bx or mx>=bx+w or my<y or my>=y+h or not InputIsMouseButtonDown(1) then return end
         if InputIsMouseButtonJustDown(1) then bank_hold={id=id,start=frame}
         elseif previous and previous.id==id and previous.frame==frame-1 then bank_hold=previous end
@@ -395,11 +511,26 @@ local function draw_shop_bank(model,left,top,width,scale,tr,dispatch,mx,my)
             if batch then dispatch("bank_transfer",{direction=direction,amount=math.min(limit,batch)}) end
         end
     end
-    transfer(274,deposit,"deposit",x,model.walletGold,model.bankGold)
-    transfer(275,withdraw,"withdraw",right-GuiGetTextDimensions(gui,withdraw,button_scale),model.bankGold,model.walletGold)
+    transfer(274,deposit,"deposit",depositX,model.walletGold,model.bankGold)
+    transfer(275,withdraw,"withdraw",withdrawX,model.bankGold,model.walletGold)
 end
 
 local essence_columns,essence_rows=4,5
+local function stock_rows(key,entries)
+    local cache=sorted_stock[key]
+    if not cache then return entries end
+    if cache.source~=entries then
+        local sorted={}
+        for i,entry in ipairs(entries) do sorted[i]=entry end
+        table.sort(sorted,function(a,b)
+            if a.amount~=b.amount then return a.amount>b.amount end
+            return a.key<b.key
+        end)
+        cache.source,cache.rows=entries,sorted
+    end
+    return cache.rows
+end
+
 local function draw_essences(entries,start,limit,left,top,width,scale,mx,my)
     local column_width=(width-8)/essence_columns
     local cell_width=(column_width-3)*scale
@@ -435,10 +566,14 @@ local function draw_essences(entries,start,limit,left,top,width,scale,mx,my)
     return tip
 end
 
+local function show_production_project(id)
+    tab,expansion_section,selected_entry="expansion","production",id
+end
+
 local function draw_farm(farm,y,tr,button,label,value_row,dispatch)
     if #farm.plots==0 then
         if button(412,6,y,tr("去扩建田地","Build farmland")) then
-            tab,selected_entry="expansion","farmland"
+            show_production_project("farmland")
         end
         return
     end
@@ -481,8 +616,10 @@ local function draw_farm(farm,y,tr,button,label,value_row,dispatch)
 end
 
 local forage_rows={
+    dog={{"犬娘卡","Hound maiden card","3%"}},
+    cat={{"猫娘卡","Cat maiden card","3%"}},
     queen_bee={{"蜂娘卡","Bee card","3%"}},
-    dragon_egg={{"法术、容器或消耗品","Spell, flask or supply","92%"},{"其他召唤卡","Other summon card","5%"},{"龙娘卡","Dragon card","3%"}},
+    dragon_egg=NHDragonLoot.odds,
     gel_pool={
         {"香料 + 激活剂","Spice + injector",NHGelPool.bonusChance.."%","同时产出 1 份香料和 1 支随机满耐久激活剂。香料存入农产库存，激活剂存入消耗品库。",
             "Adds 1 spice to crop stock and 1 random full-charge injector to supplies in the same harvest."},
@@ -508,8 +645,8 @@ end
 
 local function draw_livestock(farm,y,tr,button,label,value_row)
     if #farm.pens==0 then
-        if button(442,6,y,tr("去扩建畜牧设备","Build livestock pens")) then tab,selected_entry="expansion","livestock" end
-        if button(446,6,y+13,tr("建造凝胶池","Build gel pool")) then tab,selected_entry="expansion","gel_pool" end
+        if button(442,6,y,tr("去扩建畜牧设备","Build livestock pens")) then show_production_project("livestock") end
+        if button(446,6,y+13,tr("建造凝胶池","Build gel pool")) then show_production_project("gel_pool") end
         return
     end
     local pen=find_pen(farm,selected_pen)
@@ -534,7 +671,8 @@ local function draw_livestock(farm,y,tr,button,label,value_row)
     end
     if pen.blocked then
         local full=tr("畜产库存已满","Produce storage full")
-        if pen.species=="dragon_egg" then full=tr("存钱罐已满","Bank full")
+        if pen.species=="dog" or pen.species=="cat" then full=tr("消耗品库已满","Supplies storage full")
+        elseif pen.species=="dragon_egg" then full=tr("存钱罐已满","Bank full")
         elseif pen.species=="gel_pool" then full=tr("草药或纤维库存已满","Herb or fiber stock full") end
         label(next_y,full,muted)
         next_y=next_y+13
@@ -558,12 +696,12 @@ local function draw_livestock(farm,y,tr,button,label,value_row)
         end
     end
     if pen.count<pen.capacity then
-        if button(444,6,next_y,tr("购买","Buy ")..pen.young) then
+        if button(444,6,next_y,tr("转化","Convert to ")..pen.young) then
             tab,shop_category,selected_entry="shop","livestock",pen.species
         end
     elseif pen.canExpand then
         if button(447,6,next_y,tr("扩建栏位","Expand capacity")) then
-            tab,selected_entry="expansion",pen.expansion
+            show_production_project(pen.expansion)
         end
     else
         label(next_y,tr("已达饲养上限","Maximum capacity"),muted)
@@ -586,17 +724,23 @@ end
 
 local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
     local left,width=layout.middle,layout.bench
-    if not model.debug and tab=="samples" then tab="orders" end
+    if not model.debug and tab=="samples" then open_shop() end
     local nav,body=layout.workTabs,layout.navEnd
     local nav_end=body
     local crafting=tab=="orders"
     local alchemy=crafting and recipe_category=="alchemy"
     local spells=crafting and recipe_category=="spell"
     local shopping=tab=="shop"
+    local building=tab=="expansion"
     local farming=tab=="farm"
     local ranching=tab=="livestock"
     local menu=model.progression[tab]
-    if spells then
+    if building then
+        menu={}
+        for _,project in ipairs(model.progression.expansion) do
+            if project.section==expansion_section then menu[#menu+1]=project end
+        end
+    elseif spells then
         menu=spell_family and model.spellRecipes[spell_family] or model.spellFamilies
     elseif crafting then
         menu={}
@@ -607,7 +751,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         end
     elseif shopping then
         menu={}
-        for _,good in ipairs(model.shopGoods) do
+        for _,good in ipairs(model.shopGoods or {}) do
             if good.category==shop_category then menu[#menu+1]=good end
         end
     end
@@ -615,8 +759,9 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
     for _,item in ipairs(menu or {}) do
         if item.id==selected_entry then selected=item; break end
     end
-    local outputs=crafting and selected and selected.outputs
-    local catalysts=crafting and selected and selected.catalysts
+    local recipe_detail=selected and (crafting or (shopping and selected.inputs))
+    local outputs=recipe_detail and selected.outputs
+    local catalysts=recipe_detail and selected.catalysts
     local catalyst_count=catalysts and #catalysts or 0
     local show_outputs=outputs and (#outputs>1 or (#outputs==1 and (outputs[1].name~=selected.name or catalyst_count>0)))
     local salvage
@@ -624,25 +769,27 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         local category=model.warehouse[NHStore.category(salvage_target.kind)]
         salvage=category and category[salvage_target.slot]
         if not salvage or salvage.id~=salvage_target.id or not salvage.salvage_yield
+            or ((salvage_target.mode=="store_contents")~=(salvage.store_contents~=nil))
             or (salvage_target.mode=="essence" and not salvage.essence) then salvage_target,salvage=nil,nil end
     end
     local per_card=salvage and salvage_target.mode=="essence" and salvage.essence.per_card
     local shop_bank=shopping and not salvage
     if shop_bank then
-        nav_end=body+26
+        nav_end=body+bankRowHeight
         body=nav_end
     end
     local category_tabs
     if not salvage then
-        if crafting and not selected then category_tabs=recipe_tabs
+        if building and not selected then category_tabs=expansion_tabs
+        elseif crafting and not selected then category_tabs=recipe_tabs
         elseif shopping and not selected then category_tabs=shop_tabs
         elseif farming then category_tabs=farm_tabs
         elseif ranching then category_tabs=livestock_tabs end
     end
     local category_nav,alchemy_nav
-    local function position_subtabs()
-        category_nav,body=position_work_tabs(category_tabs,nav_end,width,scale,tr)
-        if alchemy then alchemy_nav,body=position_work_tabs(alchemy_tabs,body,width,scale,tr) end
+    local function position_subtabs(navWidth)
+        category_nav,body=position_work_tabs(category_tabs,nav_end,navWidth or width,scale,tr)
+        if alchemy then alchemy_nav,body=position_work_tabs(alchemy_tabs,body,navWidth or width,scale,tr) end
     end
     if category_tabs then position_subtabs() end
     local function available(item)
@@ -650,11 +797,12 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         if shopping then return item.ready end
         return item.canBuy
     end
-    local preview=crafting and selected and (selected.category=="medical" or selected.category=="weapons") and selected.icon
+    local preview=recipe_detail and (selected.category=="medical" or selected.category=="weapons" or selected.category=="storm_products") and selected.icon
     local body_height=62
     if tab=="samples" and not salvage then body_height=82
     elseif salvage then
         body_height=77+(salvage.essence and 14 or 0)+(salvage.spell_uses~=nil and 13 or 0)+(per_card and 13 or 0)
+        if salvage.store_contents then body_height=body_height+13+12*#salvage.store_contents end
     elseif ranching then
         local pen=find_pen(model.farm,selected_pen)
         if livestock_page=="produce" then body_height=13*(1+#model.farm.produce)+5
@@ -674,27 +822,33 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         if farm_page=="stock" then body_height=13*(1+#farm.crops)+5
         elseif not plot then body_height=13*math.max(1,#farm.plots)+5
         else body_height=(plot.crop and 42 or 28)+13*#farm.crops+2 end
-    elseif crafting and selected then
+    elseif recipe_detail then
         body_height=68+12*#selected.inputs+(preview and 5 or 0)
         if spells then body_height=body_height+13 end
         if catalyst_count>0 then body_height=body_height+13+12*catalyst_count end
         if show_outputs then body_height=body_height+13+12*#outputs end
-        if selected.medkit then body_height=body_height+(selected.medkit.castFrames and 65 or 26)
+        if outputs and outputs[1] and outputs[1].stock then body_height=body_height+13 end
+        if selected.medkit then body_height=body_height+(NHSurgeryKits.types[selected.id] and 65 or 39)
+        elseif foods[selected.id] then body_height=body_height+13*(1+#foods[selected.id].notesZh)
         elseif selected.note then body_height=body_height+13 end
         if model.order_active and selected.unlocked==false then body_height=body_height+13 end
     elseif shopping and selected then
-        body_height=86+(NHLivestock.species[selected.id] and 65 or 0)+13*#(forage_rows[selected.id] or {})
+        body_height=86+(selected.scrap and 14 or 0)+(NHLivestock.species[selected.id] and 65 or 0)+13*#(forage_rows[selected.id] or {})
     elseif selected then body_height=80+12*#selected.costs
     elseif menu then
-        body_height=5+13*math.max(1,math.min(#menu,entries_per_page))
+        body_height=5+13*math.max(1,#menu)
         if spells and spell_family then body_height=body_height+13 end
-        if #menu>entries_per_page then body_height=body_height+13 end
         if crafting and model.order_active then body_height=body_height+15 end
     end
     local height=workshop_folded and 20 or layout.panelHeight
     local top=sh-5-height*scale
     panels[#panels+1]={x=left,y=top,w=width*scale,h=height*scale,slot={key="panel"}}
+    local detailTop,detailBottom
+    local function visibleDetail(y,h)
+        return not detailTop or (y>=detailTop and y+(h or 10)<=detailBottom)
+    end
     local function label(y,value,color,x)
+        if not visibleDetail(y) then return end
         x=x or 6
         local txt,short=fit(value,(width-x-6)*scale,scale)
         tint(color or white)
@@ -703,12 +857,14 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
     end
     local function recipe_icon(id,y,path,size)
         if not path then return 6 end
+        if not visibleDetail(y,size) then return 8+size end
         local w,h=GuiGetImageDimensions(gui,path)
         if w<=0 or h<=0 then return 6 end
         GuiImage(gui,id,left+6*scale,top+y*scale,path,1,size*scale/math.max(w,h))
         return 8+size
     end
     local function button(id,x,y,value,color,tip,detail)
+        if not visibleDetail(y) then return false end
         local txt,short=fit(value,(width-x-5)*scale,scale)
         tint(color or gold)
         local clicked=GuiButton(gui,id,left+x*scale,top+y*scale,txt,scale)
@@ -718,8 +874,10 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
     GuiZSetForNextWidget(gui,-79)
     GuiImageNinePiece(gui,210,left,top,width*scale,height*scale,1)
     local hover=mx>=left and mx<left+width*scale and my>=top and my<top+height*scale
-    if button(211,6,3,(workshop_folded and "[+] " or "[-] ")..tr("藏身处","Hideout")) then
+    local toggleHint=travelSession and not workshop_folded and tr("折叠后显示旅行终端","Fold to show travel routes")
+    if button(211,6,3,(workshop_folded and "[+] " or "[-] ")..tr("藏身处","Hideout"),nil,toggleHint) then
         workshop_folded=not workshop_folded
+        if not workshop_folded then open_shop() end
         return hover
     end
     if workshop_folded then return hover end
@@ -734,50 +892,50 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
     if shop_bank then draw_shop_bank(model,left,top+layout.navEnd*scale,width,scale,tr,dispatch,mx,my) end
     -- Keep all navigation above the scrolling body when there is room. On a
     -- narrow screen wrapped subcategories may scroll, but the main tabs stay put.
-    local scroll=body+body_height>height-2
-    local scroll_y=height-body>=38 and body or nav_end
-    local in_scroll=false
-    local function begin_scroll()
-        local view_key=table.concat({tab,recipe_category,alchemy_mode,shop_category,spells and spell_family or "",
-            farm_page,selected_plot or "",livestock_page,selected_pen or "",selected_entry or "",
-            salvage and salvage.id or "",salvage_target and salvage_target.mode or ""},"/")
-        GuiIdPushString(gui,view_key)
-        GuiBeginScrollContainer(gui,20000,left+2*scale,top+scroll_y*scale,
-            (width-4)*scale,(height-scroll_y-3)*scale,true,0,0)
-        in_scroll=true
-        -- Children of a native scroll container use relative coordinates.
-        left,top,width=0,-scroll_y*scale,width-12
+    local listHeader=(spells and spell_family and 13 or 0)+(crafting and model.order_active and 15 or 0)
+    local rowList=menu and not selected and not salvage and height-body-listHeader>=17
+    local function scroll_body(key,start,pitch)
+        local room=height-3-start
+        if room<=0 then return end
+        local overflow=math.max(0,body+body_height-(height-3))
+        local visible=math.max(1,math.floor(room/pitch))
+        local steps=math.ceil(overflow/pitch)
+        local first=scrollMenu.rows(gui,key,7102,visible+steps,visible,left,top+start*scale,width*scale,room*scale,scale,mx,my,nil,drag)
+        local offset=math.min(first*pitch,overflow)
+        detailTop,detailBottom=start+offset,height-3+offset
+        top=top-offset*scale
+        if steps>0 then width=width-5 end
     end
-    local function finish()
-        if in_scroll then
-            GuiEndScrollContainer(gui)
-            GuiIdPop(gui)
-        end
-        return hover
-    end
-    if scroll and scroll_y==nav_end then
-        begin_scroll()
-        if category_tabs then position_subtabs() end
+    local section=building and expansion_section or (spells and spell_family) or (alchemy and alchemy_mode)
+        or (crafting and recipe_category) or (shopping and shop_category) or (farming and farm_page) or (ranching and livestock_page) or tab
+    local viewKey=table.concat({tab,section,selected and selected.id or (farming and selected_plot) or (ranching and selected_pen) or ""},"/")
+    local pageBody=not rowList and not salvage and not selected
+    local scrollTabs=pageBody and category_tabs and height-body<38 and body+body_height>height-3
+    if scrollTabs then
+        position_subtabs(width-5)
+        scroll_body(viewKey,nav_end,13)
     end
     for _,t in ipairs(category_nav or {}) do
-        local current=ranching and livestock_page or farming and farm_page or (shopping and shop_category or recipe_category)
+        local current=building and expansion_section or ranching and livestock_page or farming and farm_page or (shopping and shop_category or recipe_category)
         if button(t.id,t.x,t.y,t.name,t.key==current and gold or muted) then
-            if ranching then livestock_page,selected_pen=t.key,nil
+            if building then expansion_section=t.key
+            elseif ranching then livestock_page,selected_pen=t.key,nil
             elseif farming then farm_page,selected_plot=t.key,nil
             elseif shopping then shop_category=t.key else recipe_category=t.key end
             selected_entry=nil
-            return finish()
+            return hover
         end
     end
     for _,t in ipairs(alchemy_nav or {}) do
         if button(t.id,t.x,t.y,t.name,t.key==alchemy_mode and gold or muted) then
             alchemy_mode,selected_entry=t.key,nil
-            return finish()
+            return hover
         end
     end
-    if scroll and scroll_y~=nav_end then begin_scroll() end
+    if pageBody and not scrollTabs then scroll_body(viewKey,body,13) end
     -- Quantities and timers stay visible even when a long name needs a tooltip.
     local function value_row(y,name,value,color,tip,detail)
+        if not visibleDetail(y) then return end
         local right=width-6-GuiGetTextDimensions(gui,value,scale)/scale
         local txt,short=fit(name,(right-9)*scale,scale)
         tint(muted)
@@ -809,23 +967,27 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         local stock_right=rate_right-rate_w*number_factor-3*scale
         local name_w=stock_right-stock_w*number_factor-3*scale-name_x
         for i,r in ipairs(rows) do
-            local row_y=top+(y+(i-1)*13)*scale
-            local entry=r.entry
-            local detail=entry and string.format(tr("库存 %.0f\n每分钟产量 %s","Stock %.0f\nOutput per minute %s"),
-                entry.stock,r.rate)
-            tint(entry and white or muted)
-            GuiText(gui,name_x,row_y,fit(r.name,name_w,scale),scale)
-            if detail then GuiTooltip(gui,r.name,detail) end
-            tint(entry and entry.stock>0 and white or muted)
-            GuiText(gui,stock_right-r.stockWidth*number_factor,row_y,r.stock,scale*number_factor)
-            if detail then GuiTooltip(gui,r.name,detail) end
-            tint(entry and entry.perMinute>0 and green or muted)
-            GuiText(gui,rate_right-r.rateWidth*number_factor,row_y,r.rate,scale*number_factor)
-            if detail then GuiTooltip(gui,r.name,detail)
-            else GuiTooltip(gui,tr("每分钟产量","Output per minute"),tr("按当前完整生产周期计算","Average over a full production cycle")) end
+            local logicalY=y+(i-1)*13
+            if visibleDetail(logicalY) then
+                local row_y=top+logicalY*scale
+                local entry=r.entry
+                local detail=entry and string.format(tr("库存 %.0f\n每分钟产量 %s","Stock %.0f\nOutput per minute %s"),
+                    entry.stock,r.rate)
+                tint(entry and white or muted)
+                GuiText(gui,name_x,row_y,fit(r.name,name_w,scale),scale)
+                if detail then GuiTooltip(gui,r.name,detail) end
+                tint(entry and entry.stock>0 and white or muted)
+                GuiText(gui,stock_right-r.stockWidth*number_factor,row_y,r.stock,scale*number_factor)
+                if detail then GuiTooltip(gui,r.name,detail) end
+                tint(entry and entry.perMinute>0 and green or muted)
+                GuiText(gui,rate_right-r.rateWidth*number_factor,row_y,r.rate,scale*number_factor)
+                if detail then GuiTooltip(gui,r.name,detail)
+                else GuiTooltip(gui,tr("每分钟产量","Output per minute"),tr("按当前完整生产周期计算","Average over a full production cycle")) end
+            end
         end
     end
     local function cost(y,name,have,need,detail,essence)
+        if not visibleDetail(y) then return end
         local balance=compact(have).." / "..compact(need)
         local tip=string.format("%s  %.0f / %.0f",name,have,need)
         local kind=NHEssences.types[essence]
@@ -853,18 +1015,27 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
     end
     if salvage then
         label(body,tr("拆解","Dismantle"),gold)
+        scroll_body("salvage/"..salvage.kind.."/"..salvage_target.mode,body+13,12)
         label(body+13,salvage.name)
         local y=body+27
         local extract=salvage_target.mode=="essence"
         local amount,stock=salvage.salvage_yield,salvage.salvage_stock
+        if salvage.store_contents then
+            label(y,tr("存入物料库","Store in bulk storage"),muted)
+            y=y+13
+            for _,entry in ipairs(salvage.store_contents) do
+                value_row(y,entry.name,"+"..compact(entry.amount),green,nil,string.format("%.0f",entry.amount))
+                y=y+12
+            end
+        end
         if salvage.essence then
             local essence=tr("精华","Essence")
             local scrap=tr("碎片","Scrap")
             local choice=extract and "["..essence.."]" or essence
-            if button(262,6,y,choice,extract and gold or muted) then salvage_target.mode="essence"; return finish() end
+            if button(262,6,y,choice,extract and gold or muted) then salvage_target.mode="essence"; return hover end
             local x=13+GuiGetTextDimensions(gui,choice,scale)/scale
             if button(263,x,y,extract and scrap or "["..scrap.."]",extract and muted or gold) then
-                salvage_target.mode="scrap"; return finish()
+                salvage_target.mode="scrap"; return hover
             end
             y=y+14
         end
@@ -894,12 +1065,14 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
             label(y,salvage.salvage_name.." +"..amount,green)
             label(y+12,tr("现有碎片 ","Current scrap ")..compact(stock),muted)
         end
-        if amount<=NHStore.maxResourceAmount-stock then
-            local confirm=extract and tr("确认提取","Extract essence") or tr("确认拆解","Dismantle item")
+        if salvage.materials_fit==false then label(y+26,tr("物料库空间不足","Material storage full"),muted)
+        elseif amount<=NHStore.maxResourceAmount-stock then
+            local confirm=salvage.store_contents and tr("存放并拆解","Store and dismantle")
+                or extract and tr("确认提取","Extract essence") or tr("确认拆解","Dismantle item")
             if button(260,6,y+26,confirm,green) then
                 dispatch("salvage",salvage_target)
                 salvage_target=nil
-                return finish()
+                return hover
             end
         else label(y+26,tr("库存已满","Storage full"),muted) end
         if button(261,6,y+38,tr("取消","Cancel")) then salvage_target=nil end
@@ -909,24 +1082,35 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
     elseif farming then
         if farm_page=="stock" then stock_table(model.farm.crops,body)
         else draw_farm(model.farm,body,tr,button,label,value_row,dispatch) end
-    elseif crafting and selected then
+    elseif recipe_detail then
         local back=tr("< 返回配方","< Recipes")
         local confirm=tr("确认制造","Confirm craft")
-        if spells then
+        if shopping then
+            back,confirm=tr("< 产物转化","< Storm products"),tr("确认加工","Process")
+        elseif spells then
             local family=NHEssences.types[spell_family]
             back,confirm="< "..tr(family.zh,family.en),tr("合成法术","Craft spell")
         elseif alchemy then
             if alchemy_mode=="synthesis" then
                 back,confirm=tr("< 炼成","< Synthesis"),tr("确认炼成","Synthesize")
+            elseif alchemy_mode=="rubedo" then
+                back,confirm=tr("< 红化","< Rubedo"),tr("确认红化","Transmute")
+            elseif alchemy_mode=="logistics" then
+                back,confirm=tr("< 后勤资源包","< Logistics packs"),tr("制作资源包","Craft packs")
             else
                 back,confirm=tr("< 分解","< Decomposition"),tr("确认分解","Decompose")
             end
         end
-        if button(240,6,body,back) then selected_entry=nil; return finish() end
+        if button(240,6,body,back) then selected_entry=nil; return hover end
+        scroll_body("recipe/"..selected.id,body+13,12)
         local x=recipe_icon(610,body+14,preview,16)
         label(body+(preview and 17 or 14),show_outputs and selected.name or selected.name.." ×"..selected.output,available(selected) and green or white,x)
         local y=body+(preview and 32 or 27)
-        value_row(y,tr("预计用时","Craft time"),time_text(selected.duration),white)
+        value_row(y,tr("交付","Delivery"),tr("即时完成","Instant"),white)
+        if outputs and outputs[1] and outputs[1].stock then
+            y=y+13
+            value_row(y,tr("成品库存","In storage"),compact(outputs[1].stock),white,string.format("%.0f",outputs[1].stock))
+        end
         y=y+13
         if spells then
             local spell_type=selected.spellType=="static_projectile" and tr("静态投射物","Static projectile") or tr("投射物","Projectile")
@@ -967,11 +1151,21 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
             value_row(y,tr("每次回血","Healing per use"),selected.medkit.healPercent..tr("% 最大生命","% max HP"),white)
             if selected.medkit.castFrames then
                 y=y+13
-                value_row(y,tr("手术用时","Use time"),(selected.medkit.castFrames/60)..tr(" 秒"," s"),white)
+                value_row(y,tr("使用时间","Use time"),(selected.medkit.castFrames/60)..tr(" 秒"," s"),white)
+            end
+            if NHSurgeryKits.types[selected.id] then
                 y=y+13
                 label(y,tr("清除负面状态","Clears harmful conditions"),white)
                 y=y+13
-                label(y,tr("受伤中断，手术包保留","Damage interrupts. Kit kept."),muted)
+                label(y,tr("受伤时仍可继续手术","Surgery continues through damage."),muted)
+            end
+        elseif foods[selected.id] then
+            local food=foods[selected.id]
+            y=y+13
+            label(y,tr("每份 "..food.uses.." 口",food.uses.." bites per portion"),white)
+            for _,line in ipairs(tr(food.notesZh,food.notesEn)) do
+                y=y+13
+                label(y,line,muted)
             end
         elseif selected.note then
             y=y+13
@@ -987,16 +1181,37 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         elseif available(selected) then
             if button(214,6,y,confirm,green) then dispatch("craft",{id=selected.id}) end
         else label(y,selected.reason or tr("材料或空位不足","Need stock or space"),muted) end
+    elseif shopping and selected and selected.yield then
+        if button(240,6,body,tr("< 返回列表","< Offers")) then selected_entry=nil; return hover end
+        scroll_body(viewKey,body+13,12)
+        label(body+14,selected.name,white,recipe_icon(610,body+14,selected.icon,12))
+        label(body+27,tr("资源  库存 / 所需","Resource  stock / cost"),muted)
+        cost(body+39,selected.resourceName,selected.resourceStock,selected.quantity)
+        local y=body+52
+        value_row(y,tr("存钱罐金币","Bank gold"),tostring(selected.yield.gold),green)
+        y=y+13
+        if available(selected) then
+            if button(258,6,y,tr("确认出售","Sell"),green) then dispatch("shop_buy",{id=selected.id}) end
+        else label(y,selected.reason,gold) end
     elseif shopping and selected then
-        if button(240,6,body,tr("< 返回商品","< Goods")) then selected_entry=nil; return finish() end
+        if button(240,6,body,tr("< 返回列表","< Offers")) then selected_entry=nil; return hover end
+        scroll_body(viewKey,body+13,12)
         label(body+14,selected.name,white)
         value_row(body+27,tr("数量","Quantity"),string.format("%.0f",selected.quantity),white)
         local destination=selected.category=="materials" and tr("物料","Materials") or tr("消耗品","Supplies")
         local animal=NHLivestock.species[selected.id]
         if animal then destination=tr(animal.pen[1],animal.pen[2]) end
-        value_row(body+40,animal and tr("送往","Destination") or tr("入库","Warehouse"),destination,white)
-        value_row(body+53,tr("价格","Price"),string.format("%.0f",selected.price),gold)
+        if selected.scrap then
+            value_row(body+40,tr("奥术碎片","Arcane scrap"),tostring(selected.scrap),white)
+        else value_row(body+40,animal and tr("送往","Destination") or tr("入库","Warehouse"),destination,white) end
+        if selected.scrap then
+            value_row(body+53,tr("保单","Policy"),selected.insured and tr("已投保","Active") or tr("未投保","Uninsured"),gold)
+        else value_row(body+53,tr("耗金","Gold cost"),string.format("%.0f",selected.price),gold) end
         local confirm_y=body+70
+        if selected.scrap then
+            label(confirm_y,tr("致命伤时返回出生点，随身金留在原地。","Return to spawn on lethal damage. Carried gold stays behind."),muted)
+            confirm_y=confirm_y+14
+        end
         if animal then
             local pen=find_pen(model.farm,selected.id)
             local count,capacity=pen and pen.count or 0,pen and pen.capacity or 0
@@ -1011,7 +1226,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
             confirm_y=confirm_y+13
             if count<capacity then
                 local period=time_text(animal.period/60/(count+1))
-                value_row(confirm_y,tr("购入后全部成熟","All grown after purchase"),period,green,
+                value_row(confirm_y,tr("转化后全部成熟","Once all mature"),period,green,
                     tr("全部成熟后的产出间隔","Cycle once all are mature"))
                 confirm_y=confirm_y+13
             end
@@ -1020,12 +1235,13 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
             confirm_y=show_forage(selected.id,confirm_y+13,tr,value_row)
         end
         if available(selected) then
-            if button(258,6,confirm_y,tr("确认购买","Confirm purchase"),green) then
+            if button(258,6,confirm_y,selected.scrap and tr("投保","Insure") or tr("确认转化","Convert gold"),green) then
                 dispatch("shop_buy",{id=selected.id,pen=selected.pen})
             end
         else label(confirm_y,selected.reason,gold) end
     elseif selected then
-        if button(240,6,body,tr("< 返回列表","< Projects")) then selected_entry=nil; return finish() end
+        if button(240,6,body,tr("< 返回列表","< Projects")) then selected_entry=nil; return hover end
+        scroll_body(viewKey,body+13,12)
         label(body+14,selected.name,available(selected) and green or white)
         label(body+27,tr("当前：","Now: ")..selected.current)
         if selected.next then label(body+39,tr("升级后：","Next: ")..selected.next) end
@@ -1034,7 +1250,7 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
             label(y,tr("物料  库存 / 所需","Materials  stock / cost"),muted)
             for _,input in ipairs(selected.costs) do
                 y=y+12
-                cost(y,input.name,input.available,input.amount,input.detail)
+                cost(y,input.name,input.available,input.amount,input.detail,input.key)
             end
             y=y+13
         end
@@ -1050,15 +1266,12 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
             label(y,tr("先开垦一块田","Build a field first"),muted)
         else label(y,tr("所需物料不足","Insufficient stock"),gold) end
     elseif menu then
-        local list_key=(spells and spell_family) or (alchemy and alchemy_mode) or (crafting and recipe_category) or (shopping and shop_category) or tab
-        local pages=math.max(1,math.ceil(#menu/entries_per_page))
-        local current=math.min(list_pages[list_key] or 1,pages)
         local y=body
         if spells and spell_family then
             local family=NHEssences.types[spell_family]
             if button(226,6,y,"< "..tr(family.zh,family.en),family.color,tr("返回精华分类","Back to essence types")) then
                 spell_family=nil
-                return finish()
+                return hover
             end
             y=y+13
         end
@@ -1068,26 +1281,24 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
         end
         if crafting and #menu==0 then label(y,tr("暂无配方","No recipes yet"),muted) end
         if shopping and #menu==0 then label(y,tr("暂无商品","No goods for sale"),muted) end
-        if pages>1 then
-            if button(242,6,y,"<",current>1 and gold or muted) then current=math.max(1,current-1) end
-            if button(243,width-14,y,">",current<pages and gold or muted) then current=math.min(pages,current+1) end
-            tint(muted)
-            GuiText(gui,left+(width/2-8)*scale,top+y*scale,current.."/"..pages,scale)
-            y=y+13
+        local first,count=0,#menu
+        if rowList then
+            local room=height-y-3
+            local visible=math.max(1,math.floor(room/13))
+            first=scrollMenu.rows(gui,tab.."/"..section,7100,#menu,visible,left,top+y*scale,width*scale,room*scale,scale,mx,my,nil,drag)
+            count=math.min(count,visible)
+            if #menu>visible then width=width-5 end
         end
-        list_pages[list_key]=current
-        for i=1,entries_per_page do
-            local item=menu[(current-1)*entries_per_page+i]
-            if item then
-                local row_y=y+(i-1)*13
-                local color=available(item) and green or white
-                if item.planned or item.maxed or item.unlocked==false then color=muted end
-                if spells and not spell_family then color=NHEssences.types[item.id].color end
-                local x=crafting and recipe_icon(600+i,row_y,item.icon,10) or 6
-                if button(243+i,x,row_y,item.name,color,item.actionId and item.name,item.actionId) then
-                    if spells and not spell_family then spell_family=item.id else selected_entry=item.id end
-                    return finish()
-                end
+        for i=1,count do
+            local item=menu[first+i]
+            local row_y=y+(i-1)*13
+            local color=available(item) and green or white
+            if item.planned or item.maxed or item.unlocked==false then color=muted end
+            if spells and not spell_family then color=NHEssences.types[item.id].color end
+            local x=(crafting or shopping) and recipe_icon(600+i,row_y,item.icon,10) or 6
+            if button(i<=5 and 243+i or 7200+i,x,row_y,item.name,color,item.actionId and item.name,item.actionId) then
+                if spells and not spell_family then spell_family=item.id else selected_entry=item.id end
+                return hover
             end
         end
     else
@@ -1097,19 +1308,21 @@ local function draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
             tr("替换现有针剂包，内含两支激活剂。","Replace the current pouch with two doses.")) then dispatch("restock") end
         if button(480,6,body+49,tr("领取全部召唤卡","Claim all summon cards"),gold,
             string.format(tr("共 %d 种召唤卡，每种各发一张满耐久卡。","One full-charge card for each of the %d companions."),#NHCompanions.order)) then
-            folded,warehouse_tab,warehouse_pages.collection=false,"collection",1
+            folded,warehouse_tab,transfer_slot=false,"collection",1
             dispatch("test_cards")
         end
         if button(481,6,body+65,tr("领取空卡片夹","Claim empty card wallet"),gold) then
-            folded,warehouse_tab,warehouse_pages.equipment=false,"equipment",1
+            folded,warehouse_tab,transfer_slot=false,"equipment",1
             dispatch("test_wallet")
         end
     end
-    return finish()
+    return hover
 end
 
 local function draw_surgery(cast,tr,x,y,width,scale)
-    local caption=string.format(tr("手术中  %.1f 秒","Surgery  %.1f s"),math.ceil((cast.total-cast.elapsed)/6)/10)
+    local format=NHFirearms.packs[cast.kind] and tr("补弹中  %.1f 秒","Resupply  %.1f s") or NHShields.chargers[cast.kind] and tr("充能中  %.1f 秒","Charging  %.1f s")
+        or NHMedkits.types[cast.kind] and tr("治疗中  %.1f 秒","Treating  %.1f s") or tr("手术中  %.1f 秒","Surgery  %.1f s")
+    local caption=string.format(format,math.ceil((cast.total-cast.elapsed)/6)/10)
     local factor=math.min(scale,width/GuiGetTextDimensions(gui,caption))
     tint(white)
     GuiText(gui,x,y,caption,factor)
@@ -1123,10 +1336,93 @@ local function draw_surgery(cast,tr,x,y,width,scale)
     end
 end
 
-local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layout,pw,ph,popupHeight)
+local function slot_uses(slot,doseCapacity)
+    local kind=slot.kind
+    local view=slot.view or slot
+    if NHFirearms.rigs[kind] then return view.reserve or 0,NHFirearms.rigs[kind].capacity end
+    local firearm=NHFirearms.items[kind]
+    if firearm and firearm.magazine and view.rounds~=nil then return view.rounds,firearm.magazine end
+
+    local capacity=NHMedkits.capacity(kind)
+    if guns[kind] then capacity=guns[kind].capacity
+    elseif foods[kind] then capacity=foods[kind].uses
+    elseif NHEquipment.links[kind] then capacity=NHEquipment.links[kind].uses
+    elseif kind=="summon_card" then capacity=NHCompanions.cardCapacity(view.species or slot.species)
+    elseif kind=="dose" then capacity=doseCapacity end
+    return slot.remaining or capacity,capacity
+end
+
+local function draw_travel_panel(v,layout,scale,sh,tr,dispatch,mx,my,panels,fresh)
+    if not travelSession.entries then
+        local entries={}
+        for _,group in ipairs(v.groups) do
+            entries[#entries+1]=group
+            if travelSession.expanded[group.world] then
+                for _,route in ipairs(group.routes) do entries[#entries+1]=route end
+            end
+        end
+        travelSession.entries=entries
+    end
+    local entries=travelSession.entries
+    local pitch,header=22,27
+    local visible=math.min(#entries,math.max(1,math.floor((layout.panelHeight-24-header-4)/pitch)))
+    local left,width=layout.middle,layout.bench*scale
+    local height=(header+visible*pitch+4)*scale
+    local top=sh-5-24*scale-height
+    panels[#panels+1]={x=left,y=top,w=width,h=height,slot={key="panel"}}
+    GuiZSetForNextWidget(gui,-79)
+    GuiImageNinePiece(gui,7350,left,top,width,height,1)
+    local function line(x,y,value,color,size,room,detail)
+        size=math.max(size*0.85,math.min(size,room/math.max(1,GuiGetTextDimensions(gui,value,1))))
+        local text,short=fit(value,room,size)
+        tint(color)
+        GuiText(gui,x,y,text,size)
+        if short or detail then GuiTooltip(gui,value,detail or "") end
+    end
+    local x,y=left+5*scale,top+header*scale
+    local w=width-10*scale
+    line(x,top+3*scale,tr("旅行终端","Travel terminal"),gold,scale,w)
+    line(x,top+15*scale,tr("点击航点开启传送门","Click a stop to open its portal"),muted,0.85*scale,w)
+    local arrived=travelSession.frame==GameGetFrameNum()
+    local first=scrollMenu.rows(gui,"travel/routes",7352,#entries,visible,x,y,w,pitch*visible*scale,scale,mx,my,arrived and 0 or nil,drag)
+    if #entries>visible then w=w-6*scale end
+    for slot=1,visible do
+        local row=entries[first+slot]
+        local hovered=mx>=x and mx<x+w and my>=y and my<y+pitch*scale
+        local clicked=hovered and not drag and not fresh and not arrived and InputIsMouseButtonJustDown(1)
+        local active=row.kind and row.kind==v.gateKind and row.x==v.gateX and row.y==v.gateY
+        if hovered or active then
+            GuiZSetForNextWidget(gui,-79)
+            GuiImage(gui,7360+slot,x,y,"data/ui_gfx/1px_white.png",hovered and 0.17 or 0.09,w,pitch*scale)
+        end
+        if row.routes then
+            local world=row.world
+            local name=tr("主世界","Main world")
+            if world<0 then name=tr("西 %d 平行世界","West world %d"):format(-world)
+            elseif world>0 then name=tr("东 %d 平行世界","East world %d"):format(world) end
+            local expanded=travelSession.expanded[world]
+            local title=(expanded and "[-] " or "[+] ")..name
+            line(x+2*scale,y,title,gold,scale,w-4*scale)
+            line(x+5*scale,y+11*scale,tr("已解锁 %d 站","Stops unlocked: %d"):format(#row.routes),muted,0.85*scale,w-7*scale)
+            if clicked then
+                travelSession.expanded[world]=not expanded
+                travelSession.entries=nil
+            end
+        else
+            local name,detail=travelRoutes.label(row,tr)
+            local pos=("(%d, %d)"):format(row.x,row.y)
+            line(x+5*scale,y,(active and "> " or "")..name,active and green or white,scale,w-7*scale,pos)
+            line(x+5*scale,y+11*scale,detail~="" and detail or pos,muted,0.85*scale,w-7*scale)
+            if clicked then dispatch("travel_to",row.index) end
+        end
+        y=y+pitch*scale
+    end
+end
+
+local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layout,pw,ph,popupHeight,collapsed)
     local frame = GameGetFrameNum()
     local fresh = last_case_frame ~= frame - 1
-    if fresh then drag,page,loading = nil,1,nil end
+    if fresh then drag,loading,dismantle_mode=nil,nil,false end
     last_case_frame = frame
     local wx, wy = DEBUG_GetMouseWorld()
     local cx, cy, cw, ch = GameGetCameraBounds()
@@ -1143,25 +1439,63 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     end
 
     local standalone = model.mode=="container"
-    if not standalone then
-        local pages = math.ceil(model.capacity/3)
-        page = math.min(page,pages)
-        if pages>1 then
-            local py=pw<145 and 56 or 5
-            if GuiButton(gui,35,ox+(pw-72)*scale,oy+py*scale,"<",scale) and not drag then page=math.max(1,page-1) end
-            label(pw-54,py,page.."/"..pages,38,muted)
-            if GuiButton(gui,36,ox+(pw-15)*scale,oy+py*scale,">",scale) and not drag then page=math.min(pages,page+1) end
+    if model.gear and not standalone and not collapsed then
+        local x=ox+8*scale
+        for i,key in ipairs({"gear","safe"}) do
+            local title=i==1 and tr("装备","Gear") or tr("安全箱","Secure case")
+            local y=oy+equipment_tabs_y*scale
+            local tabScale=math.min(scale,(pw/2-8)*scale/GuiGetTextDimensions(gui,title))
+            local width=GuiGetTextDimensions(gui,title,tabScale)
+            tint(equipment_tab==key and gold or muted)
+            local clicked=GuiButton(gui,5100+i,x,y,title,tabScale)
+            local over=drag and mx>=x and mx<x+width and my>=y and my<y+12*scale
+            if clicked or over then equipment_tab=key end
+            x=x+width+8*scale
         end
-        for i=1,math.min(3,model.capacity-(page-1)*3) do
-            local n = (page-1)*3+i
+    end
+    if not standalone and not collapsed and (not model.gear or equipment_tab=="safe") then
+        local gridY=model.gear and equipment_grid_y or 25
+        local totalRows=math.ceil(model.capacity/case_columns)
+        local gridHeight=math.min(case_rows,totalRows)*qh
+        local row=scrollMenu.rows(gui,"safe",7110,totalRows,case_rows,
+            ox+6*scale,oy+gridY*scale,math.min(pw-6,case_columns*qw+9)*scale,gridHeight*scale,scale,mx,my,revealSafe,drag)
+        revealSafe=nil
+        local start=row*case_columns
+        for i=1,math.min(visible_case_slots,model.capacity-start) do
+            local n=start+i
             local v = model.secure_loot[n] or {}
-            slot(i-1,25,"valuable",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id)
+            slot((i-1)%case_columns,gridY+math.floor((i-1)/case_columns)*qh,"valuable",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id)
             slots[#slots].safeSlot,slots[#slots].dockSlot,slots[#slots].view=n,v.dockSlot,v
             slots[#slots].remaining,slots[#slots].count,slots[#slots].subtype,slots[#slots].species=v.remaining,v.count,v.subtype,v.species
         end
     end
-    local popupY = model.popup and not standalone and -(popupHeight+5) or 0
-    if model.popup then
+    local popupY = model.popup and not standalone and not collapsed and -(popupHeight+5) or 0
+    if model.gear and not standalone and not collapsed and equipment_tab=="gear" then
+        for pair,heading in ipairs({tr("护盾<充能器","Shield<Charger"),tr("弹挂<弹药盒","Rig<Ammo box")}) do
+            local rowY=equipment_grid_y+(pair-1)*(qh+15)
+            local width=GuiGetTextDimensions(gui,heading)
+            local headingScale=math.min(scale,2*qw*scale/width)
+            tint(muted)
+            GuiText(gui,ox+(8+qw)*scale-width*headingScale/2,oy+rowY*scale,heading,headingScale)
+        end
+        local linkColumn=2.5
+        local linkX=8+linkColumn*qw
+        local linkTitle=tr("数据链","Data link")
+        local linkScale=scale*math.min(1,(pw-4-linkX)/GuiGetTextDimensions(gui,linkTitle))
+        tint(muted)
+        GuiText(gui,ox+linkX*scale,oy+equipment_grid_y*scale,linkTitle,linkScale)
+        for i,field in ipairs({"shield","charger","rig","ammo","link"}) do
+            local v=model.gear[field] or {}
+            local title=({tr("护盾","Shield"),tr("充能器","Charger"),tr("弹挂","Ammo rig"),tr("弹药盒","Ammo box"),tr("数据链","Data link")})[i]
+            local column=field=="link" and linkColumn or (i-1)%2
+            local row=i==5 and 0 or math.floor((i-1)/2)
+            slot(column,equipment_grid_y+12+row*(qh+15),"gear",v.kind,v.name or title,v.icon,v.id)
+            local entry=slots[#slots]
+            entry.safeSlot,entry.view,entry.count,entry.remaining=i,v,v.count,v.remaining
+        end
+
+    end
+    if model.popup and not collapsed then
         if not standalone then
             GuiZSetForNextWidget(gui,-79)
             GuiImageNinePiece(gui,37,ox,oy+popupY*scale,pw*scale,popupHeight*scale,1)
@@ -1176,8 +1510,16 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             local col=(i-1)%4
             local rowY=popupY+23+math.floor((i-1)/4)*qh
             local cell=model.cells[i]
-            if model.walletId then
-                local species=cell and NHCompanions.species[cell.species]
+            if model.gunId then
+                local title=i==1 and tr("命中","Impact") or tr("弹道","Flight")
+                slot(col,rowY,"gun_socket",cell and "spell",cell and tr(cell.zh,cell.en) or title,cell and cell.icon,cell and cell.id)
+                slots[#slots].gunId=model.gunId
+                label(8+col*qw,rowY+qh,title,qw,muted)
+            elseif model.chainId then
+                slot(col,rowY,"relic_cell",cell and "relic",cell and cell.name or tr("遗物插槽","Relic socket"),cell and cell.icon,cell and cell.id)
+                slots[#slots].chainId,slots[#slots].view=model.chainId,cell
+            elseif model.walletId then
+                local species=cell and NHCompanions.cardDefinition(cell.species)
                 slot(col,rowY,"card_cell",cell and "summon_card",species and tr(species.zh,species.en) or tr("空格","Empty slot"),cell and cell.icon)
             else
                 local d=cell and NHInjectors.get(cell.subtype)
@@ -1190,15 +1532,19 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     end
 
     local perk_top
-    if not standalone then
+    if not standalone and not collapsed then
         perk_top=NHPerks.draw(gui,model,ox,oy,scale,pw,qw,qh,popupY,tr,slot,slots,function(action,args)
             if not fresh and not drag then dispatch(action,args) end
         end)
     end
     local stock_tip
     if layout then
+        local showTravel=travelSession and workshop_folded
         draw_workshop(model,layout,scale,sh,tr,dispatch,mx,my,panels)
-        local left,width=layout.left,layout.stash
+        if showTravel and workshop_folded then
+            draw_travel_panel(model.travel,layout,scale,sh,tr,dispatch,mx,my,panels,fresh)
+        end
+        local left,width=layout.stashX,layout.stash
         local cols=math.max(1,math.min(10,math.floor((width-16)/qw)))
         local tabs,grid_y=layout.tabs,layout.gridY
         local content_height=layout.contentHeight
@@ -1208,9 +1554,12 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         panels[#panels+1]={x=left,y=top,w=width*scale,h=height*scale,slot={key="panel"}}
         if warehouse_hover and drag and not folded then
             local src=drag.source
-            if src.key=="dose" then warehouse_tab="supplies"
+            if src.key=="gear" then warehouse_tab="equipment"
+            elseif src.key=="gun_socket" then warehouse_tab="spell"
+            elseif src.key=="dose" then warehouse_tab="supplies"
             elseif src.key=="card_cell" or (src.key=="valuable" and src.kind=="summon_card") then warehouse_tab="collection"
-            elseif src.key=="valuable" and NHStore.category(src.kind)=="equipment" then warehouse_tab="equipment"
+            elseif (src.key=="valuable" or src.key=="relic_cell") and NHStore.category(src.kind)=="equipment" then warehouse_tab="equipment"
+            elseif src.key=="valuable" and NHFirearms.items[src.kind] then warehouse_tab=NHStore.category(src.kind)
             elseif src.key=="native" and src.kind~="other" and (warehouse_tab~="materials" or src.kind~="potion") then
                 warehouse_tab=NHStore.category(src.kind)
             end
@@ -1220,7 +1569,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         tint(gold)
         local stash_name=model.remote_linked and tr("仓库 · 远程","Stash · Remote") or tr("仓库","Stash")
         if GuiButton(gui,71,left+6*scale,top+3*scale,(folded and "[+] " or "[-] ")..stash_name,scale) and not drag then
-            folded,loading=not folded,nil
+            folded,loading,dismantle_mode=not folded,nil,false
             return
         end
         if not folded then
@@ -1235,23 +1584,56 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                     ((drag.source.key=="warehouse" and t.key=="materials") or (drag.source.key=="docks" and t.key=="containers"))
                 local over=cross and mx>=bx and mx<bx+pos.w*scale and my>=by and my<by+10*scale
                 if (clicked and not drag or over) and warehouse_tab~=t.key then
-                    warehouse_tab,loading=t.key,nil
+                    warehouse_tab,loading,dismantle_mode=t.key,nil,false
                     return
                 end
             end
             local bulk=warehouse_tab=="materials"
             local essences=warehouse_tab=="essences"
-            local per_page=essences and essence_columns*essence_rows or (bulk and material_rows*2 or cols*math.floor(content_height/qh))
+            local footerY=top+(height-14)*scale
+            local sortLabel=tr("一键整理","Sort")
+            local sortWidth=GuiGetTextDimensions(gui,sortLabel,scale)
+            local sortX=left+(width-6)*scale-sortWidth
+            tint(gold)
+            if GuiButton(gui,7080,sortX,footerY,sortLabel,scale) and not drag then
+                transfer_slot=1
+                if bulk or essences then sorted_stock[warehouse_tab]={}
+                else dispatch("organize_warehouse",{category=warehouse_tab}) end
+            end
+            GuiTooltip(gui,sortLabel,(bulk or essences) and tr("按库存量从多到少排列","Sort by amount, highest first")
+                or tr("同类物品排在一起，空格移到末尾","Group similar items and move empty slots to the end"))
+            if warehouse_tab=="containers" or warehouse_tab=="spell" or warehouse_tab=="supplies" then
+                local spellTab=warehouse_tab=="spell"
+                local supplies=warehouse_tab=="supplies"
+                local enabled=supplies or model.salvage_enabled
+                if not enabled or dismantle_mode~=warehouse_tab then dismantle_mode=false end
+                local caption=(dismantle_mode and "[x] " or "[ ] ")..(supplies and tr("快售／转化","Sell / convert") or spellTab and tr("快速提取","Quick extract") or tr("存放并拆解","Store and dismantle"))
+                local x=left+6*scale
+                local buttonScale=math.min(scale,(sortX-x-5*scale)/GuiGetTextDimensions(gui,caption))
+                tint(enabled and (dismantle_mode and green or white) or muted)
+                if GuiButton(gui,7081,x,footerY,caption,buttonScale) and enabled and not drag then
+                    dismantle_mode=not dismantle_mode and warehouse_tab
+                    salvage_target=nil
+                end
+                GuiTooltip(gui,caption,supplies and tr("左键出售普通消耗品，或将风暴产物转为资源。按住 Shift 处理整组。","Click to sell a supply or convert a storm product to resources. Hold Shift for the stack.")
+                    or model.salvage_enabled and (spellTab and tr("左键点已解锁合成的法术，整叠提取为精华。","Click a spell with an unlocked recipe to extract its whole stack as essence.") or tr("开启后，左键点容器即可存入全部物料并拆解空壳。","Enable, then click a container to store its contents and dismantle the shell."))
+                    or tr("需要先建造拆解台","Build the dismantling station first"))
+            else dismantle_mode=false end
             local capacity=essences and #model.essences or model.warehouse_capacity[warehouse_tab]
-            local pages=math.max(1,math.ceil((bulk and #model.materials or capacity)/per_page))
-            local current=warehouse_pages[warehouse_tab] or 1
-            local page_no=warehouse_pager(left+4*scale,top+(height-17)*scale,width-8,scale,current,pages)
-            if current~=page_no then loading=nil end
-            warehouse_pages[warehouse_tab]=page_no
+            local columns=essences and essence_columns or (bulk and 2 or cols)
+            local visibleRows=essences and essence_rows or (bulk and material_rows or math.floor(content_height/qh))
+            local count=bulk and #model.materials or capacity
+            local listY=bulk and grid_y+qh+26 or grid_y
+            local pitch=bulk and 11 or (essences and ((width-8)/essence_columns<50 and 18 or 14) or qh)
+            local row=scrollMenu.rows(gui,"stash/"..warehouse_tab,7112,math.ceil(count/columns),visibleRows,
+                left,top+listY*scale,width*scale,visibleRows*pitch*scale,scale,mx,my,
+                transfer_slot and math.floor((transfer_slot-1)/columns),drag)
+            transfer_slot=nil
+            local start,visible=row*columns,visibleRows*columns
             if essences then
-                stock_tip=draw_essences(model.essences,(page_no-1)*per_page+1,per_page,left,top+grid_y*scale,width,scale,mx,my)
+                stock_tip=draw_essences(stock_rows(warehouse_tab,model.essences),start+1,visible,left,top+grid_y*scale,width,scale,mx,my)
             elseif bulk then
-                local docks,materials=model.docks,model.materials
+                local docks,materials=model.docks,stock_rows(warehouse_tab,model.materials)
                 local column_width=math.floor((width-12)/2)
                 for n=1,2 do
                     local dock=docks[n] or {}
@@ -1279,8 +1661,8 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                     GuiText(gui,left+8*scale,top+(y+13)*scale,tr("库存为空","Empty"),scale)
                 end
                 local held_target
-                for i=1,per_page do
-                    local mat=materials[(page_no-1)*per_page+i]
+                for i=1,visible do
+                    local mat=materials[start+i]
                     if mat then
                         local col=(i-1)%2
                         local row=math.floor((i-1)/2)+1
@@ -1296,12 +1678,13 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                         GuiText(gui,start_x,row_y,name,scale)
                         GuiText(gui,count_x,row_y,amount,scale)
                         tint(enabled and gold or muted)
-                        GuiButton(gui,186+i,bx,row_y,"+",scale)
+                        if not mat.hideout then GuiButton(gui,186+i,bx,row_y,"+",scale) end
                         local hover=mx>=start_x and mx<end_x and my>=row_y and my<row_y+11*scale
                         if hover then
                             local tip=enabled and tr("点按 1 单位，按住加速","Click for 1 unit; hold to load faster")
+                                or (mat.hideout and tr("藏身处专用材料，用于工坊配方。","Hideout material for workshop recipes.")
                                 or (not mat.slot and tr("无匹配容器","No compatible container")
-                                or (dock and tr("容器已满","Container full") or tr("请先放入对应容器","Dock a compatible container first")))
+                                or (dock and tr("容器已满","Container full") or tr("请先放入对应容器","Dock a compatible container first"))))
                             stock_tip={mat.name.."  "..string.format("%.0f",mat.amount),tip}
                         end
                         if enabled and hover and not drag and not fresh then
@@ -1321,19 +1704,20 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
                 if not held_target then loading=nil end
             else
                 local rows=model.warehouse[warehouse_tab] or {}
-                for i=0,math.min(per_page,capacity-(page_no-1)*per_page)-1 do
-                    local n=(page_no-1)*per_page+i+1
+                for i=0,math.min(visible,capacity-start)-1 do
+                    local n=start+i+1
                     local v=rows[n] or {}
                     slot(i%cols,grid_y+math.floor(i/cols)*qh,"warehouse",v.kind,v.name or tr("空格","Empty slot"),v.icon,v.id,left,top)
                     local target=slots[#slots]
                     target.view=v
+                    target.dismantle=dismantle_mode
                     target.subtype,target.species=v.subtype,v.species
                     target.safeSlot,target.remaining,target.count,target.dockSlot=n,v.remaining,v.count,v.dockSlot
                 end
             end
         end
     else
-        loading=nil
+        loading,dismantle_mode=nil,false
         if drag and (drag.source.key=="warehouse" or drag.source.key=="docks") then drag=nil end
     end
 
@@ -1358,7 +1742,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     end
     last_inventory_layout=boxes
     local hovered=slot_at(boxes,mx,my)
-    if drag and (model.revision~=drag.revision or model.pouchId~=drag.pouchId or model.walletId~=drag.walletId) then drag=nil end
+    if drag and (model.revision~=drag.revision or model.pouchId~=drag.pouchId or model.walletId~=drag.walletId or model.chainId~=drag.chainId or model.gunId~=drag.gunId) then drag=nil end
     local prepared,pending_use=model.rightUse
     if prepared then
         model.rightUse=nil
@@ -1366,24 +1750,82 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             local source=use_source(hovered)
             if same_use(source,prepared) then pending_use=source end
         end
-    elseif model.salvage_enabled and hovered and hovered.key=="warehouse" and hovered.view and hovered.view.salvage_yield
+    elseif model.salvage_enabled and hovered and not hovered.dismantle and hovered.key=="warehouse" and hovered.view and hovered.view.salvage_yield
         and not fresh and not drag and InputIsMouseButtonJustDown(2) then
-        salvage_target={id=hovered.entity,kind=hovered.kind,slot=hovered.safeSlot,mode=hovered.view.essence and "essence" or "scrap"}
+        salvage_target={id=hovered.entity,kind=hovered.kind,slot=hovered.safeSlot,
+            mode=hovered.view.store_contents and "store_contents" or hovered.view.essence and "essence" or "scrap"}
         workshop_folded=false
     end
-    if not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind and hovered.kind~="reserved" then
-        drag={source=hovered,revision=model.revision,pouchId=model.pouchId,walletId=model.walletId,x=mx,y=my}
+    if hovered and hovered.dismantle then
+        if warehouse_tab=="supplies" and not fresh and not drag then
+            local q=hovered.view.trade
+            if q and InputIsMouseButtonJustDown(1) then
+                dispatch("supply_trade",{kind=hovered.kind,slot=hovered.safeSlot,id=hovered.entity,count=q.count,remaining=q.remaining,
+                    quantity=NHUI.shiftDown() and q.count or 1,mode=q.resource and "convert" or "sell"})
+            end
+        elseif not fresh and not drag and not NHUI.shiftDown() and InputIsMouseButtonJustDown(1) then
+            local mode=hovered.kind=="potion" and hovered.view.salvage_yield and "store_contents"
+                or hovered.kind=="spell" and hovered.view.quick_essence and "quick_essence"
+            if mode then dispatch("salvage",{kind=hovered.kind,slot=hovered.safeSlot,id=hovered.entity,mode=mode}) end
+        end
+    elseif not fresh and InputIsMouseButtonJustDown(1) and hovered and hovered.kind and hovered.kind~="reserved"
+        and not (model.mode=="case" and NHUI.shiftDown() and quick_source(hovered)) then
+        drag={source=hovered,gunId=model.gunId,revision=model.revision,pouchId=model.pouchId,walletId=model.walletId,chainId=model.chainId,x=mx,y=my}
     end
     if drag and ((mx-drag.x)^2+(my-drag.y)^2)>9*scale^2 then drag.moved=true end
     local source=drag and drag.source
     local function drop(target)
         if not source or not target then return end
-        if (source.kind=="pouch" or source.kind=="card_wallet") and source.key==target.key and source.entity==target.entity
+        if (source.kind=="pouch" or source.kind=="card_wallet" or (source.kind=="relic_chain" and source.key=="valuable") or (storage_key(source.key) and NHFirearms.modes.guns[source.kind])) and source.key==target.key and source.entity==target.entity
             and source.safeSlot==target.safeSlot and not drag.moved then
             return "open_container",source,source.safeSlot
         end
         local from_store=source.key=="valuable" or source.key=="warehouse"
         local to_store=target.key=="valuable" or target.key=="warehouse"
+        if target.key=="gun_socket" and not target.kind and from_store and source.view then
+            local d=NHFirearms.mods.byAction[source.view.actionId]
+            if d and d.slot==target.cell then return "move_gun_attachment",source end
+        elseif source.key=="gun_socket" and to_store and not target.kind and (target.key=="valuable" or warehouse_tab=="spell") then
+            return "move_gun_attachment",source,target.safeSlot
+        end
+        if target.key=="gear" and target.safeSlot==NHShields.slot(source.kind) then
+            if source.key=="native" and not target.kind then return "place",source,target.safeSlot end
+            if from_store and (not target.kind or not NHShields.supply(source.kind)) then return "move_gear",source,target.safeSlot end
+        end
+        if source.key=="gear" then
+            if target.key=="native" and not target.entity and target.lane=="tool" then return "take_gear",target,source.safeSlot,source.entity end
+            if to_store and (target.key=="valuable" or warehouse_tab=="equipment") and
+                (not target.kind or (NHShields.supply(source.kind) and target.kind==source.kind)) then return "move_gear",source,target.safeSlot end
+            return
+        end
+        local storm=stormProducts.types[source.kind]
+        if (NHMedkits.capacity(source.kind) or foods[source.kind] or bags[source.kind] or guns[source.kind] or turrets[source.kind] or storm) and to_store and (not target.kind or target.kind==source.kind)
+            and (not target.kind or not storm or (target.count or 1)+(from_store and 1 or source.count or 1)<=stormProducts.stackLimit)
+            and (not target.kind or not guns[source.kind] or
+                gunCatalog.canCombine(guns[source.kind],source.remaining,target.remaining))
+            and (not target.kind or not NHMedkits.capacity(source.kind) or NHMedkits.canCombine(source.kind,NHMedkits.charges(source),NHMedkits.charges(target)))
+            and (not target.kind or not turrets[source.kind] or (source.count or 1)+(target.count or 1)<=4)
+            and (target.key=="valuable" or warehouse_tab==NHStore.category(source.kind)) then
+            if source.key=="native" then return "place",source,target.safeSlot end
+            if from_store and (source.key~=target.key or source.safeSlot~=target.safeSlot) then
+                return "move_food",source,target.safeSlot
+            end
+        end
+        if source.kind=="relic" then
+            if target.key=="relic_cell" and not target.kind then
+                if source.key=="native" then return "place",source end
+                if from_store or source.key=="relic_cell" then return "move_chain_relic",source end
+            end
+            if source.key=="relic_cell" and not target.kind then
+                if to_store and (target.key=="valuable" or warehouse_tab=="equipment") then return "move_chain_relic",source,target.safeSlot end
+                if target.key=="native" and not target.entity and target.lane=="tool" then return "take_relic",target,nil,source.entity end
+            end
+        end
+        if NHFirearms.items[source.kind] and not NHFirearms.packs[source.kind] and from_store and to_store and not target.kind
+            and (not target.kind or not turrets[source.kind] or (source.count or 1)+(target.count or 1)<=4)
+            and (target.key=="valuable" or warehouse_tab==NHStore.category(source.kind)) then return "move_firearm",source,target.safeSlot end
+        if (source.kind=="relic" or source.kind=="relic_chain" or source.kind=="tablet" or source.kind=="native_valuable") and from_store and to_store and not target.kind
+            and (target.key=="valuable" or warehouse_tab=="equipment") then return "move_relic",source,target.safeSlot end
         if source.kind=="summon_card" then
             local accepts=not target.kind or (target.kind=="summon_card" and NHCompanions.canStack(target,source))
             if target.key=="card_cell" and accepts then
@@ -1397,7 +1839,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             end
             if source.key=="card_cell" and target.key=="native" and not target.entity and target.lane=="tool" then return "take_card",target end
         end
-        if (source.kind=="card_wallet" or source.kind=="remote_terminal") and from_store and to_store and not target.kind
+        if (source.kind=="card_wallet" or NHEquipment.links[source.kind]) and from_store and to_store and not target.kind
             and (target.key=="valuable" or warehouse_tab=="equipment") and (source.key~=target.key or source.safeSlot~=target.safeSlot) then
             return source.kind=="card_wallet" and "move_wallet" or "move_terminal",source,target.safeSlot
         end
@@ -1438,6 +1880,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             return "pack_dose",source,source.safeSlot
         end
         if source.key=="native" then
+            if target.key=="relic_cell" then return "reject_relic",source end
             if target.key=="perk" and not target.kind and source.kind=="perk" then return "equip_perk",source,target.perkSlot end
             if target.key=="dose" and model.popup and source.kind=="dose" and (not target.kind or canStack) then return "place",source end
             if to_store and (not target.kind or canStack) and source.kind~="other"
@@ -1446,7 +1889,7 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
             end
             if target.key~="native" then return "cancel_native",source end
         elseif target.key=="native" and not target.entity then
-            local lane=source.kind=="spell" and "spell" or (source.kind=="wand" and "wand" or "tool")
+            local lane=NHFirearms.lane(source.kind)
             if target.lane~=lane then return end
             if source.key=="perk" then return "unequip_perk",target,source.perkSlot,source.entity end
             if source.kind=="pouch" then return "take_pouch",target,source.safeSlot end
@@ -1475,70 +1918,114 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
         end
         GuiImage(gui,id,x-w*zoom/2,y-h*zoom/2,image,alpha,zoom)
     end
+    -- Each glyph is a 6x10 bitmap with one pixel of spacing. Measure and draw
+    -- in the same coordinates, independently of the game's language font.
+    local function corner_label(v,id,text,bottomRight)
+        local width=7*#text-1
+        local pad=2*scale
+        local zoom=scale*math.min(0.5,(qw-4)/width)
+        local x,y=v.x+pad,v.y+pad
+        if bottomRight then
+            x,y=v.x+qw*scale-pad-width*zoom,v.y+qh*scale-pad-10*zoom
+        end
+        for i=1,#text do
+            local char=text:sub(i,i)
+            local frameName=char=="/" and "slash" or char=="x" and "times" or char
+            GuiZSetForNextWidget(gui,-84)
+            tint(bottomRight and gold or white)
+            GuiImage(gui,id+i-1,x+(i-1)*7*zoom,y,"mods/noita_hideout/files/slot_digits.xml",
+                1,zoom,zoom,0,1,frameName) -- PlayToEndAndPause on the single-frame glyph.
+        end
+    end
     for i,v in ipairs(slots) do
         local placement=drop(v)
-        if placement=="place" or placement=="move_pouch" or placement=="move_wallet" or placement=="move_terminal" or placement=="move_wallet_card"
+        if placement=="move_gun_attachment" or placement=="move_gear" or placement=="place" or placement=="move_chain_relic" or placement=="move_relic" or placement=="move_firearm" or placement=="move_pouch" or placement=="move_wallet" or placement=="move_terminal" or placement=="move_wallet_card"
             or placement=="move_stored_card" or placement=="equip_stored_perk" or placement=="store_equipped_perk" then tint(green) end
         GuiImage(gui,1000+i,v.x,v.y,tile,1,scale)
         if v.kind=="reserved" then GuiText(gui,v.x+5*scale,v.y+3*scale,"...",scale)
         elseif v.kind then sprite(v,2000+i,v.x+qw*scale/2,v.y+qh*scale/2,source and source.key==v.key and source.safeSlot==v.safeSlot and source.cell==v.cell and source.perkSlot==v.perkSlot and 0.35 or 1)
         end
-        local caption
-        local kit=NHMedkits.types[v.kind]
-        if (v.kind=="bandage" or NHThrowables.types[v.kind]) and (v.count or 1)>1 then
-            caption="×"..compact(v.count)
-        elseif (kit or v.kind=="remote_terminal") and v.key~="native" then
-            local maxUses=kit and kit.uses or NHEquipment.remoteTerminal.uses
-            caption=(v.remaining or maxUses).."/"..maxUses
-        elseif v.kind=="dose" or v.kind=="summon_card" then
-            local durability=v.kind=="summon_card" and NHCompanions.durability or model.maxUses
-            local remaining=v.remaining or durability
-            local quantity=(v.kind=="summon_card" and compact(v.count or 1)) or v.count
-            caption=(v.count or 1)>1 and ("×"..quantity) or (remaining.."/"..durability)
-        end
-        if caption then
-            GuiZSetForNextWidget(gui,-84)
-            local captionScale=0.8*scale
-            if kit or v.kind=="remote_terminal" then captionScale=math.min(captionScale,(qw-1)*scale/GuiGetTextDimensions(gui,caption)) end
-            GuiText(gui,v.x,v.y+(v.key=="warehouse" and qh-7 or qh-1)*scale,caption,captionScale)
+        if v.kind then
+            local current,maximum=slot_uses(v,model.maxUses)
+            local firstGlyph=8192+i*64
+            if maximum then corner_label(v,firstGlyph,("%d/%d"):format(current,maximum),false) end
+            if (v.count or 1)>1 then
+                corner_label(v,firstGlyph+32,("x%.0f"):format(v.count),true)
+            end
         end
     end
     local tip=stock_tip
     if source then
         if source.key~="native" then sprite(source,3000,mx,my,0.95) end
         local action=hovered and drop(hovered)
-        tip={action and action~="cancel_native" and tr("松开放置","Release to place") or tr("拖至对应空格","Drag to a matching slot")}
+        tip={action=="reject_relic" and tr("无法装入这个遗物插槽","Cannot place in this relic socket")
+            or action and action~="cancel_native" and tr("松开放置","Release to place") or tr("拖至对应空格","Drag to a matching slot")}
     elseif hovered and hovered.kind and hovered.key~="native" then
         tip=item_details(hovered,model,tr)
-        if model.salvage_enabled and hovered.key=="warehouse" and hovered.view.salvage_yield then
+        if hovered.dismantle then
+            if warehouse_tab=="supplies" then
+                local q=hovered.view.trade
+                if q then
+                    local all=NHUI.shiftDown()
+                    local n=all and q.count or 1
+                    if q.resource then
+                        local name=NHStore.alchemyResources[q.resource]
+                        tip[#tip+1]=string.format(tr("左键转化 %d 件 · %s +%d","Convert %d / %s +%d"),n,tr(name.zh,name.en),q.units*n)
+                    else
+                        tip[#tip+1]=string.format(tr("左键出售 %d 件 · %g 金","Click to sell %d / %g gold"),n,all and q.allGold or q.oneGold)
+                    end
+                    if q.count>1 then tip[#tip+1]=tr("按住 Shift 处理整组","Hold Shift for the stack") end
+                elseif bags[hovered.kind] then tip[#tip+1]=tr("仅限右键开启","Right-click to open only")
+                else tip[#tip+1]=tr("此物品无法回收","No trade value") end
+            elseif warehouse_tab=="spell" then
+                local e=hovered.view.essence
+                tip[#tip+1]=hovered.view.quick_essence and tr("左键提取：","Click to extract: ")..e.name.." +"..e.amount
+                    or tr("此法术没有已解锁的合成配方","No unlocked recipe for this spell")
+            elseif hovered.view.materials_fit==false then tip[#tip+1]=tr("物料库空间不足","Material storage full")
+            elseif hovered.view.salvage_yield then tip[#tip+1]=tr("左键存放并拆解 · 容器碎片 +1","Click to store and dismantle · +1 container scrap")
+            else tip[#tip+1]=tr("此物品无法拆解","This item cannot be dismantled") end
+        elseif model.salvage_enabled and hovered.key=="warehouse" and hovered.view.salvage_yield then
             tip[#tip+1]=tr("右键预览拆解","Right-click to preview dismantling")
-        elseif hovered.kind~="pouch" and hovered.kind~="card_wallet" and use_source(hovered) then
+        elseif hovered.kind~="pouch" and hovered.kind~="card_wallet" and hovered.kind~="relic_chain" and use_source(hovered) then
             tip[#tip+1]=tr("右键使用","Right-click to use")
         end
+    end
+    if tip and not source and model.mode=="case" and quick_source(hovered) then
+        tip[#tip+1]=hovered.key=="warehouse" and tr("Shift + 左键取出一件","Shift + click to transfer one")
+            or tr("Shift + 左键快速转移","Shift + click to transfer")
     end
     if tip then cursor_tip(tip,mx,my,sw,sh,scale) end
     if standalone and model.surgery then
         draw_surgery(model.surgery,tr,ox+8*scale,oy+49*scale,(pw-16)*scale,scale)
-    elseif standalone or pw>=145 or model.capacity<=3 then
-        label(8,56,(model.status~="" and model.status) or tr("拖动物品以存取","Drag items to transfer"),pw-16,muted)
+    elseif standalone then
+        label(8,56,tr("拖动物品以存取","Drag items to transfer"),pw-16,muted)
     end
     if pending_use then
+        if pending_use.kind=="pouch" or pending_use.kind=="card_wallet" or pending_use.kind=="relic_chain" then secure_folded=false end
         dispatch("use_inventory",pending_use)
     elseif drag and InputIsMouseButtonJustUp(1) then
         local action, arg, safeSlot, storedId = drop(hovered)
         drag=nil
+        if action=="move_gear" then
+            dispatch(action,{source=storage_key(source.key) or "gear",destination=storage_key(hovered.key) or "gear",
+                container=storage_key(source.key) or storage_key(hovered.key) or "safe",kind=source.kind,
+                entity=source.entity,from=source.safeSlot,safeSlot=safeSlot})
+            return
+        end
         if action=="equip_stored_perk" or action=="store_equipped_perk" then
             dispatch(action,{entity=source.entity,container=storage_key(source.key) or storage_key(hovered.key),
                 storageSlot=source.safeSlot or hovered.safeSlot,perkSlot=source.perkSlot or hovered.perkSlot})
             return
         end
         if action then
+            if action=="open_container" then secure_folded=false end
             local request = {parent=arg.parent,lane=arg.lane,xslot=arg.xslot,yslot=arg.yslot,
                 entity=arg.entity,safeSlot=safeSlot,storedId=storedId,from=arg.safeSlot,kind=source.kind,
                 source=storage_key(source.key),destination=storage_key(hovered.key),
+                intoGear=hovered.key=="gear",
                 container=(source.key=="docks" or hovered.key=="docks") and "docks" or storage_key(source.key) or storage_key(hovered.key) or "safe",
                 sourceCell=source.cell,targetCell=hovered and hovered.cell,
-                pouchId=source.pouchId or hovered.pouchId,walletId=source.walletId or hovered.walletId,
+                gunId=source.gunId or hovered.gunId,chainId=source.chainId or hovered.chainId,pouchId=source.pouchId or hovered.pouchId,walletId=source.walletId or hovered.walletId,
                 species=source.species,remaining=source.remaining,count=source.kind=="summon_card" and (source.count or 1) or source.count,
                 intoContainer=hovered and hovered.key=="dose"}
             dispatch(action,request)
@@ -1546,15 +2033,257 @@ local function draw_case(model, ox, oy, scale, sw, sh, tr, label, dispatch,layou
     elseif not InputIsMouseButtonDown(1) then drag=nil end
 end
 
+local function shield_points(n)
+    if n>=1000000 then return ("%.3g"):format(n) end
+    if n>0 and n<0.1 then return "<0.1" end
+    return (("%.1f"):format(n):gsub("%.0$",""))
+end
+
+local function draw_shield(shield,screenWidth)
+    if not shield.maxHp or shield.maxHp<=0 then return end
+    local right=screenWidth+(tonumber(MagicNumbersGetValue("UI_BARS2_OFFSET_X")) or -40)-1
+    local y=(tonumber(MagicNumbersGetValue("UI_BARS_POS_Y")) or 20)+1
+    local height=math.max(1,math.floor(4*(tonumber(MagicNumbersGetValue("UI_BARS_SCALE")) or 1)+0.5))
+    local cellPoints=shield.maxHp*(tonumber(MagicNumbersGetValue("GUI_HP_MULTIPLIER")) or 25)/2
+    local live=math.ceil(shield.charge/NHShields.cell)
+    local spare=math.max(0,live-1)
+    local current=shield.charge/NHShields.cell-spare
+    local label=("[%s]+[%s]"):format(shield_points(spare*cellPoints),shield_points(current*cellPoints))
+    local labelW,labelH=GuiGetTextDimensions(gui,label)
+    -- Native HP uses a fixed 40px track; health points must not stretch it.
+    -- Every two shield cells span one health track, including native bar scaling.
+    local maxWidth=math.floor((right-4)/shield.cells)
+    local cellWidth=math.max(2,math.min(math.max(3,math.floor(20*(tonumber(MagicNumbersGetValue("UI_BARS_SCALE")) or 1)+0.5)),maxWidth))
+    local pixel="data/ui_gfx/1px_white.png"
+    GuiZSet(gui,-9010)
+    for i=1,shield.cells do
+        local edge=right-(i-1)*cellWidth
+        local span=cellWidth-(i==shield.cells and 0 or 1)
+        local filled=math.min(1,math.max(0,shield.charge/NHShields.cell-i+1))
+        if filled>0 then
+            local w=math.max(1,math.floor(span*filled+0.5))
+            GuiColorSetForNextWidget(gui,0.24,0.48,1,1)
+            GuiImage(gui,5710+i,edge-w,y,pixel,0.82,w,height)
+            -- Clip diagonal bands to the current fill, leaving broken cells clear.
+            GuiIdPushString(gui,"shield_stripes_"..i)
+            local stripe=0
+            for row=0,height-1 do
+                local phase=(row-(edge-w))%6
+                for column=-6+phase,w-1,6 do
+                    local first,last=math.max(0,column),math.min(w,column+3)
+                    if last>first then
+                        GuiZSetForNextWidget(gui,-9011)
+                        GuiColorSetForNextWidget(gui,0.64,0.32,0.94,1)
+                        GuiImage(gui,stripe,edge-w+first,y+row,pixel,0.85,last-first,1)
+                        stripe=stripe+1
+                    end
+                end
+            end
+            GuiIdPop(gui)
+            GuiZSetForNextWidget(gui,-9012)
+            GuiColorSetForNextWidget(gui,0.76,0.82,1,1)
+            GuiImage(gui,5720+i,edge-w,y,pixel,0.92,w,1)
+        end
+        GuiColorSetForNextWidget(gui,0.64,0.91,1,1)
+        GuiImage(gui,5700+i,edge-span,y+height-1,pixel,0.55,span,1)
+        if i==live+1 and shield.repair>0 then
+            local w=math.max(1,math.floor(span*shield.repair/360))
+            GuiZSetForNextWidget(gui,-9011)
+            tint(gold)
+            GuiImage(gui,5730+i,edge-w,y+height-1,pixel,0.85,w,1)
+        end
+    end
+    GuiColorSetForNextWidget(gui,0.82,0.9,1,1)
+    GuiText(gui,math.max(2,right-labelW),math.max(0,y-labelH-3),label)
+    GuiZSet(gui,-80)
+    return right-shield.cells*cellWidth-3
+end
+
+-- Notifications are independent of the equipment window and survive closing it.
+local notices={}
+function NHUI.notify(message,isError)
+    if not message or message=="" then return end
+    local frame=GameGetFrameNum()
+    local last=notices[#notices]
+    if last and last.text==message then last.frame,last.error=frame,isError; return end
+    notices[#notices+1]={text=message,frame=frame,error=isError}
+    if #notices>3 then table.remove(notices,1) end
+end
+local function draw_notices(sw,sh)
+    local now=GameGetFrameNum()
+    for i=#notices,1,-1 do
+        local age=now-notices[i].frame
+        if age<0 or age>=300 then table.remove(notices,i) end
+    end
+    GuiZSet(gui,-9020)
+    for i,n in ipairs(notices) do
+        local alpha=math.min(1,(300-(now-n.frame))/60)
+        local text=fit(n.text,math.max(40,sw-30),0.8)
+        local w=GuiGetTextDimensions(gui,text,0.8)
+        local x,y=math.floor((sw-w)/2),sh-43-(#notices-i)*15
+        GuiColorSetForNextWidget(gui,0.08,0.10,0.12,1)
+        GuiImage(gui,5800+i,x-5,y-2,"data/ui_gfx/1px_white.png",alpha*0.86,w+10,13)
+        local color=n.error and {1,0.55,0.45} or {0.76,0.96,0.83}
+        GuiColorSetForNextWidget(gui,color[1],color[2],color[3],alpha)
+        GuiText(gui,x,y,text,0.8)
+        GuiTooltip(gui,n.text,"")
+    end
+    GuiZSet(gui,-80)
+end
+local function draw_rescue(r,sw,tr,shieldLabelRight)
+    local line=tr("保险 ","Insurance ")..(r.insured and tr("已投保","Active") or tr("未投保","None"))
+    if r.species then line=line..tr(" · 保金 "," · Keep ")..string.format("%.0f",r.kept or 0) end
+    -- Keep insurance left of the shield track and clear of vanilla money.
+    local right=shieldLabelRight or sw+(tonumber(MagicNumbersGetValue("UI_BARS2_OFFSET_X")) or -40)-44
+    local y=(tonumber(MagicNumbersGetValue("UI_BARS_POS_Y")) or 20)+24
+    local scale=math.min(0.8,math.max(0.4,(right-5)/GuiGetTextDimensions(gui,line)))
+    local w=GuiGetTextDimensions(gui,line,scale)
+    GuiZSet(gui,-9010)
+    tint(r.insured and green or muted)
+    GuiText(gui,right-w,y,line,scale)
+    local species=r.species and NHCompanions.species[r.species]
+    local detail=tr("同行：","Companion: ")..(species and tr(species.zh,species.en) or tr("无","None"))
+        .."\n"..tr("本次保金：","Gold kept: ")..string.format("%.0f",r.kept or 0)
+        .."\n"..tr("保金上限：","Gold limit: ")..string.format("%.0f",r.limit or 0)
+    GuiTooltip(gui,line,detail)
+    GuiZSet(gui,-80)
+end
+local draw_fire_support=dofile("mods/noita_hideout/files/fire_support_hud.lua")
+local mimicLabels={ready={"可拟态","Mimic ready"},unsupported={"未收录形态","Unsupported form"},boss={"首领不可拟态","Boss: cannot mimic"},friendly={"非敌对目标","Not hostile"},
+    unstable={"形态不稳定 · 已禁用","Unstable form: disabled"},
+    ammo={"弹药不足","Low ammo"},reload={"装填中","Reloading"},
+    cooldown={"冷却中","Cooling down"},immune={"自身变形免疫","Polymorph immunity"}}
+local function drawMimicTarget(target,sw,sh,tr)
+    local cx,cy,cw,ch=GameGetCameraBounds()
+    if cw<=0 or ch<=0 then return end
+    local x,y=(target.x-cx)*sw/cw,(target.y-cy)*sh/ch
+    if x<0 or x>sw or y<0 or y>sh then return end
+    local label=tr(unpack(mimicLabels[target.status]))
+    if target.substitute then
+        local key="$animal_"..target.substitute
+        local name=GameTextGetTranslatedOrNot(key)
+        label=label..tr(" · 替代："," · Proxy: ")..(name and name~="" and name~=key and name or target.substitute)
+    end
+    local width,height=GuiGetTextDimensions(gui,label,0.85)
+    if target.status=="ready" then tint(green) elseif target.form then tint(gold) else GuiColorSetForNextWidget(gui,1,0.55,0.5,1) end
+    GuiText(gui,math.max(0,math.min(sw-width,x-width/2)),math.max(0,math.min(sh-height,y-height-7)),label,0.85)
+end
+local function draw_deployment(p,sw,sh)
+    local d=turrets[p.kind]
+    local icon=p.icon or (d and d.icon)
+    if not icon then return end
+    local cx,cy,cw,ch=GameGetCameraBounds()
+    if cw<=0 or ch<=0 then return end
+    local sx,sy=sw/cw,sh/ch
+    local x,y=(p.x-cx)*sx,(p.y-cy)*sy
+    if x<0 or x>sw or y<0 or y>sh then return end
+    local color=p.valid and {0.25,1,0.4} or {1,0.25,0.25}
+    local function rect(id,rx,ry,w,h,alpha)
+        GuiColorSetForNextWidget(gui,color[1],color[2],color[3],1)
+        GuiImage(gui,id,rx,ry,"data/ui_gfx/1px_white.png",alpha,w,h)
+    end
+    GuiZSet(gui,-70)
+    local left,top,w,h=x-(p.offsetX or 10)*sx,y-(p.offsetY or 16)*sy,(p.width or 20)*sx,(p.height or 20)*sy
+    rect(5830,left,top,w,h,0.16)
+    rect(5831,left,top,w,sy,0.85)
+    rect(5832,left,top,sx,h,0.85)
+    rect(5833,left+w-sx,top,sx,h,0.85)
+    rect(5834,left,top+h-sy,w,sy,0.85)
+    local iw,ih=GuiGetImageDimensions(gui,icon)
+    GuiColorSetForNextWidget(gui,color[1],color[2],color[3],1)
+    if p.icon then
+        local iconX=x-(p.iconOffsetX or p.offsetX or 10)*sx
+        local iconY=y-(p.iconOffsetY or p.offsetY or 16)*sy
+        GuiImage(gui,5835,iconX,iconY,icon,0.65,(p.iconWidth or p.width or 20)*sx/iw,(p.iconHeight or p.height or 20)*sy/ih)
+    else
+        GuiImage(gui,5835,x-8*sx,y-12*sy,icon,0.65,16*sx/iw,16*sy/ih)
+    end
+    GuiZSet(gui,-80)
+end
+
 function NHUI.draw(model, dispatch)
     last_inventory_layout=nil
+    local at_home=model.open and model.near and model.mode=="case"
+    if at_home and model.travel and model.travel.groups then
+        if not travelSession then
+            travelSession={folded=workshop_folded,expanded={[0]=true},frame=GameGetFrameNum()}
+            workshop_folded=true
+        end
+        if travelSession.groups~=model.travel.groups then
+            travelSession.groups,travelSession.entries=model.travel.groups,nil
+        end
+    elseif travelSession then
+        workshop_folded,travelSession=travelSession.folded,nil
+    end
+    if at_home and not homeWasOpen then open_shop() end
+    homeWasOpen=at_home
     if not model.open then drag,last_case_frame,salvage_target=nil,nil,nil end
-    if not gui then gui = GuiCreate() end
+    if not gui then
+        dofile_once("data/scripts/lib/utilities.lua")
+        gui = GuiCreate()
+    end
     GuiStartFrame(gui)
     GuiZSet(gui, -80)
 
     local sw, sh = GuiGetScreenDimensions(gui)
+    scrollMenu.begin()
+    if model.terminals and #model.terminals>0 then
+        local cx,cy,cw,ch=GameGetCameraBounds()
+        if cw>0 and ch>0 then
+            for _,v in ipairs(model.terminals) do
+                local x,y=(v.x-cx)*sw/cw,(v.y-cy)*sh/ch
+                if x>=0 and x<=sw and y>=0 and y<=sh then
+                    GuiColorSetForNextWidget(gui,1,v.warning and 0.2 or 1,v.warning and 0.2 or 1,v.alpha)
+                    GuiText(gui,x-GuiGetTextDimensions(gui,v.text,0.75)/2,y,v.text,0.75)
+                end
+            end
+        end
+    end
     local function tr(zh, en) return model.lang == "zh" and zh or en end
+    if model.turretStatus then worldBars.drawTurret(gui,model.turretStatus,sw,sh,tr) end
+    if model.mimicFrames then
+        local seconds=math.ceil(model.mimicFrames/60)
+        local caption=tr("拟态剩余 %d 秒","Mimic: %ds"):format(seconds)
+        tint(seconds<=5 and gold or green)
+        GuiText(gui,sw-10-GuiGetTextDimensions(gui,caption),62,caption)
+        return
+    end
+    if model.fireSupport then draw_fire_support(gui,model.fireSupport,sw,sh,tr) end
+    if model.travel and not model.travel.rows and not model.open then drawTravel(gui,model.travel,sw,sh,tr) end
+    if model.ammo then
+        local a=model.ammo
+        if a.mimicTarget then drawMimicTarget(a.mimicTarget,sw,sh,tr) end
+        local mode=a.modes[a.index]
+        local line=("%s  %d/%d  ·  %s"):format(tr(mode.zh,mode.en),a.rounds,a.max,
+            mode.cost==0 and (a.charge and tr("蓄力 %d/3","Charge %d/3"):format(a.charge) or tr("无需弹药","No ammo needed")) or tr("可射 %d 次","%d shots"):format(math.floor(a.rounds/mode.cost)))
+        tint(white)
+        GuiText(gui,sw-10-GuiGetTextDimensions(gui,line),62,line)
+        local hint=a.loading and tr("装填 %.1fs","Reload %.1fs"):format(a.loading/60) or
+            ("[%s] %s   [R] %s"):format(a.keyName,tr("模式","Mode"),tr("换弹","Reload"))
+        hint=hint..tr("  备弹 ","  Reserve ")..a.reserve
+        tint(gold)
+        GuiText(gui,sw-10-GuiGetTextDimensions(gui,hint),72,hint)
+        if a.menu then
+            local positions={{0,-28},{66,0},{0,28},{-66,0}}
+            GuiZSetForNextWidget(gui,-80)
+            GuiImageNinePiece(gui,7810,sw/2-114,sh/2-37,228,77,0.94)
+            for index,entry in ipairs(a.modes) do
+                local label=("%s · %d"):format(tr(entry.zh,entry.en),entry.cost)
+                if index==a.hover then label="> "..label.." <" end
+                GuiZSetForNextWidget(gui,-81)
+                tint(index==a.hover and gold or index==a.index and green or white)
+                GuiText(gui,sw/2+positions[index][1]-GuiGetTextDimensions(gui,label)/2,sh/2+positions[index][2]-3,label)
+            end
+            local center=tr("松开确认","Release")
+            GuiZSetForNextWidget(gui,-81)
+            tint(muted)
+            GuiText(gui,(sw-GuiGetTextDimensions(gui,center))/2,sh/2-3,center)
+        end
+    end
+    local shieldLabelRight=model.shield and draw_shield(model.shield,sw)
+    if model.rescue then draw_rescue(model.rescue,sw,tr,shieldLabelRight) end
+    if model.deployment and not model.open then draw_deployment(model.deployment,sw,sh) end
+    draw_notices(sw,sh)
     if not model.open then
         if model.surgery then
             local w=88
@@ -1565,7 +2294,9 @@ function NHUI.draw(model, dispatch)
             return
         end
         if not model.near and not model.remote_linked then return end
-        local caption = model.remote_linked and tr("远程已连接 · 打开物品栏","Remote link active · Open inventory")
+        local caption = model.travel and model.travel.rows and tr("旅行终端 · 打开物品栏","Travel terminal · Open inventory")
+            or model.landmarkName and tr(unpack(model.landmarkName))..tr(" · 打开物品栏"," · Open inventory")
+            or model.remote_linked and tr("小型终端 · 打开物品栏","Small terminal · Open inventory")
             or model.at_station and tr("圣山存取点 · 打开物品栏","Hideout access · Open inventory")
             or tr("打开物品栏：仓库和工坊", "Open inventory for stash and workshop")
         local text_w = GuiGetTextDimensions(gui, caption)
@@ -1578,7 +2309,6 @@ function NHUI.draw(model, dispatch)
         return
     end
 
-    local at_home=model.near and model.mode=="case"
     local pw,ph=187,72
     local qw,qh=GuiGetImageDimensions(gui,tile)
     local popupHeight=0
@@ -1586,15 +2316,24 @@ function NHUI.draw(model, dispatch)
         local capacity=model.walletId and model.walletCapacity or model.pouchCapacity
         popupHeight=61+math.floor((capacity-1)/4)*qh
     end
-    local rightHeight=ph
+    local collapsed=model.mode=="case" and secure_folded
+    if model.mode=="case" and model.gear then
+        pw=16+case_columns*qw
+        ph=equipment_grid_y+math.max(case_rows*qh,2*qh+27)+8
+    elseif model.mode=="case" then
+        local rows=math.min(case_rows,math.ceil(model.capacity/case_columns))
+        ph=math.max(ph,25+rows*qh+24)+(model.gear and 16 or 0)
+    end
+    if collapsed then ph=20 end
+    local secureHeight=ph
     if model.mode=="container" then
         ph=math.max(ph,popupHeight)
-        rightHeight=ph
-    else
-        if model.popup then rightHeight=rightHeight+popupHeight+5 end
-        rightHeight=rightHeight+NHPerks.panelSpace(model,qh)
+        secureHeight=ph
+    elseif not collapsed then
+        if model.popup then secureHeight=secureHeight+popupHeight+5 end
+        secureHeight=secureHeight+NHPerks.panelSpace(model,qh)
     end
-    local s=math.min(1,(sw-10)/(at_home and 310 or pw),(sh-10)/math.max(at_home and 173 or 0,rightHeight))
+    local s=math.min(1,(sw-10)/(at_home and 310 or pw),(sh-10)/math.max(at_home and 173 or 0,secureHeight))
     if s<=0 then return end
     local layout
     if at_home then
@@ -1605,6 +2344,13 @@ function NHUI.draw(model, dispatch)
             panels.workTabs,panels.navEnd=position_work_tabs(work_tabs,18,panels.bench,scale,tr,model.debug)
             panels.contentHeight=content_height
             panels.panelHeight=math.max(panels.gridY,panels.navEnd)+content_height+18
+            -- Wrapped navigation and the active order timer still leave room for list rows.
+            local _,recipesEnd=position_work_tabs(recipe_tabs,panels.navEnd,panels.bench,scale,tr)
+            local _,alchemyEnd=position_work_tabs(alchemy_tabs,recipesEnd,panels.bench,scale,tr)
+            local _,shopEnd=position_work_tabs(shop_tabs,panels.navEnd+bankRowHeight,panels.bench,scale,tr)
+            -- Extra alchemy tab rows can scroll within the workshop on short screens.
+            local alchemyHeight=math.min(alchemyEnd+15+42,(sh-10)/scale)
+            panels.panelHeight=math.max(panels.panelHeight,alchemyHeight,recipesEnd+70,shopEnd+55)
             return panels
         end
         layout=measure_home(s)
@@ -1613,9 +2359,10 @@ function NHUI.draw(model, dispatch)
             s=fit_scale
             layout=measure_home(s)
         end
-        pw=layout.secure
+        pw=math.min(pw,layout.secure)
     end
-    local ox,oy=sw-pw*s-5,sh-ph*s-5
+    if collapsed then pw=math.min(pw,90) end
+    local ox,oy=model.mode=="case" and 5 or sw-pw*s-5,sh-ph*s-5
     GuiZSetForNextWidget(gui, -79)
     GuiImageNinePiece(gui, 10, ox, oy, pw*s, ph*s, 1)
 
@@ -1626,10 +2373,15 @@ function NHUI.draw(model, dispatch)
         if truncated then GuiTooltip(gui, tostring(value), "") end
     end
     if model.mode=="case" then
-        if model.surgery then
-            local width=pw-16-((model.capacity>3 and pw>=145) and 70 or 0)
-            draw_surgery(model.surgery,tr,ox+8*s,oy+4*s,width*s,s)
-        else label(9,5,tr("安全箱","Secure case"),pw-16,white) end
+        local caption=(collapsed and "[+] " or "[-] ")..tr("装备栏","Equipment")
+        if model.surgery and not collapsed then caption="[-]" end
+        if GuiButton(gui,39,ox+6*s,oy+3*s,caption,s) and not drag then
+            secure_folded=not secure_folded
+        end
+        if model.surgery and not collapsed then
+            local width=pw-32
+            draw_surgery(model.surgery,tr,ox+24*s,oy+4*s,width*s,s)
+        end
     end
-    draw_case(model,ox,oy,s,sw,sh,tr,label,dispatch,layout,pw,ph,popupHeight)
+    draw_case(model,ox,oy,s,sw,sh,tr,label,dispatch,layout,pw,ph,popupHeight,collapsed)
 end

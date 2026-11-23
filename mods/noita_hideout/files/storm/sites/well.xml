@@ -1,0 +1,12 @@
+<Entity name="法力气井" tags="cycle_storm_well,nh_storm_site,nh_segmented_tower">
+    <SpriteComponent _tags="tower_back" image_file="mods/noita_hideout/files/storm/sites/tower_back.png" offset_x="64" offset_y="256" z_index="3" />
+    <SpriteComponent _tags="port1_bud" _enabled="0" image_file="mods/noita_hideout/files/items/storm_mana.png" has_special_scale="1" emissive="1" />
+    <SpriteComponent _tags="port2_bud" _enabled="0" image_file="mods/noita_hideout/files/items/storm_mana.png" has_special_scale="1" emissive="1" />
+    <SpriteComponent _tags="port3_bud" _enabled="0" image_file="mods/noita_hideout/files/items/storm_mana.png" has_special_scale="1" emissive="1" />
+    <VariableStorageComponent name="port1" value_int="0" />
+    <VariableStorageComponent name="port2" value_int="0" />
+    <VariableStorageComponent name="port3" value_int="0" />
+    <VariableStorageComponent name="started" value_int="-1" />
+    <VariableStorageComponent name="wave" value_int="0" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/storm/sites/tick.lua" execute_every_n_frame="15" />
+</Entity>

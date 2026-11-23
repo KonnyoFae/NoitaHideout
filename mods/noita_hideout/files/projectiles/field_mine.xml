@@ -1,0 +1,5 @@
+<Entity>
+  <Base file="data/entities/projectiles/mine_scavenger.xml">
+    <CollisionTriggerComponent required_tag="enemy" />
+  </Base>
+</Entity>

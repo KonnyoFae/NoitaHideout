@@ -1,0 +1,5 @@
+<Entity>
+    <InheritTransformComponent />
+    <SpriteComponent image_file="data/particles/area_indicator_032_purple.png" offset_x="16" offset_y="16"
+        alpha="0.40" z_index="1.1" never_ragdollify_on_death="1" special_scale_x="1" special_scale_y="1" has_special_scale="1" />
+</Entity>

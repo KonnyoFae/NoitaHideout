@@ -1,0 +1,5 @@
+<Entity>
+  <Base file="data/entities/projectiles/deck/xray.xml">
+    <ProjectileComponent lifetime="5000" collide_with_world="0" />
+  </Base>
+</Entity>

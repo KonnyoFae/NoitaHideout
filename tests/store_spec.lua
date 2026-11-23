@@ -276,3 +276,32 @@ end
 selected=5
 assert(load().bankGold==0)
 print("Store: piggy bank persistence, precision, isolated balances and concurrent spending passed.")
+
+do
+    selected=7
+    profiles[selected]={}
+    local legacy=load()
+    legacy.supportAmmoExpanded=nil
+    legacy.pheromoneMagazines=nil
+    legacy.safe={{id=legacy.nextItemId+1,slot=1,item={kind="flare_gun",count=3,remaining=1}}}
+    legacy.warehouse={{id=legacy.nextItemId,slot=1,item={kind="heavy_mg",count=6,remaining=13}}}
+    legacy.nextItemId=legacy.nextItemId+2
+    local upgraded=save(legacy)
+    for i=1,2 do
+        local gun=upgraded.warehouse[1].item
+        assert(upgraded.supportAmmoExpanded and gun.count==2 and gun.remaining==93 and NHGuns.rounds(gun)==413)
+        local flare=upgraded.safe[1].item
+        assert(upgraded.pheromoneMagazines and flare.count==3 and NHGuns.rounds(flare)==12)
+        upgraded=save(upgraded)
+    end
+    -- A profile from the previous release already has the other support-weapon capacities.
+    upgraded.railgunAmmoExpanded=nil
+    upgraded.warehouse[2]={id=upgraded.nextItemId,slot=2,item={kind="railgun",count=5,remaining=3}}
+    upgraded.nextItemId=upgraded.nextItemId+1
+    for i=1,2 do
+        upgraded=save(upgraded)
+        local rail=upgraded.warehouse[2].item
+        assert(upgraded.railgunAmmoExpanded and rail.count==2 and rail.remaining==3 and NHGuns.rounds(rail)==23)
+        assert(NHGuns.rounds(upgraded.warehouse[1].item)==413)
+    end
+end

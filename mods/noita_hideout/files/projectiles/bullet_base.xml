@@ -1,0 +1,20 @@
+<Entity tags="projectile,projectile_player,teleportable_NOT">
+    <Base file="data/entities/base_projectile.xml">
+        <VelocityComponent gravity_y="0" air_friction="0" />
+    </Base>
+    <!-- Vanilla machinegun_bullet_slow uses a small material hole and discards
+         the projectile sprite. Direct hits and special ammo effects stay separate. -->
+    <ProjectileComponent collide_with_world="1" on_collision_die="1" on_collision_remove_projectile="0" on_collision_spawn_entity="0"
+        penetrate_entities="0" bounces_left="0" velocity_sets_rotation="1"
+        never_hit_player="1" friendly_fire="0" collide_with_shooter_frames="-1"
+        on_death_gfx_leave_sprite="0" create_shell_casing="0"
+        on_death_explode="1" on_lifetime_out_explode="0" explosion_dont_damage_shooter="1">
+        <config_explosion never_cache="1" explosion_radius="2" hole_enabled="1" hole_destroy_liquid="0"
+            ray_energy="400000" max_durability_to_destroy="9" create_cell_probability="0"
+            damage="0" damage_mortals="0" physics_throw_enabled="0" camera_shake="0"
+            explosion_sprite="" explosion_sprite_lifetime="0" particle_effect="0" sparks_enabled="0"
+            material_sparks_enabled="1" material_sparks_real="0" material_sparks_count_min="0" material_sparks_count_max="2"
+            audio_enabled="0" light_enabled="0" stains_enabled="0" shake_vegetation="0" />
+    </ProjectileComponent>
+    <SpriteComponent image_file="data/projectiles_gfx/bullet.xml" emissive="1" additive="1" />
+</Entity>

@@ -252,6 +252,12 @@ local function check_root(entity, path)
 end
 
 local stock_pickups = {}
+local shop_pickup = "data/scripts/items/shop_effect.lua"
+
+local function add_shop_pickup(entity)
+    return assert(EntityAddComponent2(entity, "LuaComponent", {script_item_picked_up = shop_pickup}),
+        "Could not restore the shop pickup effect")
+end
 
 local function card_pickup(c, id)
     local file = get(c, "script_item_picked_up") or ""
@@ -281,6 +287,11 @@ local function default_pickups(id, x, y)
             assert(not result[file], "Duplicate spell pickup callback: " .. id)
             result[file] = settings
         end
+        -- The shop generator adds this visual callback after the card factory runs.
+        if not result[shop_pickup] then
+            local file, settings = card_pickup(add_shop_pickup(probe), id)
+            result[file] = settings
+        end
         return result
     end)
     EntityKill(probe)
@@ -295,7 +306,7 @@ local function pickup_states(entity, id)
         local file, settings = card_pickup(c, id)
         local expected = default_pickups(id, EntityGetTransform(entity))[file]
         assert(expected, "Nonstandard spell pickup callback: " .. id .. " " .. file)
-        assert((get(c, "mTimesExecuted") or 0) == 0 or file:match("^data/scripts/particles/"),
+        assert((get(c, "mTimesExecuted") or 0) == 0 or file == shop_pickup or file:match("^data/scripts/particles/"),
             "Stateful spell pickup callback: " .. id .. " " .. file)
         for key, value in pairs(settings) do
             assert(expected[key] == value, "Modified spell pickup callback: " .. id .. " " .. key)
@@ -308,6 +319,7 @@ local function pickup_states(entity, id)
 end
 
 local function capture_card(entity, action)
+    assert(not first(entity, "ItemCostComponent"), "Cannot store a shop spell")
     local id = get(action, "action_id")
     assert(type(id) == "string" and id ~= "", "Spell has no action ID")
     assert(not (EntityGetAllChildren(entity) or {})[1], "Unsupported spell attachment: " .. id)
@@ -352,7 +364,10 @@ local function capture(entity)
     assert(gun.deck_capacity ~= nil and cast.fire_rate_wait ~= nil, "Cannot read wand firing settings")
     local frame = GameGetFrameNum()
     local name = get(item, "always_use_item_name_in_ui") and get(item, "item_name") or get(ability, "ui_name")
+    -- Native generation can tint the ground light purple on a rare wand.
+    local light=path:match("^data/entities/items/wand_level_0[123]%.xml$") and first(entity,"LightComponent")
     return {kind = "wand", name = name, template = path, editor = editor, cards = cards, cleaner = cleaner, tags = wand_tags(entity),
+        light=light and fields(light,{"r","g","b"}) or nil,
         entity_name = EntityGetName(entity), ability = fields(ability, ability_fields),
         item = fields(item, item_fields), sprite = canonical_sprite(fields(sprite, sprite_fields)), tip = {tip_x, tip_y},
         gun_config = gun, gunaction_config = cast,
@@ -394,14 +409,19 @@ local function configure_card(child, card, restoring)
     EntitySetComponentsWithTagEnabled(child, "enabled_in_hand", false)
     EntitySetComponentsWithTagEnabled(child, "enabled_in_world", false)
     if restoring then
+        local needs_shop = card.pickups and card.pickups[shop_pickup] ~= nil
         for _, c in ipairs(EntityGetComponentIncludingDisabled(child, "LuaComponent") or {}) do
             local file = card_pickup(c, card.id)
+            if file == shop_pickup then needs_shop = false end
             local enabled = card.pickups and card.pickups[file]
             if enabled ~= nil then EntitySetComponentIsEnabled(child, c, enabled)
             else
                 -- The original card no longer had this stock pickup helper.
                 EntityRemoveComponent(child, c)
             end
+        end
+        if needs_shop then
+            EntitySetComponentIsEnabled(child, add_shop_pickup(child), card.pickups[shop_pickup])
         end
     end
 end
@@ -418,7 +438,6 @@ function NHSpell.capture(entity)
     local ok, result = pcall(function()
         local card = capture_card(entity, required(entity,"ItemActionComponent"))
         local item = required(entity,"ItemComponent")
-        assert(not first(entity,"ItemCostComponent"), "Cannot store a shop spell")
         local icon = get(item,"ui_sprite")
         if not icon or icon == "" then
             local sprite = first(entity,"SpriteComponent")
@@ -453,6 +472,28 @@ local function build(path, x, y, configure)
     return nil, tostring(err)
 end
 
+-- The vanilla level_01..03 scripts use these budgets and the same three
+-- generator calls. Finish generation before capturing the actual wand; an
+-- execute_on_added component may not have run yet on this engine tick.
+local discoveryBudgets={30,40,60}
+function NHWand.generateDiscovery(seed)
+    local level=1+seed%#discoveryBudgets
+    local path=("data/entities/items/wand_level_%02d.xml"):format(level)
+    local x,y=seed%32768,math.floor(seed/32768)
+    local record
+    local entity,err=build(path,x,y,function(wand)
+        dofile_once("data/scripts/gun/procedural/gun_procedural.lua")
+        SetRandomSeed(x,y)
+        local gun=get_gun_data(discoveryBudgets[level],level,false)
+        make_wand_from_gun_data(gun,wand,level)
+        wand_add_random_cards(gun,wand,level)
+        record=capture(wand)
+    end)
+    if not entity then return nil,err end
+    EntityKill(entity)
+    return record
+end
+
 local function verify_values(stored, actual, path)
     if type(stored) ~= "table" or type(actual) ~= "table" then
         assert(stored == actual, "Wand readback mismatch: " .. path)
@@ -463,6 +504,15 @@ local function verify_values(stored, actual, path)
 end
 
 function NHWand.restore(data, x, y)
+    if data.discovery then
+        local preset=NHDragonLoot.wandItem(data.discovery)
+        if not preset then return nil,"Unknown dragon nest wand." end
+        return build(preset.template,x,y,function(entity)
+            for _,card in ipairs(preset.cards) do add_card(entity,card,x,y) end
+            assert(EntityAddComponent2(entity,"VariableStorageComponent",
+                {_tags=source_marker,name=source_marker,value_string=preset.template}))
+        end)
+    end
     return build(data.template, x, y, function(entity, ability)
         -- Normalize old records on read without modifying the journaled entry.
         local normalized = canonical_sprite(data.sprite)
@@ -471,6 +521,11 @@ function NHWand.restore(data, x, y)
             for k, v in pairs(data) do copy[k] = v end
             copy.sprite = normalized
             data = copy
+        end
+        if data.light then
+            local light=required(entity,"LightComponent")
+            apply(light,data.light)
+            set(light,"update_properties",true)
         end
         apply(ability, data.ability)
         for _, object in ipairs({"gun_config", "gunaction_config"}) do
@@ -506,7 +561,9 @@ function NHWand.restore(data, x, y)
         end
         -- Some setters report engine errors without raising a Lua error.
         -- Re-read the actual clone before the transfer retires its stash entry.
-        verify_values(data, capture(entity), "wand")
+        local actual=capture(entity)
+        if not data.light then actual.light=nil end -- Older records omit the native ground light.
+        verify_values(data,actual,"wand")
     end)
 end
 

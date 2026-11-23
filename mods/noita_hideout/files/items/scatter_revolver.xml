@@ -1,0 +1,15 @@
+<Entity name="$nh_hideout_scatter_revolver" tags="wand,nh_firearm,noita_hideout_scatter_revolver,teleportable_NOT">
+    <Base file="data/entities/base_item.xml">
+        <ItemComponent item_name="$nh_hideout_scatter_revolver" ui_description="$nh_hideout_scatter_revolver_desc"
+            ui_sprite="mods/noita_hideout/files/items/scatter_revolver.png" is_frozen="1" always_use_item_name_in_ui="1" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/scatter_revolver.png" offset_x="4" offset_y="8" has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" />
+    </Base>
+    <LuaComponent _tags="enabled_in_hand,enabled_in_world,nh_equipment_mirror" script_source_file="mods/noita_hideout/files/equipment_sprite_mirror.lua" execute_every_n_frame="1" />
+    <AbilityComponent use_gun_script="1" ui_name="$nh_hideout_scatter_revolver" sprite_file="mods/noita_hideout/files/items/scatter_revolver.png"
+        mana="36" mana_max="36" mana_charge_speed="0" rotate_in_hand="1" throw_as_item="0">
+        <gun_config shuffle_deck_when_empty="0" deck_capacity="1" actions_per_round="1" reload_time="17" />
+        <gunaction_config fire_rate_wait="17" spread_degrees="0" />
+    </AbilityComponent>
+    <HotspotComponent _tags="shoot_pos" offset.x="6" offset.y="-2" />
+    <VariableStorageComponent _tags="nh_magazine" name="scatter_revolver" value_int="36" value_float="1" value_string="-1" />
+</Entity>

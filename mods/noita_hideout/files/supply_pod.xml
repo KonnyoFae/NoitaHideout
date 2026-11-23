@@ -1,0 +1,5 @@
+<Entity tags="nh_supply_pod,teleportable_NOT">
+    <SpriteComponent image_file="mods/noita_hideout/files/items/drop_pod.png" offset_x="8" offset_y="8" />
+    <LightComponent r="150" g="215" b="165" radius="18" />
+    <LifetimeComponent lifetime="180" />
+</Entity>

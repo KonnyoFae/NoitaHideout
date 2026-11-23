@@ -1,0 +1,9 @@
+<Entity name="沙漠油钻" tags="cycle_storm_rig,nh_storm_site">
+    <Base file="mods/noita_hideout/files/storm/sites/rig_body.xml" />
+    <InteractableComponent radius="22" ui_text="启动油钻" />
+    <LuaComponent script_interacting="mods/noita_hideout/files/storm/sites/activate.lua" execute_every_n_frame="-1" />
+    <VariableStorageComponent name="produced" value_int="0" />
+    <VariableStorageComponent name="started" value_int="-1" />
+    <VariableStorageComponent name="wave" value_int="0" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/storm/sites/tick.lua" execute_every_n_frame="15" />
+</Entity>

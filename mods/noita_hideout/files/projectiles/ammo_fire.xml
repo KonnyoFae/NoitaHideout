@@ -1,0 +1,8 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/projectiles/ammo_pulse.xml" />
+    <ParticleEmitterComponent emitted_material_name="fire" count_min="2" count_max="3"
+        x_pos_offset_min="-2" x_pos_offset_max="2" y_pos_offset_min="-2" y_pos_offset_max="1"
+        x_vel_min="-12" x_vel_max="12" y_vel_min="-16" y_vel_max="-3"
+        lifetime_min="0.3" lifetime_max="0.6" emission_interval_min_frames="2" emission_interval_max_frames="2"
+        create_real_particles="1" emit_cosmetic_particles="0" is_emitting="1" />
+</Entity>

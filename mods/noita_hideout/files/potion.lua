@@ -3,10 +3,10 @@ NHPotion = {}
 local empty_flask = "data/entities/items/pickup/potion_empty.xml"
 local pickup="data/entities/items/pickup/"
 local variants={
-    powder_stash={icon="material_pouch",zh="粉末袋",en="Powder pouch"},
+    powder_stash={icon="material_pouch",tag="powder_stash",zh="粉末袋",en="Powder pouch"},
     jar={icon="jar",zh="罐子",en="Jar"},
     jar_of_urine={icon="jar",zh="尿罐",en="Urine jar"},
-    potion_aggressive={icon="potion_alchemist",zh="炼金师药瓶",en="Alchemist flask"},
+    potion_aggressive={icon="potion_alchemist",tag="projectile_item",zh="炼金师药瓶",en="Alchemist flask"},
 }
 local fill_scripts={
     ["data/scripts/items/powder_stash.lua"]=true,
@@ -51,14 +51,8 @@ local ordinary_art = {
     ["data/ui_gfx/items/potion.png"] = true,
     ["data/items_gfx/potion.png"] = true,
 }
-local ordinary_scripts = {
-    ["data/scripts/items/potion.lua"] = true,
-    ["data/scripts/items/potion_starting.lua"] = true,
-}
-local ordinary_variables = {noita_hideout_transfer_id = true}
-
--- Read the installed templates, including inherited callback and sprite
--- definitions. No base-game assets are modified.
+-- Installed art helps identify streamed flasks. Patched templates cannot tell
+-- us which scripts or instance state the storage format can reconstruct.
 function NHPotion.readTemplates()
     local seen = {}
     local function read(path)
@@ -66,36 +60,13 @@ function NHPotion.readTemplates()
         seen[path] = true
         local xml = (ModTextFileGetContent(path) or ""):gsub("<!%-%-.-%-%->", "")
         for key, value in xml:gmatch([=[([%w_]+)%s*=%s*["']([^"']+)["']]=]) do
-            if key:match("^script_") and value:match("^data/") then
-                ordinary_scripts[value] = true
-            elseif (key == "image_file" or key == "ui_sprite") and value:match("^data/[^/]*gfx/.*potion") then
+            if (key == "image_file" or key == "ui_sprite") and value:match("^data/[^/]*gfx/.*potion") then
                 ordinary_art[value] = true
             end
-        end
-        for variable in xml:gmatch("<VariableStorageComponent%s+([^>]+)>") do
-            local name = (" " .. variable):match([=[%sname%s*=%s*["']([^"']+)["']]=])
-            if name then ordinary_variables[name] = true end
         end
         for base in xml:gmatch([=[<Base%s+[^>]-file%s*=%s*["']([^"']+)["']]=]) do read(base) end
     end
     for path in pairs(normal_templates) do read(path) end
-end
-
-local function stock_state(entity)
-    for _, variable in ipairs(EntityGetComponentIncludingDisabled(entity, "VariableStorageComponent") or {}) do
-        if not ordinary_variables[ComponentGetValue2(variable, "name")] then return false end
-    end
-    for _, lua in ipairs(EntityGetComponentIncludingDisabled(entity, "LuaComponent") or {}) do
-        local members = ComponentGetMembers(lua)
-        if not members then return false end
-        for field in pairs(members) do
-            if field:match("^script_") then
-                local script = ComponentGetValue2(lua, field)
-                if script and script ~= "" and not ordinary_scripts[script] then return false end
-            end
-        end
-    end
-    return true
 end
 
 local function ordinary_flask(entity, item)
@@ -107,7 +78,6 @@ local function ordinary_flask(entity, item)
     if path:match("^mods/") or path:match("^data/entities/items/") or path:match("^data/entities/animals/") then
         return false
     end
-    if not stock_state(entity) then return false end
     if EntityHasTag(entity, normal_flask_tag) then return true end
     -- Inline player inventory and streamed entities can report the enclosing
     -- file or an empty filename. Recognize the original bottle on the entity.
@@ -141,6 +111,103 @@ local function variant_for(entity,item)
             if ComponentGetValue2(c,"name")=="potion_material" and ComponentGetValue2(c,"value_string")=="urine" then return "jar_of_urine" end
         end
         return "jar"
+    end
+end
+
+local component_types = {
+    PhysicsBodyComponent=true, PhysicsImageShapeComponent=true, PhysicsThrowableComponent=true,
+    ProjectileComponent=true, VelocityComponent=true, PotionComponent=true, MaterialSuckerComponent=true,
+    MaterialInventoryComponent=true, DamageModelComponent=true, ExplodeOnDamageComponent=true,
+    PhysicsBodyCollisionDamageComponent=true, SpriteComponent=true, ItemComponent=true, AbilityComponent=true,
+    UIInfoComponent=true, SpriteParticleEmitterComponent=true, AudioLoopComponent=true, AudioComponent=true,
+    ItemCostComponent=true,
+}
+local flask_tags = {
+    hittable=true, teleportable_NOT=true, item_physics=true, item_pickup=true, potion=true,
+    item=true, item_shop=true, glue_NOT=true, extra_potion_capacity=true,
+    noita_hideout_transfer_item=true, [normal_flask_tag]=true,
+}
+local initializers = {
+    ["data/scripts/items/potion.lua"]=true, ["data/scripts/items/potion_starting.lua"]=true,
+    ["data/scripts/items/potion_water.lua"]=true, ["data/scripts/items/potion_random_material.lua"]=true,
+    ["data/scripts/items/potion_secret.lua"]=true,
+}
+local native_fill_materials = {alcohol=true, beer=true, milk=true, porridge=true, slime=true, vomit=true}
+local script_defaults = {
+    execute_on_removed=false, execute_every_n_frame=1, execute_times=0,
+    limit_how_many_times_per_frame=-1, limit_to_every_n_frame=-1, limit_all_callbacks=false,
+    enable_coroutines=false,
+}
+
+local function native_callback(field, script, variant)
+    if field=="script_item_picked_up" then return script=="data/scripts/items/potion_effect.lua" end
+    if field=="script_death" then
+        if variant=="potion_aggressive" then return script=="data/scripts/items/potion_glass_break_temporary.lua" end
+        return variant~="powder_stash" and script=="data/scripts/items/potion_glass_break.lua"
+    end
+    if field~="script_source_file" then return false end
+    if variant=="powder_stash" or variant=="potion_aggressive" then
+        return script=="data/scripts/items/"..variant..".lua"
+    end
+    if variant then return script=="data/scripts/items/potion.lua" end
+    return initializers[script]
+end
+
+local function check_script(c, variant, seen)
+    local members = assert(ComponentGetMembers(c), "Cannot inspect flask script")
+    local hook, path
+    for field in pairs(members) do
+        if field:match("^script_") then
+            local script = ComponentGetValue2(c,field)
+            if script and script~="" then
+                assert(native_callback(field,script,variant) and not hook and not seen[field],
+                    "Unsupported flask script: "..script.." ("..field..")")
+                hook,path = field,script
+                seen[field] = true
+            end
+        end
+    end
+    if not hook then return end
+    if hook~="script_source_file" then
+        assert(ComponentGetIsEnabled(c), "Unsupported flask script: "..path.." (disabled)")
+    end
+    -- Native fill and pickup scripts run once. A recurring copy of the same
+    -- file has different behavior and would silently disappear on restore.
+    for field in pairs(members) do
+        local expected = script_defaults[field]
+        if field=="execute_on_added" or field=="call_init_function" then expected = hook=="script_source_file" end
+        if field=="remove_after_executed" then expected = hook~="script_death" end
+        if expected~=nil then
+            assert(ComponentGetValue2(c,field)==expected, "Unsupported flask script: "..path.." ("..field..")")
+        end
+    end
+end
+
+local function check_state(entity, variant)
+    for tag in (EntityGetTags(entity) or ""):gmatch("[^,]+") do
+        local variant_tag = variant and (tag=="noita_hideout_"..variant or tag==variants[variant].tag)
+        assert(flask_tags[tag] or variant_tag, "Unsupported flask tag: "..tag)
+    end
+    local seen = {}
+    for _, c in ipairs(assert(EntityGetAllComponents(entity), "Cannot inspect flask components")) do
+        local kind = ComponentGetTypeName(c)
+        if kind=="LuaComponent" then
+            check_script(c,variant,seen)
+        elseif kind=="VariableStorageComponent" then
+            local name = ComponentGetValue2(c,"name")
+            -- potion_material selects the initial fill. Transfer receipts are recreated on issue.
+            local value = ComponentGetValue2(c,"value_string")
+            local known = (name=="noita_hideout_transfer_id" and ComponentHasTag(c,name))
+                or (name=="potion_material" and (not variant and native_fill_materials[value]
+                    or variant=="jar_of_urine" and value=="urine"))
+            assert(known and not seen[name] and not ComponentGetValue2(c,"value_bool")
+                and (ComponentGetValue2(c,"value_int") or 0)==0 and (ComponentGetValue2(c,"value_float") or 0)==0,
+                "Unsupported flask state: "..tostring(name))
+            seen[name]=true
+        elseif kind~="SpriteComponent" or not ComponentHasTag(c,"shop_cost") then
+            assert(component_types[kind] and not seen[kind], "Unsupported flask component: "..tostring(kind))
+            seen[kind]=true
+        end
     end
 end
 
@@ -230,17 +297,27 @@ function NHPotion.dockSlot(record)
     if record.kind=="potion" then return record.variant=="powder_stash" and 2 or 1 end
 end
 
--- Only a captured native material container with an explicitly empty inventory
--- is usable as a shell. Capture rejects entity children before creating a record.
-function NHPotion.isEmptyContainer(record)
-    if not record or record.kind~="potion" or type(record.materials)~="table" or next(record.materials)
+function NHPotion.carriedDockSlot(entity,item)
+    return variant_for(entity,item)=="powder_stash" and 2 or 1
+end
+
+-- Only captured native containers with fully understood contents can be dismantled.
+function NHPotion.isMaterialContainer(record)
+    if not record or record.kind~="potion" or type(record.materials)~="table"
         or type(record.capacity)~="number" or record.capacity<=0
         or (record.variant~=nil and not variants[record.variant]) then return false end
     -- A newer adapter may serialize attachments or additional contents in another table.
     for key,value in pairs(record) do
         if key~="materials" and type(value)=="table" and next(value) then return false end
     end
+    for name,n in pairs(record.materials) do
+        if type(name)~="string" or name=="" or not whole_units(n) or n<=0 then return false end
+    end
     return true
+end
+
+function NHPotion.isEmptyContainer(record)
+    return NHPotion.isMaterialContainer(record) and not next(record.materials)
 end
 
 function NHPotion.fillLevel(record)
@@ -251,8 +328,10 @@ function NHPotion.fillLevel(record)
     return used,math.max(0,math.floor(cap))
 end
 
+local alchemyResources=dofile("mods/noita_hideout/files/alchemy_resources.lua")
 local material_slots
 function NHPotion.materialSlot(name)
+    if alchemyResources[name] then return nil end
     if not material_slots then
         material_slots={}
         for _,liquid in ipairs(CellFactory_GetAllLiquids(true,true)) do material_slots[liquid]=1 end
@@ -301,6 +380,8 @@ function NHPotion.contentsColor(record)
 end
 
 function NHPotion.materialName(name,lang)
+    local special=alchemyResources[name]
+    if special then return lang=="zh" and special.zh or special.en end
     if lang and variant_names[name] then
         return variant_names[name][lang=="zh" and 1 or 2]
     end
@@ -312,6 +393,16 @@ function NHPotion.materialName(name,lang)
     return name
 end
 
+function NHPotion.storeContents(state,item)
+    if not NHStore.canStockMaterials(state,item.materials) then return false,"Material storage is full." end
+    for name,amount in pairs(item.materials) do
+        state.materials[name]=(state.materials[name] or 0)+amount
+    end
+    item.materials={}
+    item.color=nil
+    return true
+end
+
 -- Both sides belong to a detached profile draft and are committed together.
 function NHPotion.transferMaterial(state,request)
     local index=NHStore.slotIndex(state,"docks",request.slot)
@@ -320,11 +411,8 @@ function NHPotion.transferMaterial(state,request)
     local item,stock=row.item,state.materials
     if request.unload then
         if not next(item.materials) then return false,"Container is empty." end
-        if not NHStore.canStockMaterials(state,item.materials) then return false,"Material storage is full." end
-        for name,amount in pairs(item.materials) do
-            stock[name]=(stock[name] or 0)+amount
-        end
-        item.materials={}
+        local ok,err=NHPotion.storeContents(state,item)
+        if not ok then return false,err end
     else
         local name,n=request.material,request.amount
         if not whole_units(n) or n<1 or NHPotion.materialSlot(name)~=row.slot then return false,"Incompatible material." end
@@ -350,6 +438,7 @@ local function capture(entity)
         local cost = ComponentGetValue2(price, "cost")
         assert(type(cost) == "number" and cost <= 0, "This flask still has a shop price")
     end
+    check_state(entity,variant)
     local inv = c.MaterialInventoryComponent
     return refresh_name({
         kind = "potion", materials = read_materials(inv), variant=variant,

@@ -1,0 +1,6 @@
+<Entity>
+  <Base file="data/entities/projectiles/mine.xml">
+    <VelocityComponent gravity_y="220" air_friction="0" terminal_velocity="1000" />
+    <ProjectileComponent spawn_entity="mods/noita_hideout/files/projectiles/field_mine.xml" friction="0" lifetime="300" />
+  </Base>
+</Entity>

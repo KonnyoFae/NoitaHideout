@@ -1,0 +1,8 @@
+<Entity tags="noita_hideout_meal_speed">
+    <InheritTransformComponent />
+    <VariableStorageComponent name="speed" value_int="0" value_float="0" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/meal_tick.lua" execute_every_n_frame="60" />
+    <GameEffectComponent effect="MOVEMENT_FASTER" frames="-1" />
+    <UIIconComponent name="$nh_hideout_meal_speed" description="$nh_hideout_meal_speed"
+        icon_sprite_file="mods/noita_hideout/files/items/sugar_cube.png" is_perk="0" display_in_hud="1" display_above_head="0" />
+</Entity>

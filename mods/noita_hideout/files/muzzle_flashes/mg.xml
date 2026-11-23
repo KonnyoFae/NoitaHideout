@@ -1,0 +1,5 @@
+<Entity>
+    <SpriteComponent image_file="data/particles/explosion_008.xml" rect_animation="explosion"
+        emissive="1" additive="1" kill_entity_after_finished="1" />
+    <LifetimeComponent lifetime="14" />
+</Entity>

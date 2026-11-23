@@ -28,11 +28,13 @@ end
 local function commit(s, changed)
     local ok, err = NHStore.commit(changed)
     if not ok then return nil, err end
+    s.pendingChargerUses=changed.pendingChargerUses
     s.revision, s.nextItemId = changed.revision, changed.nextItemId
     s.docks = changed.docks
     s.summons, s.dragonLoot = changed.summons, changed.dragonLoot
     s.gelBonus,s.resources=changed.gelBonus,changed.resources
     s.warehouse, s.safe, s.transit = changed.warehouse, changed.safe, changed.transit
+    for _,field in ipairs(NHShields.fields) do s[field]=changed[field] end
     return true
 end
 
@@ -72,10 +74,20 @@ end
 
 local function storage_ids(s)
     local ids, sources = {}, {}
+    for _,field in ipairs(NHShields.fields) do
+        local row=s[field]
+        if row then ids[row.id]=true; if row.origin then sources[row.origin]=true end end
+    end
     for _, rows in ipairs({s.warehouse, s.safe, s.docks}) do
         for _, row in ipairs(rows) do
             ids[row.id] = true
             if row.origin then sources[row.origin] = true end
+            if row.item.kind=="relic_chain" then
+                for _,socket in pairs(row.item.cells) do
+                    ids[socket.id]=true
+                    if socket.origin then sources[socket.origin]=true end
+                end
+            end
         end
     end
     return ids, sources
@@ -105,7 +117,7 @@ function NHTransfers.registerItem(kind, matches, adapter)
         and kind~="pouch" and kind~="dose" and kind~="other","Duplicate or reserved item kind")
     if adapter.warehouseCategory then
         assert(adapter.warehouseCategory=="equipment" or adapter.warehouseCategory=="supplies"
-            or adapter.warehouseCategory=="collection","Invalid warehouse category")
+            or adapter.warehouseCategory=="wand" or adapter.warehouseCategory=="collection","Invalid warehouse category")
         NHStore.itemCategories[kind]=adapter.warehouseCategory
     end
     customItems[kind]={matches=matches,adapter=adapter}
@@ -202,67 +214,59 @@ local function incoming(s,player,item)
     return true,source
 end
 
-local function deposit_item(s,player,dest,item,preferred,equipped_record)
-    local accepted,source,sourceError=incoming(s,player,item)
-    if not accepted then return nil,sourceError end
-    local kind = NHTransfers.item_kind(item)
-    local adapter = codec(kind)
-    if not adapter then return nil, "This item has no storage adapter." end
-    local record, err = equipped_record
-    if not record then record,err=adapter.capture(item,s) end
-    if not record then return nil, err end
-    if record.kind~=kind then return nil,"Invalid item record." end
-    local slot,stack
-    if kind=="summon_card" then slot,stack=NHCompanions.cardSlot(s,dest,preferred,record)
-    else slot=NHStore.freeSlot(s,dest,preferred,kind) end
-    if not slot then return nil,"Inventory slot changed." end
-    if dest=="docks" and NHPotion.dockSlot(record)~=slot then return nil,"Wrong loading slot." end
-    local id = s.nextItemId
-    if not source or not EntityHasTag(item, tag) then
-        source = source or new_token("d", s, id, id, item)
-        if not stamp(item, source) then return nil, "Could not mark this item; it remains in your inventory." end
+-- Plan all partial stacks before changing any rows. A full destination can
+-- still accept the transfer when several stacks have enough room together.
+local function stormStorage(s,dest,item)
+    local left=NHStormProducts.count(item.count)
+    if not left then return end
+    local fills={}
+    local slot
+    for index,row in ipairs(s[dest]) do
+        if row.item.kind==item.kind then
+            local n=row.item.count or 1
+            local take=math.min(left,NHStormProducts.stackLimit-n)
+            if take>0 then
+                fills[#fills+1]={index=index,count=n+take}
+                slot=row.slot or index
+                left=left-take
+                if left==0 then break end
+            end
+        end
     end
-
-    local changed = draft(s)
-    changed.nextItemId = id + 1
-    if kind=="summon_card" then
-        if not NHCompanions.put(changed,dest,slot,stack,record,id,source) then return nil,"Inventory slot changed." end
-    else
-        local issued=kind=="card_wallet" and changed.transit.issued[source]
-        table.insert(changed[dest],{id=issued and issued.row.id or id,item=record,origin=source,slot=slot})
+    if left>0 then slot=NHStore.freeSlot(s,dest,nil,item.kind) end
+    if not slot then return end
+    return slot,nil,function(rows,incoming)
+        for _,fill in ipairs(fills) do
+            local row=copy(rows[fill.index])
+            row.item=copy(row.item)
+            row.item.count=fill.count
+            rows[fill.index]=row
+        end
+        if left>0 then
+            local row=copy(incoming)
+            row.slot,row.item=slot,copy(row.item)
+            row.item.count=left
+            table.insert(rows,row)
+        end
     end
-    -- Keep retirement after a stored flask's contents are spent or the item
-    -- is withdrawn. A replayed source object must never become spendable.
-    changed.transit.retired[source] = true
-    changed.transit.issued[source] = nil
-    local ok, reason = commit(s, changed)
-    if not ok then return nil, reason end
-    dispose(item, player)
-    return true
 end
 
-function NHTransfers.deposit(s, player, container, selected, preferred)
-    local dest = container_name(container)
-    if not dest then return nil, "Unknown container." end
-    local inv = EntityGetFirstComponentIncludingDisabled(player, "Inventory2Component")
-    local item = selected or (inv and ComponentGetValue2(inv, "mActiveItem"))
-    local parent = item and item ~= 0 and EntityGetIsAlive(item) and EntityGetParent(item)
-    local loose = parent and parent ~= 0 and EntityGetName(parent) == "inventory_full"
-        and EntityGetParent(parent) == player and NHTransfers.item_kind(item) == "spell"
-    if not loose and not quick_item(player, item) then
-        if selected then return nil, "The selected item is no longer in your quick inventory." end
-        return nil, "Hold a wand or flask first."
+function NHTransfers.storageSlot(s,dest,item,preferred)
+    if not preferred and NHStormProducts.types[item.kind] and (dest=="warehouse" or dest=="safe") then
+        return stormStorage(s,dest,item)
     end
-    return deposit_item(s,player,dest,item,preferred)
-end
-
-function NHTransfers.depositEquippedPerk(s,player,request)
-    if request.container~="safe" and request.container~="warehouse" then return nil,"Unknown container." end
-    local perk=customItems.perk
-    if not perk then return nil,"Stored item type is unsupported." end
-    local record,reason=perk.adapter.captureEquipped(s,player,request.perkSlot,request.entity)
-    if not record then return nil,reason end
-    return deposit_item(s,player,request.container,request.entity,request.storageSlot,record)
+    if item.kind=="summon_card" then return NHCompanions.cardSlot(s,dest,preferred,item,item.count) end
+    if item.kind=="dose" then
+        for i,row in ipairs(s[dest]) do
+            local slot=row.slot or i
+            if row.item.kind=="dose" and (not preferred or preferred==slot)
+                and NHStore.acceptsDose(row.item,item.remaining or NHStore.doseDurability,item.subtype)
+                and (item.count or 1)<=NHStore.maxResourceAmount-(row.item.count or 1) then return slot,i end
+        end
+    end
+    local slot,index=NHStore.stackSlot(s,dest,item,preferred)
+    if slot then return slot,index end
+    return NHStore.freeSlot(s,dest,preferred,item.kind)
 end
 
 -- Both warehouse rows and individual wallet cards use this commit boundary.
@@ -280,38 +284,254 @@ local function issue(s,changed,player,release,deliver)
         dispose(entity,player)
         return nil,"Could not mark the delivery; item remains in storage."
     end
-    if deliver and not deliver(entity) then
-        dispose(entity,player)
-        return nil,"Inventory slot changed."
+    local finish
+    if deliver then
+        local accepted
+        accepted,finish=deliver(entity)
+        if not accepted then
+            dispose(entity,player)
+            return nil,"Inventory slot changed."
+        end
     end
     release.x,release.y=x,y-4
     changed.nextItemId=ticket+1
     changed.transit.issued[token]=release
     local ok,reason=commit(s,changed)
     if not ok then dispose(entity,player); return nil,reason end
+    -- A merge into an existing native item becomes visible only after commit.
+    if finish then finish() end
     GlobalsSetValue(receipt(token),"1")
     return true,entity
 end
 
-function NHTransfers.withdraw(s, player, index, container, deliver)
+local function deposit_item(s,player,dest,item,preferred,equipped_record,fallback,chain)
+    local accepted,source,sourceError=incoming(s,player,item)
+    if not accepted then return nil,sourceError end
+    local kind = NHTransfers.item_kind(item)
+    local adapter = codec(kind)
+    if not adapter then return nil, "This item has no storage adapter." end
+    local record, err = equipped_record
+    if not record then record,err=adapter.capture(item,s) end
+    if not record then return nil, err end
+    if record.kind~=kind then return nil,"Invalid item record." end
+    local slot,stack,putStorm
+    if dest=="gear" then
+        local field=NHShields.field(kind)
+        if field and preferred==NHShields.slot(kind) and not s[field] then slot=preferred end
+    elseif chain then
+        local row=NHRelics.chain(s,chain)
+        if kind~="relic" or not row or not preferred or row.item.cells[preferred] then return nil,"Relic unavailable." end
+        slot=preferred
+    else
+        slot,stack,putStorm=NHTransfers.storageSlot(s,dest,record,preferred)
+    end
+    if not slot and fallback then
+        dest=fallback
+        slot,stack,putStorm=NHTransfers.storageSlot(s,dest,record)
+    end
+    if not slot then return nil,preferred and "Inventory slot changed." or "No free destination slot." end
+    if dest=="docks" and NHPotion.dockSlot(record)~=slot then return nil,"Wrong loading slot." end
+    local id = s.nextItemId
+    if not source or not EntityHasTag(item, tag) then
+        source = source or new_token("d", s, id, id, item)
+        if not stamp(item, source) then return nil, "Could not mark this item; it remains in your inventory." end
+    end
+
+    local changed = draft(s)
+    changed.nextItemId = id + 1
+    if record.chargerOverflow then
+        changed.pendingChargerUses=(changed.pendingChargerUses or 0)+record.chargerOverflow
+        record.chargerOverflow=nil
+    end
+    if dest=="gear" then
+        local row={id=id,item=record,origin=source,epoch=s.revision+1}
+        changed[NHShields.field(kind)]=row
+        if NHShields.supply(kind) and record.count>1 then
+            local rest=copy(record)
+            rest.count,rest.remaining=record.count-1,NHShields.supply(kind).uses
+            record.count=1
+            local component=EntityGetFirstComponentIncludingDisabled(item,"ItemComponent")
+            local sx,sy=ComponentGetValue2(component,"inventory_slot")
+            local parent=EntityGetParent(item)
+            changed.transit.retired[source],changed.transit.issued[source]=true,nil
+            local release={container="warehouse",row={id=changed.nextItemId,item=rest}}
+            local ok,reason=issue(s,changed,player,release,function(remainder)
+                return true,function()
+                    dispose(item,player)
+                    EntityAddChild(parent,remainder)
+                    local c=EntityGetFirstComponentIncludingDisabled(remainder,"ItemComponent")
+                    ComponentSetValue2(c,"inventory_slot",sx,sy)
+                    EntitySetComponentsWithTagEnabled(remainder,"enabled_in_world",false)
+                    EntitySetComponentsWithTagEnabled(remainder,"enabled_in_inventory",true)
+                    EntitySetComponentsWithTagEnabled(remainder,"enabled_in_hand",false)
+                    local inv=EntityGetFirstComponentIncludingDisabled(player,"Inventory2Component")
+                    ComponentSetValue2(inv,"mForceRefresh",true)
+                end
+            end)
+            if not ok then return nil,reason end
+            return true,nil,dest,slot
+        end
+    elseif chain then
+        if not NHRelics.put(changed,chain,slot,{id=id,item=record,origin=source}) then return nil,"Relic unavailable." end
+    elseif kind=="summon_card" then
+        if not NHCompanions.put(changed,dest,slot,stack,record,id,source) then return nil,"Inventory slot changed." end
+    elseif putStorm then
+        putStorm(changed[dest],{id=id,item=record,origin=source})
+    elseif stack then
+        local row=changed[dest][stack]
+        local target=copy(row.item)
+        NHStore.mergeStack(target,record)
+        changed[dest][stack]={id=row.id,slot=row.slot,origin=row.origin,item=target}
+    else
+        local issued=(kind=="card_wallet" or kind=="relic_chain") and changed.transit.issued[source]
+        table.insert(changed[dest],{id=issued and issued.row.id or id,item=record,origin=source,slot=slot})
+    end
+    -- Keep retirement after a stored flask's contents are spent or the item
+    -- is withdrawn. A replayed source object must never become spendable.
+    changed.transit.retired[source] = true
+    changed.transit.issued[source] = nil
+    local ok, reason = commit(s, changed)
+    if not ok then return nil, reason end
+    dispose(item, player)
+    return true,nil,dest,slot
+end
+
+function NHTransfers.deposit(s, player, container, selected, preferred, fallback, chain)
+    local dest = container=="gear" and "gear" or container_name(container)
+    if not dest then return nil, "Unknown container." end
+    local inv = EntityGetFirstComponentIncludingDisabled(player, "Inventory2Component")
+    local item = selected or (inv and ComponentGetValue2(inv, "mActiveItem"))
+    local parent = item and item ~= 0 and EntityGetIsAlive(item) and EntityGetParent(item)
+    local loose = parent and parent ~= 0 and EntityGetName(parent) == "inventory_full"
+        and EntityGetParent(parent) == player and NHTransfers.item_kind(item) == "spell"
+    if not loose and not quick_item(player, item) then
+        if selected then return nil, "The selected item is no longer in your quick inventory." end
+        return nil, "Hold a wand or flask first."
+    end
+    return deposit_item(s,player,dest,item,preferred,nil,fallback,chain)
+end
+
+-- The caller selects a pickable ground entity in interaction range.
+function NHTransfers.pickupToSafe(s,player,id)
+    if not EntityGetIsAlive(id) or EntityGetRootEntity(id)~=id or EntityGetFirstComponentIncludingDisabled(id,"ItemCostComponent") then
+        return nil,"Slot unavailable."
+    end
+    return deposit_item(s,player,"safe",id)
+end
+
+function NHTransfers.available(s,player,id)
+    return incoming(s,player,id)
+end
+
+function NHTransfers.depositEquippedPerk(s,player,request)
+    if request.container~="safe" and request.container~="warehouse" then return nil,"Unknown container." end
+    local perk=customItems.perk
+    if not perk then return nil,"Stored item type is unsupported." end
+    local record,reason=perk.adapter.captureEquipped(s,player,request.perkSlot,request.entity)
+    if not record then return nil,reason end
+    return deposit_item(s,player,request.container,request.entity,request.storageSlot,record)
+end
+
+-- Only the front food portion or launcher may be partly used.
+local function take_row(s,src,index,one)
+    local row=s[src][index]
+    local item=row.item
+    if not one then return table.remove(s[src],index) end
+    if item.kind=="summon_card" then return NHCompanions.take(s,src,index) end
+    local spell=item.kind=="spell" and item.card
+    local count=spell and spell.stack or 1
+    if item.count and (item.kind=="dose" or NHThrowables.types[item.kind] or NHStore.stackUnits(item)) then
+        count=item.count
+    end
+    if count==1 then return table.remove(s[src],index) end
+    if s.nextItemId>=NHStore.maxResourceAmount then return end
+    local unit,rest=copy(item),copy(item)
+    if spell then
+        unit.card,rest.card=copy(spell),copy(spell)
+        unit.card.stack,rest.card.stack=nil,count-1
+    else
+        unit.count,rest.count=1,count-1
+        local gun,food=NHGuns.types[item.kind],NHFoods.byId[item.kind]
+        if NHMedkits.capacity(item.kind) then rest.remaining=NHMedkits.capacity(item.kind)
+        elseif gun then rest.remaining=gun.capacity elseif food then rest.remaining=food.uses end
+    end
+    s[src][index]={id=row.id,origin=row.origin,slot=row.slot,item=rest}
+    local id=s.nextItemId
+    s.nextItemId=id+1
+    return {id=id,slot=row.slot,item=unit}
+end
+
+function NHTransfers.withdraw(s, player, index, container, deliver, one)
     local src = container_name(container)
     if not src then return nil, "Unknown container." end
     local row = s[src][index]
     if not row then return nil, "Item is no longer in this container." end
     local changed = draft(s)
-    if row.item.kind=="summon_card" then
-        row=NHCompanions.take(changed,src,index)
-        if not row then return nil,"Inventory slot changed." end
-    else
-        table.remove(changed[src],index)
-    end
+    row=take_row(changed,src,index,one or row.item.kind=="summon_card")
+    if not row then return nil,"Inventory slot changed." end
     return issue(s,changed,player,{row=row,container=src},deliver)
+end
+
+function NHTransfers.withdrawRelic(s,player,ref,cell,id,deliver)
+    local changed=draft(s)
+    local row=NHRelics.take(changed,ref,cell,id)
+    if not row then return nil,"Inventory slot changed." end
+    return issue(s,changed,player,{row=row,container="relic_chain",chain=ref,cell=cell},deliver)
+end
+
+function NHTransfers.withdrawGear(s,player,id,kind,deliver)
+    local field=NHShields.field(kind)
+    local row=s[field]
+    if not row or row.id~=id or row.item.kind~=kind then return nil,"Inventory slot changed." end
+    local changed=draft(s)
+    changed[field]=nil
+    return issue(s,changed,player,{row=row,container="gear"},deliver)
+end
+
+-- Both containers belong to one profile. Publish the move in a single write.
+function NHTransfers.moveStored(s,src,index,dest,one,preferred)
+    local changed=draft(s)
+    local row=take_row(changed,src,index,one)
+    if not row then return nil,"Inventory slot changed." end
+    if dest=="docks" and (not preferred or NHPotion.dockSlot(row.item)~=preferred) then return nil,"Wrong loading slot." end
+    local slot,stack,putStorm=NHTransfers.storageSlot(changed,dest,row.item,preferred)
+    if not slot then return nil,"No free destination slot." end
+    if putStorm then
+        putStorm(changed[dest],row)
+    elseif not stack then
+        row=copy(row)
+        row.slot=slot
+        table.insert(changed[dest],row)
+    elseif row.item.kind=="summon_card" then
+        if not NHCompanions.put(changed,dest,slot,stack,row.item,row.id,row.origin) then return nil,"Inventory slot changed." end
+    else
+        local target=copy(changed[dest][stack])
+        target.item=copy(target.item)
+        if row.item.kind=="dose" then target.item.count=(target.item.count or 1)+(row.item.count or 1)
+        else NHStore.mergeStack(target.item,row.item) end
+        changed[dest][stack]=target
+    end
+    local ok,reason=commit(s,changed)
+    return ok,reason,dest,slot
 end
 
 local function recover(draft,release)
     local dest=release.container
     local row=copy(release.row)
+    if dest=="gear" then
+        local field=NHShields.field(row.item.kind)
+        if not draft[field] then
+            row.epoch=draft.revision+1
+            draft[field]=row
+            return true
+        end
+        dest,row.slot="warehouse",nil
+    end
     if dest=="card_wallet" then return NHCardWallets.recover(draft,release) end
+    if dest=="relic_chain" then
+        if NHRelics.put(draft,release.chain,release.cell,row) then return true end
+        dest,row.slot="warehouse",nil
+    end
     if row.item.kind=="summon_card" then
         local slot,index=NHCompanions.cardSlot(draft,dest,row.slot,row.item)
         if not slot then slot,index=NHCompanions.cardSlot(draft,dest,nil,row.item) end
@@ -320,6 +540,24 @@ local function recover(draft,release)
             slot,index=NHCompanions.cardSlot(draft,dest,nil,row.item)
         end
         return NHCompanions.put(draft,dest,slot,index,row.item,row.id,row.origin)
+    end
+    local slot,index=NHStore.stackSlot(draft,dest,row.item,row.slot)
+    if slot then
+        local target=copy(draft[dest][index])
+        target.item=copy(target.item)
+        NHStore.mergeStack(target.item,row.item)
+        draft[dest][index]=target
+        return true
+    end
+    if NHStormProducts.types[row.item.kind] then
+        local _,_,putStorm=stormStorage(draft,dest,row.item)
+        if not putStorm and dest=="safe" then
+            dest="warehouse"
+            _,_,putStorm=stormStorage(draft,dest,row.item)
+        end
+        if not putStorm then return false end
+        putStorm(draft[dest],row)
+        return true
     end
     if dest=="safe" then
         row.slot=NHStore.freeSafeSlot(draft,row.slot or 1) or NHStore.freeSafeSlot(draft)
@@ -360,11 +598,11 @@ function NHTransfers.reconcile(s, player)
                 if j.retired[token] or origins[token] or stored_release(s, token, ids) or unpublished_release(s,j,token) then
                     dispose(entity, player)
                 elseif j.issued[token] then
-                    if seen[token] then
-                        dispose(entity, player)
-                    else
-                        seen[token] = true
+                    if not seen[token] then
+                        seen[token] = entity
                         if GlobalsGetValue(receipt(token), "") ~= "1" then GlobalsSetValue(receipt(token), "1") end
+                    elseif seen[token]~=entity then
+                        dispose(entity, player)
                     end
                 end
             end
@@ -384,6 +622,9 @@ function NHTransfers.reconcile(s, player)
             -- A full warehouse keeps the release in the journal for a later retry.
             if ids[release.row.id] or recover(candidate,candidate.transit.issued[token]) then
                 changed=candidate
+                if release.chargerOverflow and not ids[release.row.id] then
+                    changed.pendingChargerUses=(changed.pendingChargerUses or 0)+release.chargerOverflow
+                end
                 ids[release.row.id]=true
                 changed.transit.retired[token] = true
                 changed.transit.issued[token] = nil

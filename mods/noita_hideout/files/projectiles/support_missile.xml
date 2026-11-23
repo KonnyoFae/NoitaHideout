@@ -1,0 +1,8 @@
+<Entity>
+    <Base file="data/entities/projectiles/deck/rocket.xml">
+        <ProjectileComponent velocity_sets_rotation="1" muzzle_flash_file="" />
+    </Base>
+    <HomingComponent target_tag="enemy" homing_targeting_coeff="18" homing_velocity_multiplier="1" detect_distance="120" />
+    <LuaComponent execute_every_n_frame="-1" execute_on_removed="1"
+        script_source_file="mods/noita_hideout/files/projectiles/missile_impact.lua" />
+</Entity>

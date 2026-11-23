@@ -1,0 +1,19 @@
+weather_rain.ogg
+“AMBIENT - Rain - Light (LOOP)” by Arctura
+https://freesound.org/people/Arctura/sounds/34065/
+Creative Commons Attribution 3.0 Unported
+https://creativecommons.org/licenses/by/3.0/
+OGG version from Regional Weather, copied without changes.
+https://github.com/t-affeldt/regional_weather/blob/master/sounds/weather_rain.ogg
+
+weather_rain_heavy.ogg
+Heavy rain by Q.K., credited by Regional Weather via mymonths.
+CC0 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+OGG version from Regional Weather, copied without changes.
+https://github.com/t-affeldt/regional_weather/blob/master/sounds/weather_rain_heavy.ogg
+
+rain_transition_preview.wav
+Audition mix of the two recordings above. Excerpts looped, level-adjusted
+and crossfaded for a compressed demonstration of the weather cycle.
+Credits and licenses for the source recordings are listed above.

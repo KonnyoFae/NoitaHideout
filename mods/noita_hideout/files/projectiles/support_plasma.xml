@@ -1,0 +1,20 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/projectiles/bullet_base.xml">
+        <VelocityComponent terminal_velocity="430" />
+        <SpriteComponent image_file="data/projectiles_gfx/plasmaball_small.xml" rect_animation="fireball"
+            has_special_scale="1" special_scale_x="2" special_scale_y="1" />
+        <ProjectileComponent speed_min="430" speed_max="430" lifetime="65" damage="1.6"
+            muzzle_flash_file="" shoot_light_flash_radius="55" shoot_light_flash_r="130" shoot_light_flash_g="215" shoot_light_flash_b="255">
+            <config_explosion explosion_radius="10" damage="0.6" damage_mortals="1" hole_enabled="0"
+                explosion_sprite="data/particles/explosion_016_plasma.xml" explosion_sprite_additive="1"
+                load_this_entity="mods/noita_hideout/files/projectiles/plasma_cloud.xml"
+                audio_enabled="1" audio_event_name="explosions/magic_rocket_small" />
+        </ProjectileComponent>
+    </Base>
+    <LightComponent radius="36" r="110" g="200" b="255" />
+    <ParticleEmitterComponent emitted_material_name="plasma_fading" is_trail="1" trail_gap="0.9"
+        count_min="1" count_max="2" lifetime_min="0.05" lifetime_max="0.10" fade_based_on_lifetime="1"
+        create_real_particles="0" emit_cosmetic_particles="1" is_emitting="1"
+        emission_interval_min_frames="1" emission_interval_max_frames="1" />
+    <AudioComponent file="data/audio/Desktop/projectiles.bank" event_root="player_projectiles/bullet_heavy_fast" />
+</Entity>

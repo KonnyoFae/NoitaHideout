@@ -1,0 +1,4 @@
+{81ce57fd-7b74-3ca1-fade-7acf10d41188} bank:/cycle_storm_drizzle
+{994b4dac-e2ff-230a-deb0-5f5a8135239a} event:/cycle_storm/drizzle
+{509c676e-7c80-00d3-ad19-49582a973a3e} bank:/cycle_storm_downpour
+{d0a9f22d-07bc-2f82-a6b4-df848c011156} event:/cycle_storm/downpour

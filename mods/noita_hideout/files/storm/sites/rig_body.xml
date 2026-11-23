@@ -1,0 +1,5 @@
+<Entity>
+    <!-- The root stays at ground level. (72 - 52) * 0.5 puts the foot 10 px below it. -->
+    <SpriteComponent _tags="cycle_storm_rig_body" image_file="mods/noita_hideout/files/storm/sites/oil_drill.png"
+        has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" offset_x="32" offset_y="52" z_index="1" />
+</Entity>

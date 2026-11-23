@@ -1,9 +1,14 @@
 -- Companion entity scripts and init.lua have separate Lua states. World
 -- globals retain the exact number of companionship frames between checkpoints.
-NHAffinity={thresholds={0,10,40,100},framesPerPoint=360}
-local maximum=NHAffinity.framesPerPoint*100
+NHAffinity={thresholds={0,100,400,1000},framesPerPoint=36,maxPoints=10000}
+local maximum=NHAffinity.framesPerPoint*NHAffinity.maxPoints
 local prefix="noita_hideout_affinity_"
 local run_key="noita_hideout_run_v1"
+
+-- Ten basis points per hundred post-cap points, up to +9 percentage points.
+function NHAffinity.incomeBasisPoints(points)
+    return math.floor(math.max(0,math.min(points,NHAffinity.maxPoints)-1000)/10)
+end
 
 function NHAffinity.tier(points)
     for i=#NHAffinity.thresholds,2,-1 do
@@ -45,12 +50,17 @@ function NHAffinity.bind(state)
     GlobalsSetValue(prefix.."run",ticket)
 end
 
+function NHAffinity.livePoints(id)
+    local floor=tonumber(GlobalsGetValue(prefix.."floor_"..id,"0")) or 0
+    return math.floor(math.max(floor,worldFrames(id))/NHAffinity.framesPerPoint)
+end
+
 function NHAffinity.follow(id,elapsed)
     local bound=GlobalsGetValue(prefix.."run","")
     if bound=="" or bound~=GlobalsGetValue(run_key,"") then return 0 end
     local current=worldFrames(id)
     local floor=tonumber(GlobalsGetValue(prefix.."floor_"..id,"0")) or 0
-    if floor>=maximum then return 100 end
+    if floor>=maximum then return NHAffinity.maxPoints end
     local advanced=math.min(maximum,current+elapsed)
     if advanced~=current then GlobalsSetValue(prefix..id,tostring(advanced)) end
     return math.floor(math.max(floor,advanced)/NHAffinity.framesPerPoint)

@@ -1,0 +1,8 @@
+<Entity tags="nh_travel_gate,teleportable_NOT">
+    <LightComponent r="95" g="180" b="231" radius="36" />
+    <SpriteParticleEmitterComponent sprite_file="data/particles/whirl_0$[1-8].png"
+        sprite_centered="1" lifetime="0.8" color.r="0.52" color.g="0.86" color.b="1"
+        color.a="0.85" color_change.a="-0.9" angular_velocity="5" scale.x="1" scale.y="1"
+        emission_interval_min_frames="5" emission_interval_max_frames="5" count_min="1" count_max="1"
+        emissive="1" additive="1" />
+</Entity>

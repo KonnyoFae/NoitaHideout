@@ -1,0 +1,9 @@
+<Entity name="$nh_hideout_shield_fire" tags="noita_hideout_shield_fire,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/shield_fire.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/shield_fire.png" offset_x="8" offset_y="8" />
+        <ItemComponent item_name="$nh_hideout_shield_fire" ui_description="$nh_hideout_shield_fire_desc" ui_sprite="mods/noita_hideout/files/items/shield_fire.png" />
+        <UIInfoComponent name="$nh_hideout_shield_fire" />
+        <AbilityComponent ui_name="$nh_hideout_shield_fire" />
+    </Base>
+</Entity>

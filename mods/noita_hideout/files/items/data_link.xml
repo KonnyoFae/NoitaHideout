@@ -1,0 +1,9 @@
+<Entity name="$nh_hideout_data_link" tags="noita_hideout_data_link,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/remote_terminal.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/remote_terminal.png" offset_x="8" offset_y="8" />
+        <ItemComponent item_name="$nh_hideout_data_link" uses_remaining="20" ui_description="$nh_hideout_data_link_desc" ui_sprite="mods/noita_hideout/files/items/remote_terminal.png" />
+        <UIInfoComponent name="$nh_hideout_data_link" />
+        <AbilityComponent ui_name="$nh_hideout_data_link" />
+    </Base>
+</Entity>

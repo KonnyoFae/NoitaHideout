@@ -1,13 +1,13 @@
 -- Profiles predating typed injectors stored fire doses without a subtype.
-local M={types={},order={}}
+local M={types={},order={},uses=5}
 local root="mods/noita_hideout/files/"
 
-local function define(id,zh,en,essence,cost,workSeconds,seconds,zhEffect,enEffect)
+local function define(id,zh,en,essence,cost,workSeconds,seconds,zhEffect,enEffect,healPercent,timerTicks)
     local filename=id=="fire" and "dose" or "dose_"..id
     local effect=id=="fire" and "stimulant" or "stimulant_"..id
     M.types[id]={id=id,zh=zh,en=en,essence="essence_"..essence,cost=cost,workSeconds=workSeconds,
         seconds=seconds,filename=filename,icon=root.."items/"..filename..".png",effect=effect,
-        tag="noita_hideout_"..effect,zhEffect=zhEffect,enEffect=enEffect}
+        tag="noita_hideout_"..effect,zhEffect=zhEffect,enEffect=enEffect,healPercent=healPercent,timerTicks=timerTicks}
     M.order[#M.order+1]=id
 end
 
@@ -15,13 +15,13 @@ define("fire","耐火激活剂","Fire injector","fire",6,120,60,"60 秒火焰免
 define("lightning","耐电激活剂","Lightning injector","lightning",6,120,60,"60 秒雷电免疫","60 seconds of electricity immunity")
 define("frost","耐冰激活剂","Frost injector","frost",6,120,60,"60 秒冰冻免疫","60 seconds of freeze immunity")
 define("healing","持续治疗激活剂","Regeneration injector","healing",4,120,60,
-    "60 秒内每 2 秒恢复 1 点生命","1 HP every 2 seconds for 60 seconds")
-define("quick_heal","快速治疗针","Quick-heal injector","healing",4,60,0,
-    "立即恢复最多 25 点生命","up to 25 HP immediately")
+    "60 秒内每 2 秒恢复最大生命的 1%","1% of max HP every 2 seconds for 60 seconds",30)
+define("quick_heal","快速治疗针","Quick-heal injector","healing",4,60,5,
+    "5 秒内每 0.2 秒恢复最大生命的 1%，共 25%","1% of max HP every 0.2 seconds for 5 seconds (25% total)",25,25)
 define("healing_2","强化持续治疗激活剂","Advanced regeneration injector","healing",8,150,60,
-    "60 秒内每秒恢复 1 点生命","1 HP per second for 60 seconds")
+    "60 秒内每秒恢复最大生命的 1%","1% of max HP per second for 60 seconds",60)
 define("regen_mana","回春回魔激活剂","Health and mana injector","healing",6,150,60,
-    "60 秒内每 2 秒恢复 1 点生命，同时加快法力回复","faster mana recharge and 1 HP every 2 seconds for 60 seconds")
+    "60 秒内每 2 秒恢复最大生命的 1%，同时加快法力回复","faster mana recharge and 1% of max HP every 2 seconds for 60 seconds",30)
 define("shield","飞弹护盾激活剂","Projectile shield injector","force",6,120,30,
     "30 秒可充能的飞弹护盾","a rechargeable projectile shield for 30 seconds")
 define("haste","加速激活剂","Haste injector","displacement",4,60,60,
@@ -45,8 +45,8 @@ function M.recipe(id)
     local d=M.types[id]
     return {id=id=="fire" and "injector" or "injector_"..id,category="medical",facility="injector",
         zh=d.zh,en=d.en,durationFrames=d.workSeconds*60,inputs={},resources={active_herb=2,[d.essence]=d.cost},
-        item={kind="dose",subtype=id,remaining=3,count=1},
-        noteZh="每支 3 针，每针效果："..d.zhEffect.."。",noteEn="Three uses. Each grants "..d.enEffect.."."}
+        item={kind="dose",subtype=id,remaining=M.uses,count=1},
+        noteZh="每支 5 针，每针效果："..d.zhEffect.."。",noteEn="Five uses. Each grants "..d.enEffect.."."}
 end
 
 -- New effects stay detached until the durability transaction succeeds. Refresh
@@ -60,10 +60,6 @@ function M.use(player,subtype,pay)
         local hp,maximum=ComponentGetValue2(damage,"hp"),ComponentGetValue2(damage,"max_hp")
         if hp<=0 then return nil end
         if hp>=maximum then return nil,"Health is full." end
-        local ok,remaining=pay()
-        if not ok then return nil,remaining end
-        ComponentSetValue2(damage,"hp",math.min(maximum,hp+1)) -- One internal health unit equals 25 displayed HP.
-        return true,remaining
     end
 
     local entity
@@ -76,7 +72,7 @@ function M.use(player,subtype,pay)
         entity=EntityLoad(root..d.effect..".xml",x,y)
         if not entity or entity==0 then return nil,"Could not create the stimulant effect." end
     end
-    local regeneration=d.id=="healing" or d.id=="healing_2" or d.id=="regen_mana"
+    local regeneration=d.healPercent~=nil
     local timer=EntityGetFirstComponentIncludingDisabled(entity,regeneration and "VariableStorageComponent" or "GameEffectComponent")
     if not timer or timer==0 then
         if fresh then EntityKill(entity) end
@@ -87,7 +83,7 @@ function M.use(player,subtype,pay)
         if fresh then EntityKill(entity) end
         return nil,remaining
     end
-    ComponentSetValue2(timer,regeneration and "value_int" or "frames",regeneration and d.seconds or d.seconds*60)
+    ComponentSetValue2(timer,regeneration and "value_int" or "frames",regeneration and (d.timerTicks or d.seconds) or d.seconds*60)
     if fresh then EntityAddChild(player,entity) end
     return true,remaining
 end

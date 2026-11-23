@@ -1,0 +1,5 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/storm/sites/ship_safe.xml">
+        <SpriteComponent image_file="mods/noita_hideout/files/storm/sites/safe_lv1_sprite.xml" />
+    </Base>
+</Entity>

@@ -1,0 +1,6 @@
+<Entity>
+  <Base file="data/entities/projectiles/megalaser_blue.xml">
+    <ProjectileComponent lifetime="18" direction_random_rad="0.01" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/escort_laser_fire.lua" execute_every_n_frame="16" remove_after_executed="1" />
+  </Base>
+</Entity>

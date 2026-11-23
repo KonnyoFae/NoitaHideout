@@ -81,3 +81,16 @@ state=assert(NHStore.load())
 assert(#state.warehouse==0 and state.resources[healing]==cap and not NHStore.salvage(state,near_cap))
 assert(state.resources.essence_high_energy==375 and not state.materials[healing])
 print("Essences: full-card values, real action IDs, stacks, scrap fallback, capacity and atomic save replay passed.")
+
+do
+    local req=deposit(spell("NUKE",0,2))
+    req.mode="quick_essence"
+    local scrap=state.resources.arcane_scrap
+    assert(not NHStore.salvage(state,req) and #state.warehouse==1)
+    flags.card_unlocked_nuke=true
+    local initial=state.resources.essence_high_energy
+    assert(NHStore.salvage(state,req) and state.resources.essence_high_energy==initial+2*NHEssences.values.NUKE)
+    assert(not NHStore.salvage(state,req) and #state.warehouse==0)
+    req=deposit(spell("SPEED",-1));req.mode="quick_essence"
+    assert(not NHStore.salvage(state,req) and #state.warehouse==1 and state.resources.arcane_scrap==scrap)
+end

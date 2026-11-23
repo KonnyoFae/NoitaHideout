@@ -1,0 +1,4 @@
+<Sprite filename="mods/noita_hideout/files/storm/sites/safe_lv2.png" offset_x="24" offset_y="43" default_animation="closed">
+    <RectAnimation name="closed" pos_x="0" pos_y="0" frame_width="48" frame_height="48" frame_count="1" frames_per_row="1" frame_wait="1" loop="1" />
+    <RectAnimation name="open" pos_x="48" pos_y="0" frame_width="48" frame_height="48" frame_count="1" frames_per_row="1" frame_wait="1" loop="1" />
+</Sprite>

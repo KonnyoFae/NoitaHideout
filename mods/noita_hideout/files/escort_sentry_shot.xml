@@ -1,0 +1,7 @@
+<Entity>
+  <Base file="data/entities/projectiles/sentryshot.xml">
+    <HomingComponent target_tag="enemy" />
+    <ProjectileComponent friendly_fire="0" />
+    <HitEffectComponent value_string="mods/noita_hideout/files/escort_sentry_mark.xml" />
+  </Base>
+</Entity>

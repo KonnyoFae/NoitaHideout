@@ -4,34 +4,9 @@ local root="mods/noita_hideout/files/"
 dofile_once(root.."companions.lua")
 dofile_once(root.."affinity.lua")
 local interval=6
+local durationFrames=15*60*60
 
-local function fireAtHostile(player,x,y,damage)
-    local best,tx,ty=105^2,nil,nil
-    for _,target in ipairs(EntityGetInRadiusWithTag(x,y,105,"homing_target") or {}) do
-        if target~=player and EntityGetFirstComponentIncludingDisabled(target,"GenomeDataComponent")
-            and EntityGetHerdRelation(player,target)<40 and GameGetGameEffectCount(target,"CHARM")==0 then
-            local ex,ey=EntityGetFirstHitboxCenter(target)
-            local distance=ex and (ex-x)^2+(ey-y)^2
-            if distance and distance>=1 and distance<best and not RaytracePlatforms(x,y,ex,ey) then
-                best,tx,ty=distance,ex,ey
-            end
-        end
-    end
-    if not tx then return end
-    local bolt=EntityLoad(root.."companions/bolt.xml",x,y)
-    if not bolt or bolt==0 then return end
-    local shot=EntityGetFirstComponentIncludingDisabled(bolt,"ProjectileComponent")
-    local velocity=EntityGetFirstComponentIncludingDisabled(bolt,"VelocityComponent")
-    if not shot or not velocity then EntityKill(bolt); return end
-    local distance=math.sqrt(best)
-    local vx,vy=(tx-x)*270/distance,(ty-y)*270/distance
-    GameShootProjectile(player,x,y,tx,ty,bolt,false)
-    ComponentSetValue2(shot,"mWhoShot",player)
-    local genome=EntityGetFirstComponentIncludingDisabled(player,"GenomeDataComponent")
-    if genome then ComponentSetValue2(shot,"mShooterHerdId",ComponentGetValue2(genome,"herd_id")) end
-    ComponentSetValue2(shot,"damage",damage)
-    ComponentSetValue2(velocity,"mVelocity",vx,vy)
-end
+local combat=dofile(root.."companions/combat.lua")
 
 local function refreshAura(player,tag,path,x,y)
     local aura=(EntityGetAllChildren(player,tag) or {})[1]
@@ -47,52 +22,55 @@ local function refreshAura(player,tag,path,x,y)
     return aura
 end
 
-local function support(player,id,spec,bonus,x,y,age)
-    if spec.effect then
-        refreshAura(player,"nh_companion_"..spec.effect,"data/entities/misc/"..spec.effect..".xml",x,y)
-    end
-    if id=="flower_fairy" or spec.bonus=="regeneration" then
-        local seconds=id=="flower_fairy" and bonus.fairySeconds or bonus.regenSeconds
-        if seconds==0 or age%(seconds*60)~=0 then return end
-        local model=EntityGetFirstComponentIncludingDisabled(player,"DamageModelComponent")
-        if model then
-            local hp,maximum=ComponentGetValue2(model,"hp"),ComponentGetValue2(model,"max_hp")
-            if hp>0 and hp<maximum then ComponentSetValue2(model,"hp",math.min(hp+0.04,maximum)) end
-        end
-    elseif spec.bonus=="shield" and bonus.shieldRecharge>0 then
-        local aura=refreshAura(player,"nh_companion_shield",root.."companions/shield.xml",x,y)
-        local shield=aura and EntityGetFirstComponentIncludingDisabled(aura,"EnergyShieldComponent")
-        if shield then ComponentSetValue2(shield,"recharge_speed",bonus.shieldRecharge) end
-    elseif spec.bonus=="flight" and bonus.flightPercent>0 and age%60==0 then
-        local character=EntityGetFirstComponentIncludingDisabled(player,"CharacterDataComponent")
-        if character then
-            local fuel,maximum=ComponentGetValue2(character,"mFlyingTimeLeft"),ComponentGetValue2(character,"fly_time_max")
-            if fuel<maximum then ComponentSetValue2(character,"mFlyingTimeLeft",math.min(maximum,fuel+maximum*bonus.flightPercent/100)) end
+local function pulseField(player,spec,bonus,x,y)
+    for _,target in ipairs(EntityGetInRadiusWithTag(x,y,spec.radius,"mortal") or {}) do
+        if combat.hostile(player,target) then
+            EntityInflictDamage(target,bonus.fieldDamage/25,"DAMAGE_MELEE","$nh_companion_field","NONE",0,0,player,x,y)
         end
     end
 end
 
-local function travel(pet,spec,x,y,nearby,age,seconds)
-    local trip=EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_trip")
-    local previous=EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_position")
-    local gifts=EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_gifts")
-    if ComponentGetValue2(gifts,"value_float")>=2 then return end
-    local dx=x-ComponentGetValue2(previous,"value_int")
-    local dy=y-ComponentGetValue2(previous,"value_float")
-    ComponentSetValue2(previous,"value_int",math.floor(x+0.5))
-    ComponentSetValue2(previous,"value_float",y)
-    local distance=dx*dx+dy*dy
-    if age==interval or not nearby or distance<1 or distance>48^2 then return end
-    local walked=ComponentGetValue2(trip,"value_int")+interval
-    if walked<seconds*60 then ComponentSetValue2(trip,"value_int",walked); return end
-    ComponentSetValue2(trip,"value_int",0)
-    local roll=ComponentGetValue2(gifts,"value_int")*48271%2147483647
-    ComponentSetValue2(gifts,"value_int",roll)
-    if roll%4~=0 then return end
-    local gift=EntityLoad(root.."items/"..spec.gift..".xml",x,y-2)
-    if gift and gift~=0 then
-        ComponentSetValue2(gifts,"value_float",ComponentGetValue2(gifts,"value_float")+1)
-        GamePrint(GameTextGetTranslatedOrNot("$nh_companion_gift").." "..GameTextGetTranslatedOrNot("$nh_hideout_"..spec.gift))
+local function support(player,spec,bonus,x,y,pulse)
+    NHCompanions.applyModifier(player,spec,bonus)
+    if spec.effect then
+        refreshAura(player,"nh_companion_"..spec.effect,"data/entities/misc/"..spec.effect..".xml",x,y)
+    end
+    if spec.shield and bonus.shieldRecharge>0 then
+        local aura=refreshAura(player,"nh_companion_shield",root.."companions/shield.xml",x,y)
+        local shield=aura and EntityGetFirstComponentIncludingDisabled(aura,"EnergyShieldComponent")
+        if shield then ComponentSetValue2(shield,"recharge_speed",bonus.shieldRecharge) end
+    end
+    if spec.role=="melee" then
+        refreshAura(player,"nh_companion_knockback","data/entities/misc/effect_knockback_immunity.xml",x,y)
+        local aura=refreshAura(player,"nh_companion_field",root.."companions/field.xml",x,y)
+        local sprite=aura and EntityGetFirstComponentIncludingDisabled(aura,"SpriteComponent")
+        if sprite then
+            ComponentSetValue2(sprite,"special_scale_x",spec.radius/16)
+            ComponentSetValue2(sprite,"special_scale_y",spec.radius/16)
+        end
+    elseif spec.role=="support" then
+        refreshAura(player,"nh_companion_mana","data/entities/misc/effect_mana_regeneration.xml",x,y)
+        if not pulse then return end
+        local model=EntityGetFirstComponentIncludingDisabled(player,"DamageModelComponent")
+        if model then
+            local hp,maximum=ComponentGetValue2(model,"hp"),ComponentGetValue2(model,"max_hp")
+            if hp>0 and hp<maximum then ComponentSetValue2(model,"hp",math.min(maximum,hp+maximum*bonus.heal/100)) end
+        end
+        for _,item in ipairs(GameGetAllInventoryItems(player) or {}) do
+            if EntityHasTag(item,"wand") and not EntityHasTag(item,"nh_firearm") then
+                local ability=EntityGetFirstComponentIncludingDisabled(item,"AbilityComponent")
+                if ability then
+                    local mana,cap=ComponentGetValue2(ability,"mana"),ComponentGetValue2(ability,"mana_max")
+                    if mana<cap then ComponentSetValue2(ability,"mana",math.min(cap,mana+bonus.mana)) end
+                end
+            end
+        end
+    elseif pulse then
+        local character=EntityGetFirstComponentIncludingDisabled(player,"CharacterDataComponent")
+        if character then
+            local fuel,maximum=ComponentGetValue2(character,"mFlyingTimeLeft"),ComponentGetValue2(character,"fly_time_max")
+            if fuel<maximum then ComponentSetValue2(character,"mFlyingTimeLeft",math.min(maximum,fuel+maximum*(spec.fuel+bonus.fuel)/100)) end
+        end
     end
 end
 
@@ -104,7 +82,11 @@ function NHCompanions.update(pet)
     local id=ComponentGetValue2(clock,"value_string")
     local spec=NHCompanions.species[id]
     local age=ComponentGetValue2(clock,"value_int")+interval
-    if age>10800 then NHCompanions.clearSupport(player); EntityKill(pet); return end
+    if age>durationFrames then NHCompanions.clearSupport(player); EntityKill(pet); return end
+    if not EntityHasTag(pet,"nh_companion_roles") then
+        NHCompanions.clearSupport(player)
+        EntityAddTag(pet,"nh_companion_roles")
+    end
     ComponentSetValue2(clock,"value_int",age)
     local bonus=NHCompanions.bonuses[NHAffinity.tier(NHAffinity.follow(id,interval))]
     local x,y=EntityGetTransform(player)
@@ -121,7 +103,16 @@ function NHCompanions.update(pet)
         scaleX=toPlayer>0 and math.abs(scaleX) or -math.abs(scaleX)
     end
     EntitySetTransform(pet,px,py,0,scaleX,scaleY)
-    if age%60==interval then fireAtHostile(player,px,py,spec.damage) end
-    if age%60==0 or age==interval then support(player,id,spec,bonus,x,y,age) end
-    travel(pet,spec,x,y,distance<=45^2,age,bonus.giftSeconds)
+    combat.update(id,pet,player,age,x,y,px,py)
+    if age%60==0 or age==interval then
+        NHCompanions.immunities.apply(player,id)
+        support(player,spec,bonus,x,y,age%60==0)
+    end
+    if spec.role=="melee" and age%30==0 then pulseField(player,spec,bonus,x,y) end
+    if age%(NHCompanions.giftMinutes(spec)*3600)==0 then
+        -- The main Lua state owns the secure case. A queued gift survives
+        -- companion expiry or replacement before the controller settles it.
+        EntityAddComponent2(player,"VariableStorageComponent",{_tags="nh_companion_gift",value_string=id,
+            value_float=bonus.giftLevel,value_int=GameGetFrameNum()})
+    end
 end

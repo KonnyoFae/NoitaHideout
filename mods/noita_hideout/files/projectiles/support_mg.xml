@@ -1,0 +1,15 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/projectiles/bullet_base.xml">
+        <VelocityComponent terminal_velocity="1080" />
+        <ProjectileComponent speed_min="1080" speed_max="1080" lifetime="36" damage="1.2"
+            muzzle_flash_file=""
+            shoot_light_flash_radius="42" shoot_light_flash_r="255" shoot_light_flash_g="178" shoot_light_flash_b="70"
+            camera_shake_when_shot="0.65" create_shell_casing="1">
+            <config_explosion material_sparks_count_min="3" material_sparks_count_max="6" />
+        </ProjectileComponent>
+    </Base>
+    <ParticleEmitterComponent emitted_material_name="spark" count_min="1" count_max="1"
+        is_trail="1" trail_gap="2.5" lifetime_min="0.04" lifetime_max="0.08" fade_based_on_lifetime="1"
+        create_real_particles="0" emit_cosmetic_particles="1" emission_interval_min_frames="1" emission_interval_max_frames="1" />
+    <AudioComponent file="data/audio/Desktop/projectiles.bank" event_root="projectiles/bullet_sniper_enemy" />
+</Entity>

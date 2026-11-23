@@ -1,0 +1,12 @@
+# Local Noita test installations, saves and crash reports
+/.enemy-*/
+/.pixel-scenes-qa-*/
+/.plane-qa-*/
+/.ship-plane-probe-*/
+/.summon-qa-*/
+/.vanilla-review-*/
+/.vanilla-rollback-qa-*/
+
+# Local captures and reference images
+/work/
+/resources/MinaReference/

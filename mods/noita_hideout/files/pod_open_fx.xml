@@ -1,0 +1,5 @@
+<Entity>
+    <SpriteComponent image_file="data/particles/explosion_016.xml" emissive="1" additive="1" />
+    <LightComponent r="235" g="175" b="90" radius="14" />
+    <LifetimeComponent lifetime="12" />
+</Entity>

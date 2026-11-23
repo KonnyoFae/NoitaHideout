@@ -1,0 +1,10 @@
+<Entity name="$nh_hideout_cheese" tags="noita_hideout_cheese,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/cheese.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/cheese.png" offset_x="7" offset_y="4" />
+        <ItemComponent uses_remaining="2" item_name="$nh_hideout_cheese" ui_description="$nh_hideout_cheese_desc"
+            ui_sprite="mods/noita_hideout/files/items/cheese.png" />
+        <UIInfoComponent name="$nh_hideout_cheese" />
+        <AbilityComponent ui_name="$nh_hideout_cheese" />
+    </Base>
+</Entity>

@@ -44,9 +44,11 @@ assert(not NHStore.freeSlot(s,"warehouse",49,"spell"))
 assert(not NHStore.freeSlot(s,"warehouse",49,"pouch") and buy("warehouse_equipment"))
 assert(NHStore.freeSlot(s,"warehouse",72,"pouch")==72 and not NHStore.freeSlot(s,"warehouse",49,"dose"))
 assert(NHStore.level(s,"warehouse_containers")==0 and not buy("support"))
-assert(quote("support").planned and not quote("support").canBuy)
+assert(not quote("support").planned and not quote("support").canBuy)
 assert(not buy("perk_pack") and s.materials.slime==850)
 s.resources.arcane_scrap=1
+assert(not buy("perk_pack") and NHRelics.capacity(s)==1)
+NHPerks={enabled=true} -- exercise the dormant purchase path
 assert(buy("perk_pack") and s.resources.arcane_scrap==nil and quote("perk_pack").maxed)
 assert(buy("perk_slots") and NHStore.level(s,"perk_slots")==1)
 assert(NHStore.commit(s))
@@ -144,3 +146,37 @@ nest=quote("dragon_nest")
 assert(nest.canBuy and nest.costs[2].amount==200 and nest.costs[2].available==200)
 assert(buy("dragon_nest",1) and not s.materials.gunpowder and s.materials.gunpowder_explosive==500)
 print("Progression costs, stale confirmations, independent capacities, order reservations and legacy stock passed.")
+
+-- Existing six-slot cases can continue through six more paid ranks to 12 slots.
+do
+    settings,flags={},{}
+    fail=false
+    s=assert(NHStore.load())
+    NHStore.newRun(s)
+    s.materials={sand=13750,slime=8250}
+    for rank=0,3 do assert(buy("safe",rank)) end
+    assert(s.safeCapacity==6 and NHStore.level(s,"safe")==4)
+    s.safe[#s.safe+1]={id=s.nextItemId,slot=6,item={kind="medkit",remaining=8,count=1}}
+    s.nextItemId=s.nextItemId+1
+    assert(NHStore.commit(s))
+    s=assert(NHStore.load())
+    assert(not quote("safe").maxed and not quote("safe").canBuy)
+    assert(not buy("safe",4) and s.safeCapacity==6 and s.materials.sand==11250)
+    s.resources.container_scrap=21
+    assert(NHStore.commit(s))
+    for rank=4,9 do
+        local offer=quote("safe")
+        assert(offer.next==(rank+3).." slots" and offer.costs[3].key=="container_scrap" and offer.costs[3].amount==rank-3)
+        assert(buy("safe",rank) and not buy("safe",rank) and NHStore.commit(s))
+        s=assert(NHStore.load())
+        assert(s.safeCapacity==rank+3 and s.safe[1].slot==6 and s.safe[1].item.remaining==8)
+    end
+    assert(s.safeCapacity==12 and quote("safe").maxed and not quote("safe").canBuy and not buy("safe",10))
+    assert(not next(s.materials) and not s.resources.container_scrap)
+    local used=NHStore.freeSlot(s,"safe",12,"medkit")
+    assert(used==12 and not NHStore.freeSlot(s,"safe",13,"medkit"))
+    -- Preserve unusually enlarged legacy cases without offering a 13th slot.
+    s.levels.safe=0
+    assert(quote("safe").maxed and not buy("safe",0))
+end
+print("Secure case: six-slot save resumes to 12, exact 1-6 scrap costs, preserved contents and hard purchase cap passed.")

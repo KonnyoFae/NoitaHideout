@@ -1,0 +1,5 @@
+<Entity>
+  <Base file="data/entities/projectiles/megalaser_blue_beam.xml">
+    <ProjectileComponent damage="0.32" />
+  </Base>
+</Entity>

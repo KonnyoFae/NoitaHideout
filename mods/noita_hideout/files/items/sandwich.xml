@@ -1,0 +1,10 @@
+<Entity name="$nh_hideout_sandwich" tags="noita_hideout_sandwich,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/sandwich.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/sandwich.png" offset_x="7" offset_y="4" />
+        <ItemComponent uses_remaining="5" item_name="$nh_hideout_sandwich" ui_description="$nh_hideout_sandwich_desc"
+            ui_sprite="mods/noita_hideout/files/items/sandwich.png" />
+        <UIInfoComponent name="$nh_hideout_sandwich" />
+        <AbilityComponent ui_name="$nh_hideout_sandwich" />
+    </Base>
+</Entity>

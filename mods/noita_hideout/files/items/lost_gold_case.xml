@@ -1,0 +1,8 @@
+<Entity name="$nh_lost_gold_case" tags="mortal,hittable">
+    <SpriteComponent image_file="data/props_gfx/box_small.png" offset_x="5" offset_y="5" />
+    <UIInfoComponent name="$nh_lost_gold_case" />
+    <HitboxComponent aabb_min_x="-6" aabb_max_x="6" aabb_min_y="-6" aabb_max_y="6" />
+    <DamageModelComponent hp="0.2" max_hp="0.2" air_needed="0" falling_damages="0" wait_for_kill_flag_on_death="1" drop_items_on_death="0" blood_material="" />
+    <VariableStorageComponent _tags="nh_lost_gold" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/lost_gold_case.lua" execute_every_n_frame="1" />
+</Entity>

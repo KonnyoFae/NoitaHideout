@@ -1,0 +1,10 @@
+<Entity name="$nh_hideout_roast_meat" tags="noita_hideout_roast_meat,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/roast_meat.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/roast_meat.png" offset_x="7" offset_y="4" />
+        <ItemComponent uses_remaining="2" item_name="$nh_hideout_roast_meat" ui_description="$nh_hideout_roast_meat_desc"
+            ui_sprite="mods/noita_hideout/files/items/roast_meat.png" />
+        <UIInfoComponent name="$nh_hideout_roast_meat" />
+        <AbilityComponent ui_name="$nh_hideout_roast_meat" />
+    </Base>
+</Entity>

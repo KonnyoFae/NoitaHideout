@@ -1,0 +1,11 @@
+<Entity>
+    <!-- Native plasma beam cutter settings from orb_laseremitter_cutter.xml.
+         A stationary, short-lived emitter keeps the cut facing into the impact. -->
+    <LifetimeComponent lifetime="12" />
+    <LaserEmitterComponent is_emitting="1">
+        <laser damage_to_entities="0.09" damage_to_cells="100000" max_cell_durability_to_destroy="14"
+            root_entity_is_responsible_for_damage="1" max_length="64" beam_radius="2.5"
+            hit_particle_chance="40" beam_particle_chance="90" beam_particle_type="spark_green" />
+    </LaserEmitterComponent>
+    <LuaComponent execute_every_n_frame="3" script_source_file="mods/noita_hideout/files/projectiles/cutter_shields.lua" />
+</Entity>

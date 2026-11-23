@@ -1,0 +1,4 @@
+<Entity>
+    <InheritTransformComponent />
+    <GameEffectComponent effect="ELECTROCUTION" frames="15" disable_movement="1" />
+</Entity>

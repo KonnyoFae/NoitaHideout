@@ -1,0 +1,5 @@
+<Entity tags="nh_enemy_radar">
+    <InheritTransformComponent only_position="1" />
+    <LifetimeComponent lifetime="3000" />
+    <LuaComponent script_source_file="data/scripts/perks/radar.lua" execute_every_n_frame="1" />
+</Entity>

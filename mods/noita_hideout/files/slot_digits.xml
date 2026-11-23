@@ -1,0 +1,14 @@
+<Sprite filename="mods/noita_hideout/files/slot_digits.png" offset_x="0" offset_y="0" default_animation="0">
+    <RectAnimation name="0" pos_x="0" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="1" pos_x="7" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="2" pos_x="14" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="3" pos_x="21" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="4" pos_x="28" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="5" pos_x="35" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="6" pos_x="42" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="7" pos_x="49" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="8" pos_x="56" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="9" pos_x="63" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="slash" pos_x="70" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+    <RectAnimation name="times" pos_x="77" pos_y="0" frame_count="1" frame_width="6" frame_height="10" frame_wait="1" frames_per_row="1" loop="1" />
+</Sprite>

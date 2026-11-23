@@ -9,6 +9,11 @@ function AddFlagPersistent(k) flags[k]=true end
 dofile("mods/noita_hideout/files/store.lua")
 dofile("mods/noita_hideout/files/potion.lua")
 
+-- The entity codec has its own integration spec. Simulate its returned snapshot here.
+NHWand={generateDiscovery=function(seed)
+    return {kind="wand",template=("data/entities/items/wand_level_%02d.xml"):format(1+seed%3),
+        ability={mana_max=seed},cards={{id="LIGHT_BULLET"},{id="SPITTER"}}}
+end}
 local function load() return assert(NHStore.load()) end
 local recipes={}
 for _,r in ipairs(NHStore.recipes) do recipes[r.id]=r end
@@ -27,11 +32,11 @@ NHDragonLoot.award(other,1)
 assert(other.dragonLoot.seed==first.dragonLoot.seed)
 
 local s=load()
-local totals={spell=0,containers=0,supplies=0,card=0,dragon=0}
+local totals={spell=0,containers=0,bag=0,box=0,wand=0,tarot=0,card=0,dragon=0}
 local seen,spellSeed,spellTemplate={}
 -- The first 100 seeds permute every percentile exactly once. Continue to
 -- inspect every variant in the pool without relying on random test outcomes.
-for seed=1,1500 do
+for seed=1,10000 do
     s.warehouse={}
     s.dragonLoot={seed=seed,pending={}}
     local cards=NHDragonLoot.award(s,1)
@@ -40,8 +45,14 @@ for seed=1,1500 do
     local category=NHStore.category(item.kind)
     local key
     if item.kind=="summon_card" then
-        assert(#cards==1 and cards[1]==item.species and item.remaining==80 and NHCompanions.validCard(item))
-        category=item.species=="dragon" and "dragon" or "card"
+        assert(item.remaining==NHCompanions.cardCapacity(item.species) and NHCompanions.validCard(item))
+        if NHTarot.types[item.species] then
+            assert(#cards==1 and cards[1]==item.species and NHCompanions.rewardText(cards,"en",s):find("Cards found",1,true))
+            category="tarot"
+        else
+            assert(#cards==1 and cards[1]==item.species)
+            category=item.species=="dragon" and "dragon" or "card"
+        end
         key="card_"..item.species
     else
         assert(#cards==0)
@@ -53,33 +64,39 @@ for seed=1,1500 do
             if item.card.id=="BOMB" then spellSeed,spellTemplate=seed,template end
         elseif item.kind=="potion" then
             key=next(item.materials)
-            assert(NHPotion.fillLevel(item)==500 and item.capacity==1000 and not next(item.materials,key))
+            local capacity=(key=="sand" or key=="gunpowder") and 1500 or 1000
+            assert(NHPotion.fillLevel(item)==capacity and item.capacity==capacity and not next(item.materials,key))
             assert(NHPotion.dockSlot(item)==((key=="sand" or key=="gunpowder") and 2 or 1))
+        elseif item.kind=="wand" then
+            key=item.template
+            assert(not item.discovery and #item.cards==2)
         else
             key=item.kind
-            assert((item.count or 1)==1 and item.icon and item.name)
-            if NHMedkits.types[key] then assert(item.remaining==NHMedkits.types[key].uses) end
+            assert(NHLootBags.types[key] and item.count==1 and item.icon)
+            category=NHLootBags.types[key].loot and "box" or "bag"
         end
     end
     seen[key]=true
     if seed<=100 then totals[category]=totals[category]+1 end
 end
-assert(totals.spell==40 and totals.containers==28 and totals.supplies==24 and totals.card==5 and totals.dragon==3)
+assert(totals.spell==10 and totals.containers==32 and totals.bag==20 and totals.box==15 and totals.wand==5 and totals.tarot==10 and totals.card==5 and totals.dragon==3)
 for _,species in ipairs(NHCompanions.order) do assert(seen["card_"..species],species) end
 for _,key in ipairs({"water","slime",
-    "magic_liquid_unstable_teleportation","sand","gunpowder","medkit","bandage","bread","sugar_cube","metal_knife","grenade"}) do
+    "magic_liquid_unstable_teleportation","sand","gunpowder","travel_satchel","travel_pack","loot_case","supply_pack","improved_supply_pack","advanced_supply_pack","card_tarot_tower"}) do
     assert(seen[key],key)
 end
 -- The old slime-flask key and the new slime-maiden key must survive a
 -- delayed delivery in the same snapshot and use their separate warehouses.
 s=load()
-s.dragonLoot={seed=100,pending={slime=1,card_slime=1}}
+s.dragonLoot={seed=100,pending={slime=1,sand=1,card_slime=1}}
 assert(NHDragonLoot.pendingCards(s)==1)
 assert(NHStore.commit(s))
 s=load()
 local flask=s.warehouse[assert(NHStore.slotIndex(s,"warehouse",1,"potion"))].item
 local slimeCard=s.warehouse[assert(NHStore.slotIndex(s,"warehouse",1,"summon_card"))].item
-assert(flask.materials.slime==500 and slimeCard.species=="slime" and slimeCard.remaining==80)
+assert(flask.materials.slime==1000 and slimeCard.species=="slime" and slimeCard.remaining==80)
+local bag=s.warehouse[assert(NHStore.slotIndex(s,"warehouse",2,"potion"))].item
+assert(bag.variant=="powder_stash" and bag.capacity==1500 and bag.materials.sand==1500)
 -- The rest of this suite starts with an empty profile.
 settings,flags={},{}
 
@@ -136,3 +153,112 @@ s=load()
 assert(cardAt(collection).species=="bee" and NHDragonLoot.pendingCards(s)==0 and s.nextItemId==beforeId+1)
 assert(NHStore.commit(s) and load().nextItemId==s.nextItemId)
 print("Dragon nest: mutually exclusive loot, native records, reservations, full storage, racy commits and card delivery passed.")
+
+-- Expand beyond the original eight, respect unlocks, and retain earned pending rewards.
+do
+    local ordinary,expected=0,0
+    local extraSeen={}
+    for _,r in ipairs(NHStore.recipes) do
+        if r.category=="spell" then
+            expected=expected+1
+            if not r.unlockFlag then ordinary=ordinary+1 end
+        end
+    end
+    assert(expected==158 and ordinary>100)
+    local draft=load()
+    for seed=1,25000 do
+        draft.warehouse={}
+        draft.dragonLoot={seed=seed,pending={}}
+        NHDragonLoot.award(draft,1)
+        local item=draft.warehouse[1].item
+        if item.kind=="spell" then
+            local r=assert(recipes["spell_"..item.card.id])
+            assert(not r.unlockFlag or HasFlagPersistent(r.unlockFlag))
+            extraSeen[item.card.id]=true
+        end
+    end
+    local count=0
+    for _ in pairs(extraSeen) do count=count+1 end
+    assert(count==ordinary and extraSeen.HEAL_BULLET and extraSeen.BLACK_HOLE and extraSeen.TELEPORT_PROJECTILE and extraSeen.REGENERATION_FIELD)
+    assert(not extraSeen.NUKE and not extraSeen.CLOUD_THUNDER)
+    for _,r in ipairs(NHStore.recipes) do if r.unlockFlag then flags[r.unlockFlag]=true end end
+    local all={}
+    for seed=1,25000 do
+        draft.warehouse={}
+        draft.dragonLoot={seed=seed,pending={}}
+        NHDragonLoot.award(draft,1)
+        local item=draft.warehouse[1].item
+        if item.kind=="spell" then all[item.card.id]=true end
+    end
+    count=0
+    for _ in pairs(all) do count=count+1 end
+    assert(count==expected and all.NUKE and all.CLOUD_THUNDER)
+    local draft=load()
+    draft.warehouse={}
+    draft.dragonLoot={seed=17,pending={spell_NUKE=1,spell_HEAL_BULLET=1,spell_DISC_BULLET=1}}
+    flags.card_unlocked_nuke=nil
+    assert(NHStore.commit(draft))
+    draft=load()
+    local cards={}
+    for _,row in ipairs(draft.warehouse) do if row.item.kind=="spell" then cards[row.item.card.id]=row.item.card.item.uses_remaining end end
+    assert(cards.NUKE==1 and cards.HEAL_BULLET==20 and cards.DISC_BULLET==-1 and NHDragonLoot.pendingCount(draft)==0)
+    print("Dragon spell diversity: "..ordinary.." default and "..expected.." fully unlocked spells; old/new pending rewards keep exact full charges.")
+end
+
+do
+    local draft=load()
+    draft.warehouse={}
+    local function stock(item,slot)
+        table.insert(draft.warehouse,{id=draft.nextItemId,slot=slot,item=item})
+        draft.nextItemId=draft.nextItemId+1
+    end
+    stock(NHLootBags.item("travel_pack",5),1)
+    for i=2,NHStore.warehouseCapacity(draft,NHStore.category("travel_pack")) do stock(NHLootBags.item("loot_case",1),i) end
+    draft.dragonLoot={seed=2,pending={travel_pack=8,advanced_supply_pack=2,medical=1}}
+    local original=draft.warehouse[1]
+    assert(NHStore.commit(draft))
+    assert(original.item.count==5 and draft.warehouse[1].item.count==13 and draft.dragonLoot.pending.advanced_supply_pack==2)
+    table.remove(draft.warehouse,2)
+    assert(NHStore.commit(draft))
+    assert(not draft.dragonLoot.pending.advanced_supply_pack and draft.dragonLoot.pending.medical==1)
+    table.remove(draft.warehouse,2)
+    assert(NHStore.commit(draft))
+    assert(not next(draft.dragonLoot.pending) and draft.warehouse[#draft.warehouse].item.kind=="medkit")
+end
+
+do
+    local draft=load()
+    draft.warehouse={}
+    local capacity=NHStore.warehouseCapacity(draft,"wand")
+    local before=7001
+    for slot=1,capacity do
+        draft.warehouse[slot]={slot=slot,id=draft.nextItemId,item=NHDragonLoot.wandItem("nest_wand_010")}
+        draft.nextItemId=draft.nextItemId+1
+    end
+    draft.dragonLoot={seed=100,wandSeed=before,pending={random_wand=2,nest_wand_016=1}}
+    assert(NHStore.commit(draft))
+    draft=load()
+    assert(draft.dragonLoot.wandSeed==before and NHDragonLoot.pendingCount(draft)==3)
+    table.remove(draft.warehouse,1)
+    local generator=NHWand.generateDiscovery
+    NHWand.generateDiscovery=function() return nil,"missing entity" end
+    -- The old fixed wand can still be delivered when generation fails.
+    assert(NHStore.commit(draft))
+    draft=load()
+    assert(draft.dragonLoot.pending.random_wand==2 and draft.dragonLoot.wandSeed==before)
+    assert(draft.warehouse[#draft.warehouse].item.discovery=="nest_wand_016")
+    NHWand.generateDiscovery=generator
+    table.remove(draft.warehouse,1)
+    failHead=true
+    assert(not NHStore.commit(draft) and draft.dragonLoot.wandSeed==before)
+    failHead=false
+    assert(NHStore.commit(draft))
+    draft=load()
+    assert(draft.warehouse[#draft.warehouse].item.ability.mana_max==before and draft.dragonLoot.pending.random_wand==1)
+    local nextSeed=draft.dragonLoot.wandSeed
+    assert(nextSeed~=before)
+    table.remove(draft.warehouse,1)
+    assert(NHStore.commit(draft))
+    draft=load()
+    assert(not next(draft.dragonLoot.pending) and draft.warehouse[#draft.warehouse].item.ability.mana_max==nextSeed)
+end

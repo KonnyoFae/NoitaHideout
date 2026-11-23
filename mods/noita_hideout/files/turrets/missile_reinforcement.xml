@@ -1,0 +1,7 @@
+<Entity name="$nh_reinforcement_missile_turret" tags="nh_deployed_turret,nh_missile_turret,nh_terrain_mount">
+    <Base file="mods/noita_hideout/files/turrets/emplacement_base.xml">
+        <DamageModelComponent hp="24" max_hp="24" />
+        <HitboxComponent aabb_min_x="-9" aabb_max_x="9" aabb_min_y="-20" aabb_max_y="4" />
+    </Base>
+    <VariableStorageComponent _tags="nh_turret_ammo" value_int="120" value_float="120" />
+</Entity>

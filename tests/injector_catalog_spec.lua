@@ -62,31 +62,40 @@ for _,id in ipairs(injectors.order) do
     local item=read(base.."items/"..d.filename..".xml")
     assert(item:find('ui_sprite="'..d.icon..'"',1,true) and item:find("noita_hideout_dose,",1,true),id)
     assert(read(d.icon):sub(1,8)=="\137PNG\r\n\26\n")
-    if id~="quick_heal" then
-        local ok,reason=injectors.use(player,id,reject)
-        assert(not ok and reason=="rejected" and not active(id) and not entities[#entities].alive,id)
-        local previous=paid
-        ok,reason=injectors.use(player,id,pay)
-        assert(ok and reason==2 and paid==previous+1,id)
-        local effect=assert(active(id))
-        local timer=EntityGetFirstComponentIncludingDisabled(effect,"VariableStorageComponent")
-        local field=timer and "value_int" or "frames"
-        timer=timer or EntityGetFirstComponentIncludingDisabled(effect,"GameEffectComponent")
-        local full=field=="frames" and d.seconds*60 or d.seconds
-        assert(timer[field]==full,id)
-        if native[id] then assert(timer.effect==native[id]) end
-        timer[field]=1
-        assert(not injectors.use(player,id,reject) and timer[field]==1,id)
-        assert(injectors.use(player,id,pay) and timer[field]==full and paid==previous+2,id)
-        assert(#EntityGetAllChildren(player,d.tag)==1 and active(id)==effect,id)
-    end
+    local ok,reason=injectors.use(player,id,reject)
+    assert(not ok and reason=="rejected" and not active(id) and not entities[#entities].alive,id)
+    local previous=paid
+    ok,reason=injectors.use(player,id,pay)
+    assert(ok and reason==2 and paid==previous+1,id)
+    local effect=assert(active(id))
+    local timer=EntityGetFirstComponentIncludingDisabled(effect,"VariableStorageComponent")
+    local field=timer and "value_int" or "frames"
+    timer=timer or EntityGetFirstComponentIncludingDisabled(effect,"GameEffectComponent")
+    local full=field=="frames" and d.seconds*60 or (d.timerTicks or d.seconds)
+    assert(timer[field]==full,id)
+    if native[id] then assert(timer.effect==native[id]) end
+    timer[field]=1
+    assert(not injectors.use(player,id,reject) and timer[field]==1,id)
+    assert(injectors.use(player,id,pay) and timer[field]==full and paid==previous+2,id)
+    assert(#EntityGetAllChildren(player,d.tag)==1 and active(id)==effect,id)
 end
 local previous=paid
-assert(not injectors.use(player,"quick_heal",reject) and damage.hp==1)
-assert(injectors.use(player,"quick_heal",pay) and damage.hp==2)
-damage.hp=4.8
-assert(injectors.use(player,"quick_heal",pay) and damage.hp==5)
-assert(not injectors.use(player,"quick_heal",pay) and paid==previous+2)
+updating=assert(active("quick_heal"))
+local pulse=assert(loadfile(base.."bread_regeneration.lua"))
+assert(damage.hp==1)
+pulse()
+assert(math.abs(damage.hp-1.05)<1e-8)
+damage.max_hp=40
+assert(injectors.use(player,"quick_heal",pay) and active("quick_heal")==updating)
+for i=1,25 do pulse() end
+assert(math.abs(damage.hp-11.05)<1e-8 and not active("quick_heal"))
+damage.hp=39.9
+assert(injectors.use(player,"quick_heal",pay))
+updating=assert(active("quick_heal")); pulse()
+assert(damage.hp==40 and not injectors.use(player,"quick_heal",pay) and paid==previous+2)
+damage.hp=0
+pulse()
+assert(damage.hp==0 and not injectors.use(player,"quick_heal",pay) and paid==previous+2)
 local mana=EntityGetFirstComponentIncludingDisabled(active("regen_mana"),"GameEffectComponent")
 assert(mana.effect=="MANA_REGENERATION" and mana.frames==-1)
 for _,id in ipairs({"healing_2","regen_mana"}) do
@@ -94,7 +103,7 @@ for _,id in ipairs({"healing_2","regen_mana"}) do
     updating=assert(active(id))
     for i=1,60 do dofile(base.."bread_regeneration.lua") end
     local expected=id=="healing_2" and 60 or 30
-    assert(math.abs(damage.hp-1-expected/25)<1e-8 and not entities[updating].alive,id)
+    assert(math.abs(damage.hp-1-damage.max_hp*expected/100)<1e-8 and not entities[updating].alive,id)
 end
 assert(active("healing") and active("haste") and active("poison"))
 local shield=read(base.."stimulant_shield.xml")

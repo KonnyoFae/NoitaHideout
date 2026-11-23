@@ -13,11 +13,20 @@ local function part(id,kind,data,tag)
     entities[id].parts[kind..(tag or "")]=data
     return data
 end
+function EntityAddComponent2(id,kind,c) return part(id,kind,c,c._tags) end
+function EntityRemoveComponent(id,c)
+    for key,v in pairs(entities[id].parts) do if v==c then entities[id].parts[key]=nil end end
+end
+function ComponentObjectGetValue2(c,_,key) return c[key] end
+function ComponentObjectSetValue2(c,_,key,v) c[key]=v end
+function GameGetFrameNum() return earned end
 function EntityGetIsAlive(id) return entities[id]~=nil end
 function EntityGetParent(id) return entities[id].parent end
 function EntityAddChild(parent,id) entities[id].parent=parent end
 function EntityRemoveFromParent(id) entities[id].parent=0 end
 function EntityAddTag(id,tag) entities[id].tags[tag]=true end
+function EntityRemoveTag(id,tag) entities[id].tags[tag]=nil end
+function EntityCreateNew() return spawn() end
 function EntityHasTag(id,tag) return entities[id].tags[tag] end
 function EntityGetAllChildren(id,tag)
     local list={}
@@ -56,8 +65,27 @@ NHAffinity.follow=function(id,frames)
     return points
 end
 local player=spawn({player_unit=true})
-local health=part(player,"DamageModelComponent",{hp=1,max_hp=5})
+local health=part(player,"DamageModelComponent",{hp=1,max_hp=5,melee=0.8,ice=0.5,poison=0.75,curse=2,slice=1,air_needed=true,
+    materials_that_damage="acid,lava,poison,rock_static_cursed,blood_cold",
+    materials_how_much_damage="0.005,0.003,0.001,0.005,0.0009"})
+function EntitySetDamageFromMaterial(who,material,damage)
+    assert(who==player)
+    local parts={}
+    local nextAmount=health.materials_how_much_damage:gmatch("[^,]+")
+    for name in health.materials_that_damage:gmatch("[^,]+") do
+        local current=nextAmount()
+        parts[#parts+1]=name==material and tostring(damage) or current
+    end
+    health.materials_how_much_damage=table.concat(parts,",")
+end
 local flight=part(player,"CharacterDataComponent",{mFlyingTimeLeft=0,fly_time_max=4})
+local platform=part(player,"CharacterPlatformingComponent",{run_velocity=150,fly_velocity_x=60,velocity_min_x=-200,velocity_max_x=200,
+    fly_speed_max_up=100,velocity_min_y=-200})
+local wand=spawn({wand=true})
+local magic=part(wand,"AbilityComponent",{mana=0,mana_max=80})
+local gun=spawn({wand=true,nh_firearm=true})
+local ammo=part(gun,"AbilityComponent",{mana=0,mana_max=36})
+function GameGetAllInventoryItems() return {wand,gun} end
 local outsider=spawn({energy_shield=true})
 EntityAddChild(player,outsider)
 local native=part(outsider,"EnergyShieldComponent",{recharge_speed=0.22})
@@ -66,14 +94,11 @@ local function companion(id)
     local pet=spawn({noita_hideout_companion=true})
     EntityAddChild(player,pet)
     local clock=part(pet,"VariableStorageComponent",{value_int=0,value_string=id},"nh_companion_clock")
-    part(pet,"VariableStorageComponent",{value_int=0},"nh_trip")
-    part(pet,"VariableStorageComponent",{value_int=0,value_float=0},"nh_position")
-    local rewards=part(pet,"VariableStorageComponent",{value_int=4,value_float=0},"nh_gifts")
-    return pet,clock,rewards
+    return pet,clock
 end
 local function expire(pet,clock)
     local before=earned
-    clock.value_int=10800
+    clock.value_int=15*60*60
     NHCompanions.update(pet)
     assert(not EntityGetIsAlive(pet) and #EntityGetAllChildren(player,"noita_hideout_companion_aura")==0)
     assert(earned==before and EntityGetIsAlive(outsider) and native.recharge_speed==0.22)
@@ -103,69 +128,97 @@ do
             NHCompanions.update(pet)
             sizeAndFacing(pet,-0.5,0.5)
         end
-        expire(pet,clock)
-    end
-end
-for tier,threshold in ipairs({0,10,40,100}) do
-    points=threshold
-    local pet,clock
-    for _,id in ipairs({"minotaur","dragon"}) do
-        pet,clock=companion(id)
+        -- Continue an already active summon past the old three-minute limit.
+        clock.value_int=3*60*60
         NHCompanions.update(pet)
-        local shield=EntityGetAllChildren(player,"nh_companion_shield")[1]
-        if tier==1 then assert(not shield)
-        else
-            assert(shield and entities[shield].parts.EnergyShieldComponent.recharge_speed==({0,0.08,0.15,0.22})[tier])
-            assert(entities[shield].parts.GameEffectComponent.frames==70)
-        end
-        local effect=id=="dragon" and "effect_protection_fire" or "effect_protection_melee"
-        assert(#EntityGetAllChildren(player,"nh_companion_"..effect)==1)
+        assert(EntityGetIsAlive(pet) and clock.value_int==3*60*60+6)
+        clock.value_int=15*60*60-6
+        NHCompanions.update(pet)
+        assert(EntityGetIsAlive(pet) and clock.value_int==15*60*60)
         expire(pet,clock)
+        local queued=EntityGetFirstComponentIncludingDisabled(player,"VariableStorageComponent","nh_companion_gift")
+        if queued then EntityRemoveComponent(player,queued) end
     end
-
-    for _,id in ipairs({"dryad","flower_fairy","slime"}) do
-        pet,clock=companion(id)
-        local period=(id=="flower_fairy" and {5,4,3,2} or {0,12,9,6})[tier]
-        local ticks=math.max(period,12)*10
-        health.hp=1
-        for _=1,ticks do NHCompanions.update(pet) end
-        local pulses=period>0 and math.floor(ticks/(period*10)) or 0
-        assert(math.abs(health.hp-1-0.04*pulses)<0.00001)
-        if id=="dryad" then assert(#EntityGetAllChildren(player,"nh_companion_effect_protection_radioactivity")==1) end
-        if id=="slime" then assert(#EntityGetAllChildren(player,"nh_companion_effect_breath_underwater")==1) end
-        expire(pet,clock)
-    end
-    for _,id in ipairs({"griffin","bee"}) do
-        pet,clock=companion(id)
-        flight.mFlyingTimeLeft=0
-        for _=1,10 do NHCompanions.update(pet) end
-        assert(math.abs(flight.mFlyingTimeLeft-4*({0,0.05,0.10,0.15})[tier])<0.00001)
-        local effect=id=="bee" and "effect_movement_faster" or "effect_faster_levitation"
-        assert(#EntityGetAllChildren(player,"nh_companion_"..effect)==1)
-        flight.mFlyingTimeLeft=3.99
-        for _=1,10 do NHCompanions.update(pet) end
-        assert(flight.mFlyingTimeLeft==(tier==1 and 3.99 or 4))
-        expire(pet,clock)
-    end
-
-    local rewards
-    pet,clock,rewards=companion("flower_fairy")
-    NHCompanions.update(pet)
-    local before=gifts
-    local ticks=({30,25,20,15})[tier]*10
-    for cycle=1,3 do
-        rewards.value_int=4 -- first roll is divisible by four
-        for tick=1,ticks do
-            entities[player].x=entities[player].x+1
-            NHCompanions.update(pet)
-            local delivered=cycle-(tick<ticks and 1 or 0)
-            assert(gifts==before+math.min(delivered,2))
-        end
-    end
-    expire(pet,clock)
 end
--- Cross the first threshold while the same flower fairy is still following.
--- Standing together builds affinity but supplies no travel time for gifts.
+local function near(a,b) assert(math.abs(a-b)<0.00001,("expected %g, got %g"):format(b,a)) end
+local ally,enemy,charmed=spawn(),spawn(),spawn()
+for _,id in ipairs({ally,enemy,charmed}) do part(id,"GenomeDataComponent",{}) end
+local hits={}
+function EntityGetInRadiusWithTag(_,_,radius,tag)
+    if tag=="mortal" then assert(radius==NHCompanions.species[active].radius); return {player,ally,enemy,charmed} end
+    return {}
+end
+function EntityGetHerdRelation(_,id) return id==ally and 100 or 0 end
+function GameGetGameEffectCount(id) return id==charmed and 1 or 0 end
+function EntityInflictDamage(id,amount,kind,_,_,_,_,owner)
+    assert(id==enemy and owner==player and kind=="DAMAGE_MELEE")
+    hits[#hits+1]=amount
+end
+local immunities={
+    cat={typed="curse",material=4},dog={typed="ice",effect="PROTECTION_FREEZE",material=5},
+    griffin={effect="PROTECTION_ELECTRICITY"},bee={typed="poison",effect="PROTECTION_RADIOACTIVITY",material=3},
+    dragon={effect="PROTECTION_FIRE"},dryad={typed="slice"},flower_fairy={material=1},
+    slime={},minotaur={effect="PROTECTION_POLYMORPH"},
+}
+local originalMaterials=health.materials_how_much_damage
+for rank,threshold in ipairs({0,100,400,1000}) do
+    points=threshold
+    local bonus=NHCompanions.bonuses[rank-1]
+    for _,id in ipairs(NHCompanions.order) do
+        local spec=NHCompanions.species[id]
+        local pet,clock=companion(id)
+        flight.mFlyingTimeLeft,health.hp,magic.mana=0,1,0
+        local before=#hits
+        for _=1,10 do NHCompanions.update(pet) end
+        local expected=immunities[id]
+        local tag=id=="minotaur" and "nh_shield_poly" or "nh_companion_immunity"
+        local aura=assert(EntityGetAllChildren(player,tag)[1])
+        if expected.effect then assert(entities[aura].parts.GameEffectComponent.effect==expected.effect) end
+        assert((not health.air_needed)==(id=="slime") and (EntityHasTag(player,"polymorphable_NOT")==true)==(id=="minotaur"))
+        for kind,original in pairs({ice=0.5,poison=0.75,slice=1,curse=2}) do
+            near(health[kind],kind==expected.typed and 0 or original)
+        end
+        local amounts=health.materials_how_much_damage:gmatch("[^,]+")
+        for j,v in ipairs({0.005,0.003,0.001,0.005,0.0009}) do near(tonumber(amounts()),j==expected.material and 0 or v) end
+        if spec.role=="support" then
+            near(health.hp,1+5*bonus.heal/100)
+            near(platform.run_velocity,150*(1+bonus.speed/100))
+            assert(magic.mana==bonus.mana and ammo.mana==0 and #EntityGetAllChildren(player,"nh_companion_mana")==1)
+            health.hp,magic.mana=4.999,79
+            for _=1,10 do NHCompanions.update(pet) end
+            assert(health.hp==5 and magic.mana==80)
+        elseif spec.role=="melee" then
+            near(health.melee,0.8*(1-bonus.meleeResist/100))
+            assert(#hits==before+2 and hits[#hits]==bonus.fieldDamage/25 and #EntityGetAllChildren(player,"nh_companion_knockback")==1)
+        else
+            near(platform.fly_speed_max_up,100+spec.lift+bonus.lift)
+            near(flight.mFlyingTimeLeft,4*(spec.fuel+bonus.fuel)/100)
+            flight.mFlyingTimeLeft=3.999
+            for _=1,10 do NHCompanions.update(pet) end
+            assert(flight.mFlyingTimeLeft==4)
+        end
+        local shield=EntityGetAllChildren(player,"nh_companion_shield")[1]
+        if spec.shield and rank>1 then near(entities[shield].parts.EnergyShieldComponent.recharge_speed,bonus.shieldRecharge)
+        else assert(not shield) end
+        if spec.effect then assert(#EntityGetAllChildren(player,"nh_companion_"..spec.effect)==1) end
+        -- Jump across every due time, including the final regular gift at 15 min.
+        local period=NHCompanions.giftMinutes(spec)*3600
+        for age=period,15*3600,period do
+            clock.value_int=age-12
+            NHCompanions.update(pet)
+            assert(not EntityGetFirstComponentIncludingDisabled(player,"VariableStorageComponent","nh_companion_gift"))
+            NHCompanions.update(pet)
+            local gift=EntityGetFirstComponentIncludingDisabled(player,"VariableStorageComponent","nh_companion_gift")
+            assert(gift.value_string==id and gift.value_float==bonus.giftLevel)
+            EntityRemoveComponent(player,gift)
+        end
+        expire(pet,clock)
+        assert(not EntityGetIsAlive(aura) and not EntityHasTag(player,"polymorphable_NOT") and health.air_needed)
+        assert(health.materials_how_much_damage==originalMaterials)
+        assert(health.slice==1 and health.ice==0.5 and health.poison==0.75 and health.curse==2)
+        near(platform.run_velocity,150); near(platform.fly_speed_max_up,100); near(health.melee,0.8)
+    end
+end
 NHAffinity.follow=actualFollow
 local world={noita_hideout_run_v1="1/1"}
 function GlobalsGetValue(key,default) return world[key] or default end
@@ -173,16 +226,12 @@ function GlobalsSetValue(key,value) world[key]=value end
 local state={profile=1,runSerial=1}
 NHAffinity.bind(state)
 local pet,clock=companion("flower_fairy")
-local beforeGifts=gifts
 for _=1,599 do NHCompanions.update(pet) end
-assert(NHAffinity.points(state,"flower_fairy")==9)
+assert(NHAffinity.points(state,"flower_fairy")==99)
 health.hp=1
 NHCompanions.update(pet)
-assert(NHAffinity.points(state,"flower_fairy")==10 and math.abs(health.hp-1.04)<0.00001)
-for _=1,40 do NHCompanions.update(pet) end
-assert(math.abs(health.hp-1.08)<0.00001 and gifts==beforeGifts)
+near(health.hp,1.05); near(platform.run_velocity,172.5)
+platform.run_velocity=platform.run_velocity*1.25
 expire(pet,clock)
-pet=companion("dryad")
-for _=1,60 do NHCompanions.update(pet) end
-assert(NHAffinity.points(state,"dryad")==1 and NHAffinity.points(state,"flower_fairy")==10)
-print("All four affinity tiers scale buffs and travel gift timing, respect caps, and leave independent shields intact.")
+near(platform.run_velocity,187.5)
+print("All nine roles, four ranks, timed gifts, ally filtering, regen caps and independent modifiers passed.")

@@ -1,0 +1,5 @@
+<Entity tags="nh_escort_shield">
+    <Base file="data/entities/misc/shieldshot_shield.xml">
+        <LifetimeComponent lifetime="90" />
+    </Base>
+</Entity>

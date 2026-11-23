@@ -1,0 +1,8 @@
+<Entity>
+    <Base file="data/entities/projectiles/machinegun_bullet_tank.xml">
+        <ProjectileComponent damage="0.12" friendly_fire="0" never_hit_player="1" explosion_dont_damage_shooter="1"
+            lifetime="45" speed_min="500" speed_max="500" on_lifetime_out_explode="0">
+            <config_explosion damage="0.08" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

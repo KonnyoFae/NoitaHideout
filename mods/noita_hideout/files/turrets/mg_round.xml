@@ -1,0 +1,11 @@
+<Entity tags="nh_mg_round">
+    <Base file="data/entities/projectiles/machinegun_bullet_tank.xml">
+        <VelocityComponent gravity_y="0" air_friction="0" />
+        <ProjectileComponent damage="0.08" knockback_force="14" speed_min="500" speed_max="500" direction_random_rad="0.015"
+            friction="0" lifetime="45" never_hit_player="1" friendly_fire="0" collide_with_shooter_frames="-1"
+            on_death_explode="0" on_lifetime_out_explode="0" camera_shake_when_shot="0" shoot_light_flash_radius="24"
+            damage_game_effect_entities="mods/noita_hideout/files/turrets/mg_stagger.xml">
+            <config_explosion damage="0" damage_mortals="0" hole_enabled="0" physics_throw_enabled="0" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

@@ -1,0 +1,5 @@
+<Entity name="musicstone" tags="nh_chain_effect">
+    <InheritTransformComponent />
+    <MusicEnergyAffectorComponent energy_target="1.0" trigger_danger_music="1" is_enemy="0" fog_of_war_threshold="255" />
+    <LightComponent radius="12" r="255" g="255" b="255" fade_out_time="0.1" />
+</Entity>

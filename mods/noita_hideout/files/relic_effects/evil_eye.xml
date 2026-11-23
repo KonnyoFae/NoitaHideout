@@ -1,0 +1,10 @@
+<Entity name="evil_eye" tags="nh_chain_effect,evil_eye">
+    <InheritTransformComponent />
+    <LightComponent _tags="magic_eye_check" radius="60" r="255" g="94" b="94" />
+    <Entity>
+        <LaserEmitterComponent is_emitting="1">
+            <laser damage_to_entities="0.06" damage_to_cells="2500" max_length="54" beam_radius="2.5" max_cell_durability_to_destroy="11" root_entity_is_responsible_for_damage="1" audio_enabled="0" audio_hit_always_enabled="1" hit_particle_chance="40" beam_particle_chance="80" beam_particle_type="spark_red_bright" />
+        </LaserEmitterComponent>
+    </Entity>
+    <LuaComponent script_source_file="mods/noita_hideout/files/relic_effects/eye_aim.lua" execute_every_n_frame="1" />
+</Entity>

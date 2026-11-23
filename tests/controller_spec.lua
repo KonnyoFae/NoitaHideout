@@ -24,11 +24,15 @@ function AddFlagPersistent(k) flags[k] = true end
 function GlobalsGetValue(k,d) return world[k] or d end
 function GlobalsSetValue(k,v) world[k] = v end
 function GameGetFrameNum() return frame end
+function SessionNumbersGetValue() return "0" end
+-- The weather cycle and its HUD are exercised in storm_rain_spec.
+function GameIsIntroPlaying() return true end
 function GameTextGet() return "English" end
 function GameTextGetTranslatedOrNot(k) return k end
 function CellFactory_GetType() return -1 end
 function ModTextFileGetContent() return nil end
 function GamePrint() end
+function GamePlaySound() end
 function ProceduralRandomi(_,_,lo) return lo end
 function MagicNumbersGetValue(k) return k:sub(-1) == "X" and "227" or "-85" end
 function EntityGetTransform(id)
@@ -40,8 +44,34 @@ function EntitySetTransform(id,x,y,rotation,sx,sy)
     e.x,e.y,e.rotation,e.scaleX,e.scaleY=x,y or 0,rotation or 0,sx or 1,sy or 1
 end
 function DoesWorldExistAt() return true end
+function LoadPixelScene(mask)
+    assert(mask=="mods/noita_hideout/files/terminals/shelter_materials.png"
+        or mask=="mods/noita_hideout/files/travel/cabin_materials.png")
+end
+function RaytraceSurfaces() return false end
+function RaytracePlatforms(x,y,tx,ty)
+    if y < -26000 and tx==x then
+        local cabin=dofile("mods/noita_hideout/files/travel/cabin.lua")
+        for _,offset in ipairs({60,144}) do
+            local floor=cabin.top+offset
+            if y<=floor and ty>=floor then return true,x,floor end
+        end
+    end
+    if tx==x and ty-y==48 then return true,x,y+18 end
+    if tx==x and ty-y==5 then return true,x,y+2 end
+    return false
+end
+function RaytraceSurfacesAndLiquiform() return false end
+function EntityRefreshSprite() end
+function ComponentObjectSetValue2(c,k,m,v) c[k]=c[k] or {}; c[k][m]=v end
 function EntityHasTag(id,tag) return entities[id] ~= nil and entities[id].tags[tag] == true end
 function EntityAddTag(id,tag) entities[id].tags[tag]=true end
+function EntityRemoveTag(id,tag) entities[id].tags[tag]=nil end
+function EntityCreateNew(name)
+    next_id=next_id+1
+    entities[next_id]={name=name,x=0,y=0,parent=0,tags={},comps={}}
+    return next_id
+end
 function EntityGetIsAlive(id) return entities[id] ~= nil end
 function EntityGetParent(id) return entities[id].parent end
 function EntityRemoveFromParent(id) entities[id].parent=0 end
@@ -78,6 +108,8 @@ function BiomeMapGetName(x,y)
     end
     return "$biome_coalmine"
 end
+function BiomeMapGetSize() return 70,48 end
+function GetParallelWorldPosition(x) return math.floor(x/(BiomeMapGetSize()*512)+0.5),0 end
 function EntityGetAllChildren(parent,tag)
     local list={}
     for id,e in pairs(entities) do if e.parent==parent and (not tag or e.tags[tag]) then list[#list+1]=id end end
@@ -101,6 +133,11 @@ function ComponentGetValue2(c,key)
     if key=="inventory_slot" then return c.slotX or 0,c.slotY or 0 end
     return c[key]
 end
+function ComponentHasTag(c,tag) return c.tags and c.tags[tag] or false end
+function ComponentAddTag(c,tag) c.tags=c.tags or {}; c.tags[tag]=true end
+function ComponentRemoveTag(c,tag) c.tags[tag]=nil end
+function EntitySetComponentIsEnabled(_,c,enabled) c.disabled=not enabled end
+function ComponentGetIsEnabled(c) return not c.disabled end
 function ComponentSetValue2(c,key,v,y)
     if key=="inventory_slot" then c.slotX,c.slotY=v,y else c[key]=v end
 end
@@ -110,6 +147,14 @@ function EntityLoad(path,x,y)
     if file:match("^stimulant") and fail_effect then return 0 end
     next_id=next_id+1
     entities[next_id]={x=x,y=y,parent=0,tags={["noita_hideout_"..file]=true},comps={}}
+    if file=="station" then EntityAddTag(next_id,"nh_home_terminal") end
+    if file=="console" then EntityAddTag(next_id,"nh_travel_console") end
+    if file=="gate" then EntityAddTag(next_id,"nh_travel_gate") end
+    if file=="transit_protection" then EntityAddTag(next_id,"nh_transit_protection") end
+    if file=="remote" then
+        EntityAddTag(next_id,"nh_remote_station")
+        EntityAddComponent2(next_id,"VariableStorageComponent",{_tags="nh_remote_deadline",value_int=0})
+    end
     if file=="stimulant_healing" or file=="stimulant_healing_2" or file=="stimulant_regen_mana" then
         EntityAddComponent2(next_id,"VariableStorageComponent",{value_int=60,value_float=file=="stimulant_healing_2" and 1 or 2})
         if file=="stimulant_regen_mana" then EntityAddComponent2(next_id,"GameEffectComponent",{effect="MANA_REGENERATION",frames=-1}) end
@@ -124,13 +169,28 @@ function EntityLoad(path,x,y)
     elseif file:match("^card_") then
         EntityAddTag(next_id,"noita_hideout_summon_card")
         EntityAddTag(next_id,"nh_companion_"..file:sub(6))
-        EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png",uses_remaining=80})
+        EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png",uses_remaining=NHCompanions.cardCapacity(file:sub(6))})
     elseif path:find("/companions/",1,true) and NHCompanions.species[file] then
         EntityAddTag(next_id,"noita_hideout_companion")
         EntityAddComponent2(next_id,"VariableStorageComponent",{_tags="nh_companion_clock",value_string=file,value_int=0})
         for _,tag in ipairs({"nh_gifts","nh_trip","nh_position"}) do
             EntityAddComponent2(next_id,"VariableStorageComponent",{_tags=tag,value_int=0,value_float=0})
         end
+    elseif file=="scatter_revolver" or file=="marksman_rifle" or file=="battle_staff" then
+        local size=file=="battle_staff" and 120 or file=="scatter_revolver" and 6 or 10
+        EntityAddTag(next_id,"wand")
+        EntityAddTag(next_id,"nh_firearm")
+        EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png"})
+        EntityAddComponent2(next_id,"AbilityComponent",{mana=size,use_gun_script=true})
+        EntityAddComponent2(next_id,"VariableStorageComponent",{_tags="nh_magazine",name=file,value_int=size,value_string="-1"})
+        if file=="battle_staff" then EntityAddComponent2(next_id,"VariableStorageComponent",{_tags="nh_staff_clock",value_int=0}) end
+    elseif file=="tarot_life" or file=="effect_invisibility" or file=="effect_stains_drop_faster" then
+        EntityAddComponent2(next_id,"GameEffectComponent",{effect=file=="tarot_life" and "RESPAWN" or file,frames=-1})
+    elseif file=="lost_gold_case" then
+        EntityAddComponent2(next_id,"VariableStorageComponent",{_tags="nh_lost_gold",value_string=""})
+    elseif file:match("ammo_rig$") then
+        EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png"})
+        EntityAddComponent2(next_id,"VariableStorageComponent",{_tags="nh_reserve",value_int=0})
     elseif file=="home_wand_edit" then EntityAddComponent2(next_id,"GameEffectComponent",{effect="EDIT_WANDS_EVERYWHERE",frames=3})
     else EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=""}) end
     return next_id
@@ -143,7 +203,10 @@ function GameKillInventoryItem(p,id) assert(EntityGetRootEntity(id)==p); EntityK
 function GamePickUpInventoryItem(_,id) entities[id].parent=quick end
 function EntityAddChild(p,id) entities[id].parent=p end
 function GameIsInventoryOpen() return inventory_open end
+function GameGetIsGamepadConnected() return false end
+function DEBUG_GetMouseWorld() local x,y=EntityGetTransform(player); return x+100,y end
 function InputIsKeyJustDown(key) return keys[key] end
+function InputIsKeyDown(key) return keys[key] or false end
 function InputIsMouseButtonDown(button) return (button==1 and left_mouse) or (button==2 and right_mouse) or false end
 function GameHasFlagRun(flag) return flag=="ending_game_completed" and ending end
 function dofile_once(path) dofile(path) end
@@ -240,10 +303,11 @@ tick()
 fail_commit=false
 tick(nil,nil,nil,"right")
 tick(nil,nil,nil,"right")
-assert(EntityGetIsAlive(dose) and NHDoses.remaining(state(),dose)==2)
+assert(EntityGetIsAlive(dose) and NHDoses.remaining(state(),dose)==4)
 tick()
 tick(nil,nil,nil,"right")
-assert(NHDoses.remaining(state(),dose)==1)
+assert(NHDoses.remaining(state(),dose)==3)
+for left=2,1,-1 do tick(); tick(nil,nil,nil,"right"); assert(NHDoses.remaining(state(),dose)==left) end
 tick()
 tick(nil,nil,nil,"right")
 assert(not EntityGetIsAlive(dose) and #EntityGetWithTag("noita_hideout_stimulant")==1 and starter().doses==1)
@@ -310,24 +374,17 @@ assert(not state().order)
 inventory_open=true
 tick()
 tick(nil,"order")
-assert(state().order and not next(state().materials))
-local just_started=tick()
-local initial_remaining,drag_revision=just_started.order_remaining,just_started.revision
-assert(initial_remaining==8)
-local advancing=advance(120)
-assert(advancing.order_remaining==initial_remaining-2 and advancing.revision==drag_revision)
+assert(not state().order and state().finished==1 and state().materials.magic_liquid_teleportation==500)
+local revision=tick().revision
+advance(120)
+assert(tick().revision==revision)
 ending=true
 tick()
 OnPlayerDied()
 OnPlayerDied()
-local interrupted=state()
-assert(interrupted.order and interrupted.order.progress>0 and interrupted.finished==0 and starter().doses==2)
-frame=frame+interrupted.order.required*2
+assert(not state().order and state().finished==1 and starter().doses==2)
 new_world()
 inventory_open=true
-local resumed=tick()
-assert(resumed.order_active and math.abs(resumed.order_remaining-advancing.order_remaining)<=1)
-advance(interrupted.order.required-interrupted.order.progress)
 tick()
 assert(not state().order and state().finished==1 and #state().warehouse==1 and state().materials.magic_liquid_teleportation==500)
 print("Controller: HUD case, inventory transfer, click gating, failed injection, consume, access, death and orders passed.")
@@ -388,6 +445,34 @@ tick(nil,"secure_withdraw",stash)
 local native_card=assert(EntityGetAllChildren(3)[1])
 local native_item=EntityGetFirstComponentIncludingDisabled(native_card,"ItemComponent")
 assert(native_item.slotX==7 and native_item.uses_remaining==3 and not tick().warehouse.spell)
+
+do
+    local members,getEnabled,setEnabled=ComponentGetMembers,ComponentGetIsEnabled,EntitySetComponentIsEnabled
+    local enabled={}
+    function ComponentGetMembers(c) return c end
+    function ComponentGetIsEnabled(c) return enabled[c]~=false end
+    function EntitySetComponentIsEnabled(_,c,value) enabled[c]=value end
+    for _,action in ipairs({"DISC_BULLET","DISC_BULLET_BIG"}) do
+        local disc=CreateItemActionEntity(action,200,-80)
+        local fx="data/scripts/items/shop_effect.lua"
+        EntityAddComponent2(disc,"LuaComponent",{script_item_picked_up=fx,mTimesExecuted=1})
+        EntityAddChild(3,disc)
+        ComponentSetValue2(EntityGetFirstComponentIncludingDisabled(disc,"ItemComponent"),"inventory_slot",4,0)
+        local req={parent=3,lane="spell",xslot=4,yslot=0,entity=disc,safeSlot=1,container="warehouse",kind="spell"}
+        tick(nil,"place",req)
+        local entry=assert(tick().warehouse.spell[1])
+        assert(not EntityGetIsAlive(disc) and state().warehouse[NHStore.slotIndex(state(),"warehouse",1,"spell")].item.card.id==action)
+        req.storedId=entry.id
+        tick(nil,"secure_withdraw",req)
+        assert(not tick().warehouse.spell)
+        local copy=assert(EntityGetAllChildren(3)[2])
+        assert(ComponentGetValue2(EntityGetFirstComponentIncludingDisabled(copy,"ItemActionComponent"),"action_id")==action)
+        assert(ComponentGetValue2(EntityGetFirstComponentIncludingDisabled(copy,"ItemComponent"),"inventory_slot")==4)
+        assert(ComponentGetValue2(EntityGetFirstComponentIncludingDisabled(copy,"LuaComponent"),"script_item_picked_up")==fx)
+        EntityKill(copy)
+    end
+    ComponentGetMembers,ComponentGetIsEnabled,EntitySetComponentIsEnabled=members,getEnabled,setEnabled
+end
 -- A stored pouch opens only from its own container, in reach.
 tick(nil,"take_pouch",tool(nil,starter().slot))
 local bag=assert(EntityGetWithTag("noita_hideout_pouch")[1])
@@ -487,17 +572,25 @@ tick(nil,"buy_upgrade",{id="warehouse_equipment",level=0})
 assert(tick().warehouse_capacity.equipment==72 and tick().warehouse_capacity.supplies==48)
 
 -- Locked recipes remain readable in their own category; the backend rechecks access.
-local catalog=tick().recipes
-assert(#catalog==#NHStore.recipes)
+local catalogView=tick()
+local catalog=catalogView.recipes
+assert(#catalog+#NHStormProducts.recipes==#NHStore.recipes)
 for _,recipe in ipairs(NHStore.recipes) do
-    local entry=assert(has_project(catalog,recipe.id),recipe.id)
-    if recipe.category=="weapons" or (recipe.category=="medical" and recipe.item.kind~="dose") then
+    local menu=recipe.category=="storm_products" and catalogView.shopGoods or catalog
+    local entry=assert(has_project(menu,recipe.id),recipe.id)
+    if recipe.id:match("^ammo_mod_") then
+        assert(entry.icon==recipe.item.icon and recipe.item.kind=="spell",recipe.id)
+    elseif recipe.id=="battle_staff" then
+        assert(entry.icon=="mods/noita_hideout/files/items/staff_icon.png" and recipe.item.rounds==120)
+    elseif recipe.category=="weapons" or (recipe.category=="medical" and recipe.item.kind~="dose") then
         assert(entry.icon=="mods/noita_hideout/files/items/"..recipe.item.kind..".png",recipe.id)
     end
     if recipe.category=="alchemy" then
         assert(entry.category=="alchemy" and entry.alchemyMode==recipe.alchemyMode,recipe.id)
-        assert(entry.duration==math.ceil(NHStore.productionFrames(recipe)/60))
-        assert(#entry.inputs==#recipe.inputs and #entry.outputs>0)
+        assert(entry.duration==0)
+        local extra=recipe.goldCost and 1 or 0
+        for _ in pairs(recipe.resources or {}) do extra=extra+1 end
+        assert(#entry.inputs==#recipe.inputs+extra and #entry.outputs>0)
         for i,input in ipairs(recipe.inputs) do
             local sources,_,labelEn=NHStore.ingredientSources(input)
             local name=#sources>1 and (labelEn or NHPotion.materialName(input.name)).." (total)" or NHPotion.materialName(input.name,"en")
@@ -505,7 +598,7 @@ for _,recipe in ipairs(NHStore.recipes) do
         end
         local shown={}
         for _,output in ipairs(entry.outputs) do shown[output.key]=output.amount end
-        for name,amount in pairs(recipe.materials) do assert(shown[name]==amount,recipe.id) end
+        for name,amount in pairs(recipe.materials or recipe.resourceYield) do assert(shown[name]==amount,recipe.id) end
     else
         assert(entry.alchemyMode==nil,recipe.id)
     end
@@ -515,7 +608,7 @@ assert(alchemy.category=="alchemy" and alchemy.unlocked and not alchemy.ready an
 local reverse=assert(has_project(catalog,"reverse_stable"))
 assert(reverse.category=="alchemy" and reverse.unlocked and #reverse.inputs==1 and #reverse.outputs==2)
 local expected_category={medical="medical",injector="medical",injector_lightning="medical",injector_frost="medical",injector_healing="medical",
-    grenade="weapons",grenade_essence="weapons",pouch="equipment"}
+    grenade="weapons",grenade_essence="weapons",pouch="containers"}
 assert(not has_project(catalog,"medkit_essence"))
 for _,id in ipairs({"medical","injector","injector_lightning","injector_frost","injector_healing","grenade","grenade_essence","pouch"}) do
     local locked=assert(has_project(catalog,id))
@@ -528,7 +621,7 @@ local first_product
 local products={
     {recipe="medical",kind="medkit",name="Medkit",ingredients={water=100,blood=50}},
     {recipe="injector",kind="dose",name="Fire injector",stock="resources",ingredients={active_herb=2,essence_fire=6}},
-    {recipe="grenade",kind="grenade",name="Magic grenade",ingredients={sand=64,slime=32}},
+    {recipe="grenade",kind="magic_tube",name="Cement launcher",ingredients={sand=64,slime=32}},
 }
 for n,expected in ipairs(products) do
     tick(nil,"buy_upgrade",{id=expected.recipe,level=0})
@@ -541,32 +634,20 @@ for n,expected in ipairs(products) do
     assert(not state().order)
     entities[player].x=227
     tick(nil,"craft",{id=expected.recipe})
-    tick(nil,"craft",{id=expected.recipe})
-    local queued=state()
-    local reserved=queued.order.output.slot
-    assert(queued.order.recipe==expected.recipe and #queued.warehouse==n-1)
-    for input,amount in pairs(expected.ingredients) do
-        local stock=expected.stock or "materials"
-        assert((queued[stock][input] or 0)==before[stock][input]-amount)
-    end
-    local working=tick()
-    assert(working.order_name==expected.name and working.warehouse.supplies[reserved].kind=="reserved")
-    for _,busy in ipairs(working.recipes) do assert(not busy.ready and busy.reason) end
-    if first_product then
-        tick(nil,"move_warehouse",{container="warehouse",kind="medkit",from=first_product.slot,entity=first_product.id,safeSlot=reserved})
-        local still_reserved=tick().warehouse.supplies
-        assert(still_reserved[first_product.slot].id==first_product.id and still_reserved[reserved].kind=="reserved")
-    end
-    -- The reservation outlives a reload and can only be credited once.
-    boot()
-    assert(tick().warehouse.supplies[reserved].kind=="reserved")
-    advance(queued.order.required)
-    tick()
     local delivered=state()
     assert(not delivered.order and delivered.finished==n and #delivered.warehouse==n)
+    local reserved=delivered.warehouse[n].slot
+    for input,amount in pairs(expected.ingredients) do
+        local stock=expected.stock or "materials"
+        assert((delivered[stock][input] or 0)==before[stock][input]-amount)
+    end
+    -- Delivery is already committed; loading must never award another copy.
+    boot()
+    tick()
+    assert(state().finished==n and #state().warehouse==n)
     local crafted=assert(tick().warehouse.supplies[reserved])
     assert(crafted.kind==expected.kind)
-    if n<3 then assert(crafted.remaining==3) end
+    if n<3 then assert(crafted.remaining==(n==1 and 8 or 5)) end
     if n==1 then first_product={slot=reserved,id=crafted.id} end
     OnPlayerDied()
     OnPlayerDied()
@@ -647,6 +728,10 @@ assert(replacement.name=="???" and not replacement.essence)
 tick(nil,"salvage",{id=replacement.id,slot=1,kind="spell",mode="essence"})
 tick(nil,"salvage",salvage)
 assert(replacement.id~=salvage.id and tick().warehouse.spell[1].id==replacement.id and state().resources.arcane_scrap==1)
+assert(not tick().perkCapacity)
+tick(nil,"buy_upgrade",{id="perk_pack",level=0})
+assert(not state().levels.perk_pack and state().resources.arcane_scrap==1)
+NHPerks.enabled=true -- retain integration coverage for the dormant perk bar
 tick(nil,"buy_upgrade",{id="perk_pack",level=0})
 assert(state().levels.perk_pack==1 and not state().resources.arcane_scrap)
 print("Controller: gated purchases, independent capacity, crafted item reservations, delivery and salvage confirmed.")
@@ -809,50 +894,40 @@ entities[player].x,entities[player].y=227,-85
 boot()
 tick()
 tick(nil,"craft",{id="reverse_ambrosia"})
-local normal=tick().order_remaining
-assert(normal==90 and state().order)
-local old_mountain=stand(1000,2048)
-assert(receipts()==1 and old_mountain.order_remaining>=normal-1)
-local accelerated=stand(1000,4096)
-assert(receipts()==2 and math.abs(accelerated.order_remaining-(normal-60))<=1)
+assert(not state().order and state().finished==1)
+stand(1000,2048)
+assert(receipts()==1)
+stand(1000,4096)
+assert(receipts()==2)
 stand(1000,3600)
-local repeat_visit=stand(1000,4096)
-assert(receipts()==2 and math.abs(repeat_visit.order_remaining-accelerated.order_remaining)<=1)
+stand(1000,4096)
+assert(receipts()==2)
 boot()
-local reloaded=stand(1000,4096)
-assert(receipts()==2 and math.abs(reloaded.order_remaining-repeat_visit.order_remaining)<=1)
+stand(1000,4096)
+assert(receipts()==2)
 stand(1000,6144)
 local complete_batch=state()
 assert(receipts()==3 and not complete_batch.order and complete_batch.finished==1)
 assert(complete_batch.materials.honey==50 and complete_batch.materials.diamond==50)
-tick()
-assert(state().finished==1)
-
--- No active player pauses elapsed time. A polymorphed player still explores
--- the world, earns active time and can discover a new checkpoint.
 stand(227,-85)
 tick(nil,"craft",{id="ambrosia"})
-local before_absence=tick().order_remaining
+assert(not state().order and state().finished==2)
 entities[player].tags.player_unit=nil
 tick()
 advance(2*NHStore.productionFrames())
-tick()
-assert(state().order and state().finished==1)
+assert(not state().order and state().finished==2)
 entities[player].tags.player_unit=true
-assert(tick().order_remaining==before_absence)
 local poly=EntityLoad("polymorph.xml",227,-85)
 EntityAddTag(poly,"polymorphed_player")
 entities[player].tags.player_unit=nil
 tick()
-advance(700)
-assert(state().order.progress>=700 and state().order.progress<800)
 mountain(1000,8192,holy)
 entities[poly].x,entities[poly].y=1000,8192
 for i=1,11 do tick() end
-assert(receipts()==4 and state().order.progress>=700+NHStore.checkpointFrames)
+assert(receipts()==4 and not state().order)
 EntityKill(poly)
 entities[player].tags.player_unit=true
-assert(tick().order_remaining<50 and state().finished==1)
+assert(not tick().order_active and state().finished==2)
 print("Controller: timers, suspension, polymorph, Holy Mountain hitboxes, checkpoint deduplication and reverse alchemy passed.")
 
 do
@@ -876,7 +951,7 @@ do
     assert(atLocker.near and atLocker.at_station and not atLocker.open and #EntityGetWithTag(tag)==1)
     local first=EntityGetWithTag(tag)[1]
     assert(entities[first].x==x and entities[first].y==y)
-    assert(#EntityGetWithTag("noita_hideout_home_wand_edit")==0)
+    assert(#EntityGetWithTag("noita_hideout_home_wand_edit")==1)
     inventory_open=true
     tick()
     local pouchId=state().starterPouchId
@@ -909,8 +984,147 @@ do
     EntityAddTag(secret,"coop_respawn")
     entities[secret].biome=holy
     assert(stand(8104,3034).at_station and #EntityGetWithTag(tag)==3)
-    assert(not state().checkpoints["8000,3000"] and #EntityGetWithTag("noita_hideout_home_wand_edit")==0)
+    assert(not state().checkpoints["8000,3000"] and #EntityGetWithTag("noita_hideout_home_wand_edit")==1)
+    local cabin=dofile("mods/noita_hideout/files/travel/cabin.lua")
+    local cx,cy=cabin.point(cabin.terminal)
+    world["nh_travel.built"]=cabin.revision
+    EntityLoad("console.xml",cx,cy)
+    inventory_open=false
+    assert(stand(cx,cy-6).travel.groups[2].world==-1)
+    inventory_open=true
+    local menu=tick(nil,"travel_to",1)
+    assert(menu.mode=="case" and menu.near and #EntityGetWithTag("nh_travel_gate")==0)
+    local west=menu.travel.groups[2].routes[1]
+    tick(nil,"travel_to",west.index)
+    assert(tick().travel.gateX==secondX and #EntityGetWithTag("nh_travel_gate")==1)
+    tick(nil,"travel_to",1)
+    assert(tick().travel.gateKind=="home" and #EntityGetWithTag("nh_travel_gate")==1)
+    local ix,iy=cabin.point(cabin.infirmary)
+    assert(not stand(ix,iy).travel and tick().near)
+    local gate=world["nh_travel.gate"]
+    tick(nil,"travel_to",west.index)
+    assert(world["nh_travel.gate"]==gate)
     print("Controller: local Holy Mountain lockers, shared transfers, saved rooms, revisit, parallel and secret altars passed.")
+end
+
+do
+    settings,flags={},{}
+    new_world()
+    tick() -- Let the starting terminal stream in before visiting the landmarks.
+    local ray,platform,liquid,sky,stream=RaytraceSurfaces,RaytracePlatforms,RaytraceSurfacesAndLiquiform,GameGetSkyVisibility,DoesWorldExistAt
+    local surfaceLoaded,light=true,1
+    local function floorAt(x)
+        x=x-GetParallelWorldPosition(x)*BiomeMapGetSize()*512
+        if math.abs(x+9700)<420 then return -35 end
+        if math.abs(x-8660)<420 then return 19 end
+    end
+    function DoesWorldExistAt(x,y,tx,ty) return (not floorAt(x) or surfaceLoaded) and stream(x,y,tx,ty) end
+    function RaytracePlatforms(x,y,tx,ty)
+        local floor=floorAt(x)
+        if floor then return x==tx and y<=floor and ty>=floor,x,floor end
+        return platform(x,y,tx,ty)
+    end
+    function RaytraceSurfaces(x,y,tx,ty)
+        if floorAt(x) then return RaytracePlatforms(x,y,tx,ty) end
+        return ray(x,y,tx,ty)
+    end
+    function RaytraceSurfacesAndLiquiform(x,y,tx,ty)
+        -- A tree on the first snowy candidate must shift it inland.
+        if floorAt(x) then return math.abs(x+9700)<6 and y< -35 end
+        return liquid(x,y,tx,ty)
+    end
+    function GameGetSkyVisibility() return light end
+    local function visit(x,y)
+        EntitySetTransform(player,x,y)
+        local m
+        for _=1,17 do m=tick() end
+        return m
+    end
+    local tag="nh_landmark_terminal"
+    visit(-9700,-45)
+    assert(#EntityGetWithTag(tag)==0,"skip a world layout without the landmark")
+    for _,s in ipairs({{-9970,768,"$biome_vault_frozen"},{9984,-640,"$biome_pyramid"}}) do
+        entities[EntityLoad("test.xml",s[1],s[2])].biome=s[3]
+    end
+    surfaceLoaded=false; visit(-9700,-45)
+    surfaceLoaded,light=true,0; visit(-9700,-45)
+    assert(#EntityGetWithTag(tag)==0,"need loaded terrain and open sky")
+    light=1
+    visit(-9460,-42)
+    local cliff=assert(EntityGetWithTag("nh_landmark_snowcliff")[1])
+    local cx,cy=EntityGetTransform(cliff)
+    assert(cx> -9700 and cy==-42 and not EntityHasTag(cliff,"nh_home_terminal"))
+    assert(not world["nh_travel.snowcliff_unlocked"],"streaming a terminal is not discovery")
+    local m=visit(cx,cy)
+    assert(m.near and m.landmarkName[1]=="冻结避难所东崖" and world["nh_travel.snowcliff_unlocked"]=="1")
+    assert(not m.at_station and next(state().checkpoints)==nil)
+    inventory_open=true
+    assert(tick().warehouse and #EntityGetWithTag("noita_hideout_home_wand_edit")==1)
+    inventory_open=false
+    visit(8660,12)
+    assert(world["nh_travel.pyramid_unlocked"]=="1" and #EntityGetWithTag(tag)==2)
+    boot(); visit(8660,12)
+    assert(#EntityGetWithTag(tag)==2 and #EntityGetWithTag("nh_home_terminal")==1)
+    -- Recall from desert; choose the snowy cliff from the real inventory dispatch.
+    for i=1,37 do tick(10) end
+    local gate=assert(EntityGetWithTag("nh_travel_gate")[1])
+    visit(EntityGetTransform(gate))
+    local cabin=dofile("mods/noita_hideout/files/travel/cabin.lua")
+    local sx,sy=cabin.point(cabin.terminal)
+    visit(sx,sy-6)
+    inventory_open=true
+    local stops=tick().travel.groups[1].routes
+    assert(#stops==3 and stops[1].kind=="home" and stops[2].name[1]=="冻结避难所东崖" and stops[3].name[1]=="金字塔西麓")
+    tick(nil,"travel_to",stops[2].index); inventory_open=false; tick()
+    local gx,gy=cabin.point(cabin.gate)
+    visit(gx,gy)
+    local px,py=EntityGetTransform(player)
+    assert(math.abs(px-cx)<=44 and py==-41 and world["nh_travel.trip"]=="" and tick().near)
+    for i=1,37 do tick(10) end
+    visit(EntityGetTransform(assert(EntityGetWithTag("nh_travel_gate")[1])))
+    visit(sx,sy-6)
+    inventory_open=true
+    stops=tick().travel.groups[1].routes
+    tick(nil,"travel_to",stops[3].index); inventory_open=false; tick()
+    visit(gx,gy)
+    px,py=EntityGetTransform(player)
+    assert(math.abs(px-8660)<=44 and py==13 and tick().landmarkName[1]=="金字塔西麓")
+    -- A 0.42.5 save has only the main world's keys. Each newly visited copy
+    -- checks its own terrain and is listed even if it has no Holy Mountains.
+    local width=BiomeMapGetSize()*512
+    local east,west=width,-2*width
+    assert(not visit(east+8660,12).near and #EntityGetWithTag(tag)==2)
+    for _,s in ipairs({{east+9984,-640,"$biome_pyramid"},{west-9970,768,"$biome_vault_frozen"},
+        {west+9984,-640,"$biome_pyramid"}}) do entities[EntityLoad("test.xml",s[1],s[2])].biome=s[3] end
+    assert(visit(east+8860,12).landmarkName==nil and #EntityGetWithTag(tag)==3)
+    visit(sx,sy-6); inventory_open=true
+    assert(#tick().travel.groups==1,"undiscovered world must stay hidden")
+    inventory_open=false
+    assert(visit(east+8660,12).near and not visit(east-9700,-42).near)
+    assert(visit(west-9700,-42).near and visit(west+8660,12).near)
+    boot(); visit(west+8660,12); assert(#EntityGetWithTag(tag)==5)
+    visit(sx,sy-6); inventory_open=true
+    local groups=tick().travel.groups
+    assert(#groups==3 and #groups[1].routes==3 and groups[2].world==1 and #groups[2].routes==1)
+    assert(groups[3].world==-2 and #groups[3].routes==2 and groups[3].routes[1].name[1]=="冻结避难所东崖")
+    tick(nil,"travel_to",groups[2].routes[1].index); inventory_open=false; tick(); visit(gx,gy)
+    px,py=EntityGetTransform(player)
+    assert(math.abs(px-east-8660)<=44 and py==13 and tick().near)
+    for i=1,37 do tick(10) end
+    visit(EntityGetTransform(assert(EntityGetWithTag("nh_travel_gate")[1])))
+    px,py=EntityGetTransform(player)
+    assert(cabin.inside(px,py) and world["nh_travel.trip"]=="")
+    -- NG+ uses a narrower biome map and separate run globals.
+    local originalSize,originalCycle=BiomeMapGetSize,SessionNumbersGetValue
+    function BiomeMapGetSize() return 64,48 end
+    function SessionNumbersGetValue() return "1" end
+    boot()
+    local ngEast=64*512
+    entities[EntityLoad("test.xml",ngEast+9984,-640)].biome="$biome_pyramid"
+    assert(visit(ngEast+8660,12).near and world["nh_travel.ng1.world1.pyramid_unlocked"]=="1")
+    assert(not world["nh_travel.ng1.pyramid_unlocked"])
+    BiomeMapGetSize,SessionNumbersGetValue=originalSize,originalCycle
+    RaytraceSurfaces,RaytracePlatforms,RaytraceSurfacesAndLiquiform,GameGetSkyVisibility,DoesWorldExistAt=ray,platform,liquid,sky,stream
 end
 
 -- Drive both sides through the inventory callback. Account for the native
@@ -1118,12 +1332,24 @@ local function testShop()
     local function buy(id) return tick(nil,"shop_buy",{id=id}) end
     inventory_open=true
     local unfinanced=has_project(buy("water").shopGoods,"water")
-    assert(not unfinanced.ready and unfinanced.price==20 and unfinanced.quantity==250)
+    assert(not unfinanced.ready and unfinanced.price==5 and unfinanced.quantity==250)
     buy("water")
     assert(wallet.money==400 and not state().materials.water)
     tick(nil,"bank_transfer",{direction="deposit",amount=320})
     local view=tick()
-    assert(view.bankGold==320 and view.walletGold==80 and #view.shopGoods==11)
+    assert(view.bankGold==320 and view.walletGold==80 and #view.shopGoods==18+5)
+    for _,offer in ipairs(NHStormProducts.offers) do
+        local entry=has_project(view.shopGoods,offer.id)
+        assert(entry.category=="storm_products" and entry.icon==offer.icon and entry.resourceStock==0 and not entry.ready)
+        assert(entry.resourceName==NHStore.alchemyResources[offer.resource].en and entry.quantity==1)
+    end
+    for _,recipe in ipairs(NHStormProducts.recipes) do
+        assert(not has_project(view.recipes,recipe.id))
+        local entry=has_project(view.shopGoods,recipe.id)
+        assert(entry.category=="storm_products" and entry.icon==recipe.icon and #entry.inputs==1)
+        assert(entry.inputs[1].amount==1 and entry.inputs[1].available==0)
+        for _,out in ipairs(entry.outputs) do assert(out.amount==20) end
+    end
     assert(has_project(view.shopGoods,"medkit").category=="supplies")
     entities[player].x=900
     buy("water")
@@ -1143,21 +1369,67 @@ local function testShop()
     buy("medkit")
     buy("injector")
     local settled=tick()
-    assert(settled.bankGold==20 and wallet.money==80 and wallet.money_spent==0)
+    assert(settled.bankGold==185 and wallet.money==80 and wallet.money_spent==0)
     assert(state().materials.water==250 and settled.warehouse.supplies[1].kind=="medkit")
-    assert(settled.warehouse.supplies[2].kind=="dose" and settled.warehouse.supplies[2].remaining==3)
+    assert(settled.warehouse.supplies[2].kind=="dose" and settled.warehouse.supplies[2].remaining==5)
     local recent=state()
-    assert(NHStore.spendGold(recent,1) and NHStore.commit(recent))
+    assert(NHStore.spendGold(recent,181) and NHStore.commit(recent))
     assert(has_project(settled.shopGoods,"water").ready)
     buy("water") -- recheck the price against the latest profile
-    assert(state().bankGold==19 and state().materials.water==250)
+    assert(state().bankGold==4 and state().materials.water==250)
     assert(not has_project(tick().shopGoods,"water").ready)
     boot()
     local resumed=tick()
-    assert(resumed.bankGold==19 and not has_project(resumed.shopGoods,"water").ready)
+    assert(resumed.bankGold==4 and not has_project(resumed.shopGoods,"water").ready)
     assert(#state().warehouse==2 and wallet.money==80)
+    local kit=resumed.warehouse.supplies[1]
+    local sell={id=kit.id,kind=kit.kind,slot=1,mode="sell",quantity=1,count=kit.trade.count,remaining=kit.trade.remaining}
+    assert(kit.trade.oneGold==25)
+    fail_commit=true
+    tick(nil,"supply_trade",sell)
+    fail_commit=false
+    assert(state().bankGold==4 and #state().warehouse==2)
+    boot(); tick()
+    tick(nil,"supply_trade",sell)
+    tick(nil,"supply_trade",sell)
+    assert(state().bankGold==29 and #state().warehouse==1)
 end
 testShop()
+do
+    settings,flags={},{}
+    new_world()
+    EntityAddComponent2(player,"WalletComponent",{money=0})
+    local profile=state()
+    for slot,kind in ipairs({"storm_mercury_pressure","storm_mana_pure"}) do
+        local product=NHStormProducts.types[kind]
+        profile.warehouse[slot]={id=profile.nextItemId,slot=slot,item={kind=kind,count=1,name=product.en,icon=product.icon}}
+        profile.nextItemId=profile.nextItemId+1
+    end
+    assert(NHStore.commit(profile))
+    boot()
+    inventory_open=true
+    local view=tick()
+    for slot,kind in ipairs({"storm_mercury_pressure","storm_mana_pure"}) do
+        local row=view.warehouse.supplies[slot]
+        assert(row.kind==kind and row.trade.units==50 and not row.trade.oneGold)
+        tick(nil,"supply_trade",{id=row.id,slot=slot,kind=kind,count=1,quantity=1,mode="convert"})
+    end
+    view=tick()
+    assert(has_project(view.shopGoods,"sell_red_mercury").resourceStock==50)
+    assert(has_project(view.shopGoods,"sell_crystallized_mana").resourceStock==50)
+    for _,recipe in ipairs(NHStormProducts.recipes) do
+        assert(has_project(view.shopGoods,recipe.id).ready)
+        tick(nil,"craft",{id=recipe.id})
+    end
+    tick(nil,"shop_buy",{id="sell_red_mercury"})
+    tick(nil,"shop_buy",{id="sell_crystallized_mana"})
+    boot()
+    local saved=state()
+    assert(#saved.warehouse==0 and saved.bankGold==1000)
+    assert(saved.resources.nh_red_mercury==48 and saved.resources.nh_crystallized_mana==47)
+    assert(saved.materials.midas==20 and saved.resources.nh_elixir_of_immortality==20)
+    assert(saved.resources.arcane_scrap==20 and saved.resources.container_scrap==20)
+end
 print("Controller: shop previews, range, deposits, commit failure, stale funds and reload passed.")
 
 local function testPowderSeparation()
@@ -1207,9 +1479,9 @@ do
         inventory_open=true
         local view=tick()
         local warehouse=has_project(view.progression.expansion,"warehouse_wand")
-        local knife=has_project(view.recipes,"sand_knife")
+        local grenade=has_project(view.recipes,"grenade")
         assert(warehouse.canBuy and warehouse.costs[1].available==240 and warehouse.costs[2].available==200)
-        assert(knife.ready and knife.inputs[1].name==warehouse.costs[1].name and knife.inputs[1].available==240)
+        assert(grenade.ready and grenade.inputs[1].name==warehouse.costs[1].name and grenade.inputs[1].available==240)
         assert(warehouse.costs[1].detail:find("Stock / payment",1,true)
             and warehouse.costs[1].detail:find("Surface sandstone  25 / 20",1,true))
         assert(warehouse.materialPayment.sandstone==180 and warehouse.materialPayment.sandstone_surface==20)
@@ -1224,12 +1496,8 @@ do
         tick(nil,"buy_upgrade",{id="warehouse_wand",level=0})
         local stock=state().materials
         assert(not stock.sandstone and stock.sandstone_surface==5 and not stock.water_fading and stock.water_temp==100)
-        knife=has_project(tick().recipes,"sand_knife")
-        assert(knife.ready and knife.inputs[1].available==40 and knife.inputs[1].detail:find("Surface sand  33 / 33",1,true))
-        tick(nil,"craft",{id="sand_knife"})
-        stock=state().materials
-        assert(not stock.sand_surface and not stock.sand_blue and not stock.sandstone_surface and not stock.sand_petrify)
-        advance(knife.duration*60)
+        grenade=has_project(tick().recipes,"grenade")
+        assert(not grenade.ready and grenade.inputs[1].available==40)
         tick(nil,"craft",{id="medical"})
         stock=state().materials
         assert(not stock.blood_fading and not stock.water_temp and stock.water_swamp==500)
@@ -1248,7 +1516,7 @@ local function testCatalyticWorkshop()
     local menu=tick().recipes
     local midas=assert(has_project(menu,"midas"))
     assert(midas.ready and #midas.catalysts==1 and midas.catalysts[1].available==1)
-    assert(midas.duration==180 and #midas.outputs==1 and midas.outputs[1].amount==100 and midas.outputs[1].key=="midas")
+    assert(midas.duration==0 and #midas.outputs==1 and midas.outputs[1].amount==100 and midas.outputs[1].key=="midas")
     assert(not has_project(menu,"mana").ready and has_project(menu,"mana").reason=="Missing catalyst.")
     for _,recipe in ipairs(menu) do
         for _,result in ipairs(recipe.outputs) do assert(result.key~="gold") end
@@ -1256,8 +1524,8 @@ local function testCatalyticWorkshop()
     tick(nil,"craft",{id="midas"})
     boot()
     local inProgress=has_project(tick().recipes,"midas")
-    assert(inProgress.catalysts[1].held==1 and inProgress.catalysts[1].available==0)
-    assert(inProgress.outputs[1].amount==100 and not state().materials.midas)
+    assert(inProgress.catalysts[1].held==0 and inProgress.catalysts[1].available==101)
+    assert(inProgress.outputs[1].amount==100 and state().materials.midas==101)
     advance(midas.duration*60)
     assert(state().materials.midas==101 and state().materials.midas_precursor==400)
     assert(not state().materials.gold and state().bankGold==0 and not state().order)
@@ -1280,11 +1548,11 @@ local function testLegacyMedkitOrder()
     boot()
     inventory_open=true
     local view=tick()
-    assert(view.order_active and view.order_name=="Medkit" and view.order_remaining==2)
-    assert(not has_project(view.recipes,"medkit_essence") and view.warehouse.supplies[1].kind=="reserved")
-    advance(60)
-    assert(tick().order_remaining==1)
-    advance(60)
+    assert(not view.order_active and not state().order)
+    assert(not has_project(view.recipes,"medkit_essence") and view.warehouse.supplies[1].kind=="medkit")
+    boot()
+    tick()
+    assert(state().finished==1 and #state().warehouse==1)
     local delivered=state()
     assert(not delivered.order and delivered.warehouse[1].item.kind=="medkit")
     assert(tick().warehouse.supplies[1].icon=="mods/noita_hideout/files/items/medkit.png")
@@ -1377,30 +1645,25 @@ local function testFarmController()
     assert(has_project(view.recipes,"bread").ready,"the open workshop must see a passive deposit immediately")
     local bandage=has_project(view.recipes,"bandage")
     local kit=has_project(view.recipes,"field_medkit")
-    assert(bandage.duration==3 and kit.duration==5 and has_project(view.recipes,"medical").duration==5)
-    assert(bandage.ready and bandage.output==8 and bandage.inputs[1].available==6 and bandage.inputs[1].amount==4)
+    assert(bandage.duration==0 and kit.duration==0 and has_project(view.recipes,"medical").duration==0)
+    assert(bandage.ready and bandage.output==4 and bandage.inputs[1].available==6 and bandage.inputs[1].amount==4)
     assert(bandage.inputs[2].available==2 and bandage.inputs[2].amount==2)
     assert(kit.inputs[1].available==2 and kit.inputs[2].available==0 and not kit.ready)
-    assert(kit.inputs[2].detail=="Supplies storage")
+    assert(kit.inputs[2].detail:find("fewest charges",1,true))
     assert(has_project(view.recipes,"bread").category=="food" and has_project(view.recipes,"sugar_cube").category=="food")
     tick(nil,"craft",{id="bandage"})
-    assert(state().order.required==180 and state().resources.fiber==2 and not state().resources.sugar)
-    view=advance(179)
-    assert(view.order_remaining==1 and view.warehouse.supplies[1].kind=="reserved")
+    assert(not state().order and state().resources.fiber==2 and not state().resources.sugar)
     view=tick()
-    assert(view.warehouse.supplies[1].kind=="bandage" and view.warehouse.supplies[1].count==8)
+    assert(view.warehouse.supplies[1].kind=="bandage" and view.warehouse.supplies[1].count==4)
     kit=has_project(view.recipes,"field_medkit")
-    assert(kit.ready and kit.inputs[2].available==8 and kit.inputs[2].amount==1)
+    assert(kit.ready and kit.inputs[2].available==4 and kit.inputs[2].amount==1)
     tick(nil,"craft",{id="field_medkit"})
-    assert(state().order.required==300)
-    assert(advance(120).order_remaining==3)
+    assert(not state().order)
     boot()
-    assert(tick().order_remaining==3,"continue must keep time already spent on a five-second kit")
-    view=advance(178)
-    assert(view.order_remaining==1 and view.warehouse.supplies[1].count==7 and view.warehouse.supplies[2].kind=="reserved")
     view=tick()
-    assert(view.warehouse.supplies[2].kind=="medkit" and view.warehouse.supplies[2].remaining==3)
-    assert(not state().resources.herb and has_project(view.recipes,"field_medkit").inputs[2].available==7)
+    assert(view.warehouse.supplies[1].count==3)
+    assert(view.warehouse.supplies[2].kind=="medkit" and view.warehouse.supplies[2].remaining==8)
+    assert(not state().resources.herb and has_project(view.recipes,"field_medkit").inputs[2].available==3)
     advance(125)
     local elapsed=NHFarm.observe(state(),frame)
     local deadline=state().farm.plots[1].readyAt
@@ -1431,7 +1694,7 @@ do
     new_world()
     local s=state()
     local bag=s.pouches[s.starterPouchId]
-    for i,kind in ipairs({"lightning","frost","healing"}) do assert(NHStore.putPouchDose(bag,3,i+1,kind)) end
+    for i,kind in ipairs({"lightning","frost","healing"}) do assert(NHStore.putPouchDose(bag,5,i+1,kind)) end
     assert(NHStore.commit(s))
     boot()
     local effects={}
@@ -1450,7 +1713,7 @@ do
         tick() -- release the inventory's closing click before using the held item
         tick(nil,nil,nil,"right")
         effects[kind]=assert(EntityGetWithTag(d.tag)[1],kind)
-        assert(EntityGetParent(effects[kind])==player and NHDoses.remaining(state(),syringe)==2)
+        assert(EntityGetParent(effects[kind])==player and NHDoses.remaining(state(),syringe)==4)
         local timer=kind=="healing" and "VariableStorageComponent" or "GameEffectComponent"
         local field=kind=="healing" and "value_int" or "frames"
         local component=EntityGetFirstComponentIncludingDisabled(effects[kind],timer)
@@ -1460,6 +1723,8 @@ do
         assert(#EntityGetWithTag(d.tag)==1 and ComponentGetValue2(component,field)==(kind=="healing" and 60 or 3600))
         tick()
         tick(nil,nil,nil,"right")
+        assert(NHDoses.remaining(state(),syringe)==2)
+        for j=1,2 do tick(); tick(nil,nil,nil,"right") end
         assert(not EntityGetIsAlive(syringe))
     end
     for _,effect in pairs(effects) do assert(EntityGetIsAlive(effect)) end
@@ -1467,10 +1732,10 @@ do
     function GetUpdatedEntityID() return effects.healing end
     for tickNo=1,60 do
         dofile("mods/noita_hideout/files/bread_regeneration.lua")
-        assert(math.abs(health.hp-(1+0.04*math.floor(tickNo/2)))<1e-8)
+        assert(math.abs(health.hp-(1+0.05*math.floor(tickNo/2)))<1e-8)
     end
     assert(not EntityGetIsAlive(effects.healing))
-    print("Controller: four distinct injectors, refresh, concurrent protection and 30 HP per healing dose passed.")
+    print("Controller: four distinct injectors, refresh, concurrent protection and 30% of maximum HP per healing dose passed.")
 end
 
 local function testLivestockController()
@@ -1595,7 +1860,7 @@ local function testGelPoolProduction()
         if row.item.kind=="dose" then dose=row end
         if row.item.species=="slime" then card=row end
     end
-    assert(dose and dose.item.remaining==3 and card and card.item.remaining==80)
+    assert(dose and dose.item.remaining==5 and card and card.item.remaining==80)
     boot()
     entities[player].x=227
     inventory_open=true
@@ -1605,10 +1870,10 @@ local function testGelPoolProduction()
     tick(nil,"open_container",{pouchId=pouch.id,safeSlot=pouch.slot,container="safe"})
     tick(nil,"pack_dose",{pouchId=pouch.id,container="warehouse",safeSlot=dose.slot,targetCell=4})
     local cell=assert(starter().cells[4])
-    assert(cell.remaining==3 and (cell.subtype or "fire")==dose.item.subtype)
+    assert(cell.remaining==5 and (cell.subtype or "fire")==dose.item.subtype)
     tick(nil,"use_inventory",{container="pouch",pouchId=pouch.id,cell=4,kind="dose",
-        count=1,remaining=3,subtype=dose.item.subtype})
-    assert(starter().cells[4].remaining==2)
+        count=1,remaining=5,subtype=dose.item.subtype})
+    assert(starter().cells[4].remaining==4)
 end
 testGelPoolProduction()
 
@@ -1714,7 +1979,7 @@ local function testCardSupplies()
     assert(#state().warehouse==#NHCompanions.order+1)
     tick()
     local lastPet
-    for _,species in ipairs({"bee","dragon","slime"}) do
+    for _,species in ipairs({"bee","dragon","slime","cat","dog"}) do
         local row
         for _,item in ipairs(state().warehouse) do
             if item.item.species==species then row=item; break end
@@ -1856,10 +2121,10 @@ local function testCompanionAffinity()
     for _=1,59 do NHAffinity.follow("dryad",6) end
     advance(360-frame%360)
     assert(state().affinity.dryad==354)
-    assert(NHAffinity.follow("dryad",6)==1)
+    assert(NHAffinity.follow("dryad",6)==10)
     NHAffinity.follow("griffin",6)
     boot()
-    assert(NHAffinity.points(state(),"dryad")==1)
+    assert(NHAffinity.points(state(),"dryad")==10)
     local revision=state().revision
     OnPausedChanged(true,true)
     OnPausedChanged(false,false)
@@ -1869,14 +2134,14 @@ local function testCompanionAffinity()
     OnPausedChanged(true,false)
     assert(state().revision==revision+1)
     new_world()
-    assert(state().runSerial==2 and NHAffinity.points(state(),"dryad")==1)
+    assert(state().runSerial==2 and NHAffinity.points(state(),"dryad")==10)
     NHAffinity.follow("griffin",6)
     OnPlayerDied()
     assert(state().affinity.griffin==12)
     new_world()
-    assert(NHAffinity.points(state(),"dryad")==1)
+    assert(NHAffinity.points(state(),"dryad")==10)
     for _=1,58 do NHAffinity.follow("griffin",6) end
-    assert(NHAffinity.points(state(),"griffin")==1)
+    assert(NHAffinity.points(state(),"griffin")==10)
 end
 testCompanionAffinity()
 print("Controller: affinity checkpoints, pause and new game, continue and death retain each companion's exact progress.")
@@ -1904,14 +2169,12 @@ local function testSpellWorkshopController()
     inventory_open=true
     assert(has_project(tick().spellRecipes.essence_lightning,cloud).ready)
     tick(nil,"craft",{id=healing.id})
-    local order=state().order
-    assert(order and not state().resources.essence_healing and tick().warehouse.spell[order.output.slot].kind=="reserved")
+    assert(not state().order and not state().resources.essence_healing)
     boot()
     tick()
-    advance(order.required)
-    local card=tick().warehouse.spell[order.output.slot]
+    local card=tick().warehouse.spell[1]
     assert(card.spell_uses==20 and card.essence.amount==175 and state().finished==1)
-    tick(nil,"salvage",{id=card.id,kind="spell",slot=order.output.slot,mode="essence"})
+    tick(nil,"salvage",{id=card.id,kind="spell",slot=1,mode="essence"})
     assert(state().resources.essence_healing==175 and #state().warehouse==0)
 end
 testSpellWorkshopController()
@@ -1934,7 +2197,7 @@ local function testTieredMedkits()
     inventory_open=true
     local function checkRecipe(id,duration,uses,percent,need,herbs,ingredient,count)
         local recipe=assert(has_project(tick().recipes,id))
-        assert(recipe.ready and recipe.category=="medical" and recipe.duration==duration)
+        assert(recipe.ready and recipe.category=="medical" and recipe.duration==0)
         assert(recipe.medkit.uses==uses and recipe.medkit.healPercent==percent)
         assert(recipe.inputs[1].essence=="essence_healing" and recipe.inputs[1].amount==need)
         assert(recipe.inputs[2].amount==herbs)
@@ -1942,30 +2205,24 @@ local function testTieredMedkits()
         assert(input.name==ingredient and input.available==count and input.amount==1)
         assert(input.detail:find("fewest charges",1,true))
     end
-    checkRecipe("tactical_medkit",60,9,15,2,4,"Medkit (1/3)",2)
+    checkRecipe("tactical_medkit",60,6,25,2,4,"Medkit (1/8)",2)
     tick(nil,"craft",{id="tactical_medkit"})
-    local order=state().order
-    assert(order.required==3600 and state().resources.essence_healing==3 and state().resources.herb==8)
-    assert(tick().warehouse.supplies[1].remaining==3 and tick().warehouse.supplies[order.output.slot].kind=="reserved")
-    advance(order.required)
+    assert(not state().order and state().resources.essence_healing==3 and state().resources.herb==8)
+    assert(tick().warehouse.supplies[1].remaining==8)
     local built=state()
-    local tactical=assert(tick().warehouse.supplies[order.output.slot])
-    assert(tactical.kind=="tactical_medkit" and tactical.remaining==9)
+    local tactical=assert(tick().warehouse.supplies[2])
+    assert(tactical.kind=="tactical_medkit" and tactical.remaining==6 and tactical.count==4)
     for _,row in ipairs(built.warehouse) do
-        if row.id==tactical.id then row.item.remaining=7 end
+        if row.id==tactical.id then row.item.remaining=5 end
     end
     assert(NHStore.commit(built))
     boot()
-    checkRecipe("advanced_medkit",180,12,25,3,8,"Tactical medkit (7/9)",1)
+    checkRecipe("advanced_medkit",180,6,40,3,8,"Tactical medkit (5/6)",4)
     tick(nil,"craft",{id="advanced_medkit"})
-    order=state().order
-    assert(order.required==10800 and not state().resources.essence_healing and not state().resources.herb)
+    assert(not state().order and not state().resources.essence_healing and not state().resources.herb)
     boot()
-    local reserved=tick().warehouse.supplies[order.output.slot]
-    assert(reserved.kind=="reserved")
-    advance(order.required)
-    local advanced=tick().warehouse.supplies[order.output.slot]
-    assert(advanced.kind=="advanced_medkit" and advanced.remaining==12 and state().finished==2)
+    local advanced=tick().warehouse.supplies[3]
+    assert(advanced.kind=="advanced_medkit" and advanced.remaining==6 and advanced.count==4 and state().finished==2)
 end
 testTieredMedkits()
 print("Controller: worn kits upgrade for fixed prices and both higher tiers arrive with full charges.")
@@ -1986,8 +2243,8 @@ local function testSurgeryFromWorkshop()
     local recipe=assert(has_project(tick().recipes,"field_surgery_kit"))
     assert(recipe.ready and recipe.medkit.castFrames==180 and recipe.medkit.healPercent==20)
     tick(nil,"craft",{id=recipe.id})
-    local built=advance(state().order.required).warehouse.supplies[1]
-    assert(built.kind==recipe.id and built.remaining==1)
+    local built=tick().warehouse.supplies[1]
+    assert(built.kind==recipe.id and built.remaining==8 and built.count==4)
     tick(nil,"secure_withdraw",{container="warehouse",kind=built.kind,storedId=built.id,safeSlot=1,
         parent=quick,lane="tool",xslot=1,yslot=0})
     for _,slot in ipairs(tick().native_slots) do
@@ -2018,15 +2275,15 @@ local function testSurgeryFromWorkshop()
     assert(status and status.total==180 and status.elapsed==0)
     assert(advance(100).surgery.elapsed==100)
     health.hp=0.9
-    assert(not tick().surgery and EntityGetIsAlive(held) and health.mIsOnFire and buff.frames==7200)
-    assert(tick(nil,nil,nil,"right").surgery.elapsed==0)
-    assert(advance(179).surgery.elapsed==179 and health.hp==0.9)
+    assert(tick().surgery.elapsed==101 and health.mIsOnFire and buff.frames==7200)
+    health.hp=0.8
+    assert(advance(78).surgery.elapsed==179 and entities[held].comps.ItemComponent.uses_remaining==32)
     local kit=held
-    assert(not tick().surgery and not EntityGetIsAlive(kit) and health.hp==8.9)
+    assert(not tick().surgery and EntityGetIsAlive(kit) and entities[kit].comps.ItemComponent.uses_remaining==31 and health.hp==8.8)
     assert(not health.mIsOnFire and health.mFireFramesLeft==0 and EntityGetIsAlive(food) and buff.frames==7200)
 end
 testSurgeryFromWorkshop()
-print("Controller: craft, withdraw, interrupt and complete surgery through the normal game callbacks.")
+print("Controller: a crafted kit completes surgery under fire damage and spends one charge.")
 
 local function testInventoryRightClick()
     settings,flags={},{}
@@ -2038,7 +2295,7 @@ local function testInventoryRightClick()
         table.insert(saved[container],{slot=slot,id=id,item={kind=kind,count=count,remaining=remaining}})
         return {container=container,slot=slot,storedId=id,kind=kind,count=count,remaining=remaining}
     end
-    local bandage=stock("warehouse",1,"bandage",8)
+    local bandage=stock("warehouse",1,"bandage",4)
     local secure=stock("safe",1,"bandage",3)
     local carried=stock("warehouse",2,"medkit",nil,2)
     local kit=stock("warehouse",3,"field_surgery_kit",nil,1)
@@ -2069,19 +2326,21 @@ local function testInventoryRightClick()
     local health=EntityAddComponent2(player,"DamageModelComponent",{hp=40,max_hp=40})
     inventory_open=true
     right(bandage)
-    assert(health.hp==40 and stored(bandage).count==8)
+    assert(health.hp==40 and stored(bandage).count==4)
     health.hp=1
     fail_commit=true
     right(bandage)
+    advance(30)
     fail_commit=false
-    assert(health.hp==1 and stored(bandage).count==8)
+    assert(health.hp==1 and stored(bandage).count==4)
     advance(61)
     right(bandage)
-    assert(health.hp==1.2 and stored(bandage).count==7)
+    assert(advance(29).surgery.elapsed==29 and health.hp==1)
+    assert(not tick().surgery and health.hp==3 and stored(bandage).count==4 and stored(bandage).remaining==7)
     right(bandage) -- The HUD still describes the eight-roll stack.
-    assert(health.hp==1.2 and stored(bandage).count==7)
+    assert(health.hp==3 and stored(bandage).count==4 and stored(bandage).remaining==7)
     right(secure)
-    assert(health.hp==1.4 and stored(secure).count==2)
+    assert(not advance(30).surgery and health.hp==5 and stored(secure).count==3 and stored(secure).remaining==7)
 
     local native=withdraw(carried,1)
     local unused=EntityLoad("dummy.xml",227,-85)
@@ -2090,23 +2349,23 @@ local function testInventoryRightClick()
     health.hp=1
     right(native)
     local charges=EntityGetFirstComponentIncludingDisabled(native.entity,"ItemComponent")
-    assert(health.hp==1.4 and charges.uses_remaining==1 and held==unused)
+    assert(not advance(60).surgery and health.hp==7 and charges.uses_remaining==1 and held==unused)
     ComponentSetValue2(charges,"inventory_slot",2,0)
     right(native)
-    assert(health.hp==1.4 and charges.uses_remaining==1 and held==unused)
+    assert(health.hp==7 and charges.uses_remaining==1 and held==unused)
 
     right(kit)
     assert(tick().surgery and stored(kit).remaining==1)
     EntitySetTransform(player,1000,-85)
-    assert(not tick().surgery and stored(kit).remaining==1 and health.hp==1.4)
+    assert(not tick().surgery and stored(kit).remaining==1 and health.hp==7)
     EntitySetTransform(player,227,-85)
     right(kit)
-    assert(advance(179).surgery.elapsed==179 and health.hp==1.4)
-    assert(not tick().surgery and not stored(kit) and health.hp==9.4 and held==unused)
+    assert(advance(179).surgery.elapsed==179 and health.hp==7)
+    assert(not tick().surgery and not stored(kit) and health.hp==15 and held==unused)
     right(movedKit)
     assert(tick().surgery)
     local movedNative=withdraw(movedKit,1)
-    assert(not tick().surgery and not stored(movedKit) and health.hp==9.4)
+    assert(not tick().surgery and not stored(movedKit) and health.hp==15)
     assert(EntityGetFirstComponentIncludingDisabled(movedNative.entity,"ItemComponent").uses_remaining==1)
 
     local oldValue,oldLoad,oldShoot=ComponentGetValue2,EntityLoad,GameShootProjectile
@@ -2150,7 +2409,7 @@ local function testRemoteTerminal()
     settings,flags={},{}
     new_world()
     local saved=state()
-    saved.resources.essence_displacement,saved.bankGold=10,100
+    saved.resources.arcane_scrap,saved.bankGold=1,100
     local backup={id=saved.nextItemId,slot=1,item=NHEquipment.remoteItem()}
     backup.item.remaining=1
     saved.nextItemId=saved.nextItemId+1
@@ -2159,8 +2418,8 @@ local function testRemoteTerminal()
     boot()
     inventory_open=true
     local recipe=assert(has_project(tick().recipes,"remote_terminal"))
-    assert(recipe.category=="equipment" and recipe.ready and recipe.inputs[1].essence=="essence_displacement"
-        and recipe.inputs[1].amount==10 and recipe.inputs[2].amount==100 and recipe.inputs[2].available==100)
+    assert(recipe.category=="equipment" and recipe.ready and recipe.inputs[1].amount==1
+        and recipe.inputs[2].amount==100 and recipe.inputs[2].available==100)
     local reserve={kind="remote_terminal",container="safe",slot=1,storedId=backup.id,remaining=1}
     tick(nil,"move_terminal",{source="safe",from=1,entity=backup.id,destination="warehouse",safeSlot=1})
     local parked=assert(tick().warehouse.equipment[1])
@@ -2189,7 +2448,7 @@ local function testRemoteTerminal()
     held=terminal.entity
     tick()
     local pending=tick(nil,nil,nil,"right")
-    assert(pending.remote_linked and not pending.open and not pending.near and charges(held)==19)
+    assert(pending.remote_linked and not pending.open and pending.near and charges(held)==19)
     tick(nil,nil,nil,"right")
     tick()
     tick(nil,nil,nil,"right")
@@ -2197,7 +2456,7 @@ local function testRemoteTerminal()
     inventory_open=true
     assert(tick().near and tick().remote_linked)
     tick(nil,"use_inventory",terminal)
-    assert(charges(held)==19 and #EntityGetWithTag("noita_hideout_home_wand_edit")==0)
+    assert(charges(held)==19 and #EntityGetWithTag("noita_hideout_home_wand_edit")==1)
     local pouch=state().starterPouchId
     local deposit={pouchId=pouch,source="safe",destination="warehouse",from=2,safeSlot=2}
     local withdraw={pouchId=pouch,source="warehouse",destination="safe",from=2,safeSlot=2}
@@ -2207,31 +2466,40 @@ local function testRemoteTerminal()
     tick(nil,"move_pouch",deposit)
     assert(starter().location=="warehouse" and tick().near)
     inventory_open=false
-    assert(not tick().remote_linked)
+    assert(tick().remote_linked and #EntityGetWithTag("noita_hideout_home_wand_edit")==1)
+    boot()
+    assert(tick().near and tick().remote_linked and #EntityGetWithTag("nh_remote_station")==1)
+    EntitySetTransform(player,1100,-85)
     inventory_open=true
-    assert(not tick().near)
+    assert(not tick().near and #EntityGetWithTag("noita_hideout_home_wand_edit")==0)
     tick(nil,"move_pouch",withdraw)
     assert(starter().location=="warehouse")
+    EntitySetTransform(player,1000,-85)
+    assert(tick().near)
+    EntitySetTransform(player,1200,-85)
 
-    -- A failed profile write gives no access. The final stored charge opens a full session.
+    -- The equipped link can deploy directly. Failed payment preserves the link.
+    tick(nil,"move_gear",{kind="remote_terminal",source="safe",from=1,entity=backup.id,destination="gear"})
+    reserve={kind="remote_terminal",container="gear",storedId=backup.id,remaining=1}
+    assert(state().gearLink.id==backup.id)
     fail_commit=true
     tick(nil,"use_inventory",reserve)
     fail_commit=false
-    assert(not advance(61).remote_linked and state().safe[1].item.remaining==1)
+    assert(not advance(61).remote_linked and state().gearLink.item.remaining==1)
+    assert(#EntityGetWithTag("nh_remote_station")==1)
     tick(nil,"use_inventory",reserve)
-    assert(tick().remote_linked and not NHStore.safeIndex(state(),1))
+    assert(tick().remote_linked and not state().gearLink)
+    assert(#EntityGetWithTag("nh_remote_station")==2)
     tick(nil,"move_pouch",withdraw)
     assert(starter().location=="safe")
     terminal=retrieve(tick())
     assert(charges(terminal.entity)==19)
-    inventory_open=false
-    tick()
-    inventory_open=true
-    assert(not tick().near)
-    tick(nil,"use_inventory",terminal)
-    assert(tick().remote_linked and charges(terminal.entity)==18)
     boot()
-    assert(not tick().near and not tick().remote_linked)
+    assert(tick().near and tick().remote_linked)
+    -- Deadlines expire even when the entity's own Lua tick was not running.
+    advance(36001)
+    assert(not tick().near and not tick().remote_linked and #EntityGetWithTag("nh_remote_station")==0)
+    assert(#EntityGetWithTag("noita_hideout_home_wand_edit")==0)
 
     -- The throw edge is captured before the engine switches the inventory on.
     inventory_open=false
@@ -2242,12 +2510,8 @@ local function testRemoteTerminal()
     OnWorldPostUpdate=function() inventory_open=true; post() end
     local linked=tick(nil,nil,nil,"right")
     OnWorldPostUpdate=post
-    assert(linked.near and linked.remote_linked and charges(held)==17)
-    entities[player].tags.player_unit=nil
-    tick()
-    entities[player].tags.player_unit=true
-    assert(not tick().near and not tick().remote_linked)
-
+    assert(linked.near and linked.remote_linked and charges(held)==18)
+    EntitySetTransform(player,1400,-85)
     inventory_open=false
     tick()
     tick()
@@ -2265,4 +2529,1296 @@ local function testRemoteTerminal()
     assert(not tick().near and not tick().remote_linked)
 end
 testRemoteTerminal()
-print("Controller: remote crafting, one paid inventory session, repeated field transfers and disconnect passed.")
+print("Controller: remote deployment, payment rollback, range access, save/continue, expiry and last-charge use passed.")
+do
+    settings,flags={},{}
+    new_world()
+    tick()
+    local original=EntityLoad
+    local shots=0
+    function EntityLoad(path,x,y)
+        local id=original(path,x,y)
+        if path==NHGuns.types.derringer.projectile then
+            EntityAddComponent2(id,"ProjectileComponent",{})
+            EntityAddComponent2(id,"VelocityComponent",{})
+        end
+        return id
+    end
+    function DEBUG_GetMouseWorld() return 320,-85 end
+    function GameShootProjectile() shots=shots+1 end
+    local id=EntityLoad("mods/noita_hideout/files/items/derringer.xml",227,-85)
+    GamePickUpInventoryItem(player,id)
+    held=id
+    local item=EntityGetFirstComponentIncludingDisabled(id,"ItemComponent")
+    item.uses_remaining=4
+    inventory_open=true
+    tick(nil,nil,nil,"left")
+    inventory_open=false
+    tick(nil,nil,nil,"left")
+    assert(shots==0)
+    tick()
+    for i=1,4 do
+        tick(nil,nil,nil,"left")
+        tick(nil,nil,nil,"left")
+        assert(shots==i)
+        if i<4 then assert(item.uses_remaining==4-i and EntityGetIsAlive(id)) end
+        tick()
+    end
+    assert(not EntityGetIsAlive(id))
+    EntityLoad=original
+end
+do
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    tick()
+    local target
+    NHUI.quickTarget=function() return target end
+    function InputIsKeyDown(key) return keys[key] end
+    local function click(slot,key)
+        target=slot
+        tick()
+        return tick(key or 225,nil,nil,"left")
+    end
+    local function carried(id)
+        for _,slot in ipairs(model.native_slots) do if slot.entity==id then return slot end end
+    end
+    local function stock(container)
+        local row=state()[container][1]
+        return {key=container=="safe" and "valuable" or "warehouse",entity=row.id,kind=row.item.kind,safeSlot=row.slot}
+    end
+    local id=EntityLoad("mods/noita_hideout/files/items/fire_tube.xml",227,-85)
+    GamePickUpInventoryItem(player,id)
+    entities[id].comps.ItemComponent.uses_remaining=14
+    tick()
+    click(carried(id))
+    assert(not EntityGetIsAlive(id) and state().warehouse[1].item.count==3)
+    click(stock("warehouse"),229)
+    local toolId=GameGetAllInventoryItems(player)[1]
+    assert(entities[toolId].comps.ItemComponent.uses_remaining==2 and state().warehouse[1].item.count==2)
+    tick(229,nil,nil,"left")
+    assert(state().warehouse[1].item.count==2 and not controls.mButtonDownLeftClick)
+    for x=1,3 do
+        local filler=EntityLoad("mods/noita_hideout/files/items/bandage.xml",227,-85)
+        GamePickUpInventoryItem(player,filler)
+        entities[filler].comps.ItemComponent.slotX=x
+    end
+    fail_commit=true
+    click(stock("warehouse"))
+    fail_commit=false
+    assert(state().warehouse[1].item.count==2 and entities[toolId].comps.ItemComponent.uses_remaining==2)
+    click(stock("warehouse"))
+    assert(#state().safe==0 and state().warehouse[1].item.count==1 and entities[toolId].comps.ItemComponent.uses_remaining==8)
+    EntitySetTransform(player,1000,-85)
+    tick()
+    click(carried(toolId))
+    assert(#state().safe==1 and state().safe[1].item.remaining==2 and state().safe[1].item.count==2 and state().warehouse[1].item.count==1)
+    click(stock("safe"))
+    assert(#state().safe==0 and #GameGetAllInventoryItems(player)==4)
+end
+print("Shift-click routes between inventory, warehouse and safe, splits one worn tube and claims each press once.")
+
+do
+    settings,flags={},{}
+    new_world()
+    tick()
+    dofile("mods/noita_hideout/files/bag_pickup.lua")
+    function EntityGetInRadius(x,y,r)
+        local list={}
+        for id,e in pairs(entities) do
+            if (x-e.x)^2+(y-e.y)^2<=r*r then list[#list+1]=id end
+        end
+        return list
+    end
+    local function bag(kind,count,slot)
+        local id=EntityLoad("mods/noita_hideout/files/items/"..kind..".xml",227,-85)
+        local c=entities[id].comps.ItemComponent
+        c.uses_remaining,c.is_pickable,c.next_frame_pickable,c.item_pickup_radius=count,true,0,14.1
+        if slot then
+            GamePickUpInventoryItem(player,id)
+            c.slotX=slot
+        end
+        return id
+    end
+    local function press(shift)
+        controls.mButtonDownInteract=true
+        controls.mButtonFrameInteract=frame+1
+        tick(shift and 225)
+        controls.mButtonDownInteract=false
+    end
+    local pack=bag("travel_pack",3,0)
+    local satchel=bag("travel_satchel",7,1)
+    bag("bandage",1,2)
+    local extra=bag("travel_satchel",2,3)
+    item_pickup(extra,player)
+    assert(entities[satchel].comps.ItemComponent.uses_remaining==7)
+    tick()
+    assert(not entities[extra] and entities[satchel].comps.ItemComponent.uses_remaining==9)
+    bag("bandage",1,3)
+    local ground=bag("travel_pack",2)
+    press()
+    assert(not entities[ground] and entities[pack].comps.ItemComponent.uses_remaining==5)
+    local box=bag("loot_case",3)
+    press()
+    assert(not entities[box] and state().safe[1].item.kind=="loot_case" and state().safe[1].item.count==3)
+    EntityKill(satchel)
+    box=bag("loot_case",2)
+    press()
+    assert(not entities[box] and state().safe[1].item.count==5)
+    box=bag("loot_case",1)
+    fail_commit=true
+    press(true)
+    fail_commit=false
+    assert(entities[box] and state().safe[1].item.count==5)
+    press(true)
+    assert(not entities[box] and state().safe[1].item.count==6)
+    ground=bag("travel_pack",1)
+    press(true)
+    assert(entities[ground] and entities[pack].comps.ItemComponent.uses_remaining==5)
+    EntityAddComponent2(ground,"ItemCostComponent",{cost=20})
+    press()
+    assert(entities[ground] and entities[pack].comps.ItemComponent.uses_remaining==5)
+
+    inventory_open=true
+    tick()
+    local target
+    NHUI.quickTarget=function() return target end
+    local function shiftClick(container)
+        local row=state()[container][1]
+        target={key=container=="safe" and "valuable" or "warehouse",entity=row.id,kind=row.item.kind,safeSlot=row.slot}
+        tick()
+        tick(225,nil,nil,"left")
+    end
+    shiftClick("safe")
+    local heldBox=bag("loot_case",3,1)
+    fail_commit=true
+    shiftClick("warehouse")
+    fail_commit=false
+    assert(state().warehouse[1].item.count==6 and entities[heldBox].comps.ItemComponent.uses_remaining==3)
+    shiftClick("warehouse")
+    assert(state().warehouse[1].item.count==5 and entities[heldBox].comps.ItemComponent.uses_remaining==4)
+    assert(entities[pack].comps.ItemComponent.uses_remaining==5)
+
+    inventory_open=false
+    EntityKill(ground)
+    EntityKill(heldBox)
+    tick()
+    local medicine=bag("bandage",3)
+    local neighbour=bag("loot_case",2)
+    local post=OnWorldPostUpdate
+    OnWorldPostUpdate=function()
+        controls.mButtonDownInteract,controls.mButtonFrameInteract=true,frame
+        GamePickUpInventoryItem(player,medicine)
+        local c=entities[medicine].comps.ItemComponent
+        c.slotX,c.mFramePickedUp=1,frame
+        post()
+    end
+    tick(225)
+    OnWorldPostUpdate=post
+    assert(not entities[medicine] and state().safe[1].item.kind=="bandage" and state().safe[1].item.count==1 and state().safe[1].item.remaining==3)
+    tick()
+    assert(entities[neighbour] and state().safe[1].item.remaining==3)
+end
+print("Mixed ground pickups, full quickbar, secure stacks, explicit secure pickup and rollback passed.")
+
+do
+    settings,flags={},{}
+    new_world()
+    local s=state()
+    local row={id=s.nextItemId,slot=1,item=NHLootBags.item("loot_case",2)}
+    s.nextItemId=s.nextItemId+1
+    s.warehouse={row}
+    assert(NHStore.commit(s))
+    boot()
+    local rng=ProceduralRandomi
+    local rolls
+    function ProceduralRandomi(x,y,lo,hi)
+        if not rolls then return rng(x,y,lo,hi) end
+        local result=table.remove(rolls,1)
+        assert(result and result>=lo and result<=hi)
+        return result
+    end
+    local function open(action,ref)
+        tick()
+        rolls={100,2,100,100}
+        tick(nil,action,ref,"right")
+        assert(#rolls==0)
+        rolls=nil
+    end
+    inventory_open=true
+    tick()
+    local ref={container="warehouse",slot=1,storedId=row.id,kind="loot_case",count=2}
+    fail_commit=true
+    open("use_inventory",ref)
+    fail_commit=false
+    assert(state().warehouse[1].item.count==2 and #EntityGetWithTag("noita_hideout_dose")==0)
+    advance(61)
+    open("use_inventory",ref)
+    local dose=assert(EntityGetWithTag("noita_hideout_dose")[1])
+    local left,subtype=NHDoses.remaining(state(),dose)
+    assert(left==5 and subtype=="regen_mana" and state().warehouse[1].item.count==1)
+    local source={container="warehouse",kind="loot_case",safeSlot=1,storedId=row.id,parent=quick,lane="tool",xslot=0,yslot=0}
+    tick(nil,"secure_withdraw",source)
+    held=assert(EntityGetWithTag("noita_hideout_loot_case")[1])
+    inventory_open=false
+    tick()
+    open()
+    assert(not EntityGetIsAlive(held) and #EntityGetWithTag("noita_hideout_dose")==2)
+    assert(NHDoses.reconcile(state(),player) and #EntityGetWithTag("noita_hideout_dose")==2)
+    GamePickUpInventoryItem(player,dose)
+    held=dose
+    for expected=4,0,-1 do
+        tick()
+        tick(nil,nil,nil,"right")
+        if expected>0 then assert(NHDoses.remaining(state(),dose)==expected) end
+    end
+    assert(not EntityGetIsAlive(dose))
+    ProceduralRandomi=rng
+end
+
+do
+    settings,flags={},{}
+    new_world()
+    local nativeLoad=EntityLoad
+    function EntityLoad(path,x,y)
+        local id=nativeLoad(path,x,y)
+        local e=entities[id]
+        if path:find("/relic_effects/",1,true) then
+            e.name=path:match("([^/]+)%.xml$")
+            EntityAddTag(id,"nh_chain_effect")
+        elseif path:find("data/entities/items/pickup/",1,true) then
+            e.file=path
+            EntityAddTag(id,"item_physics")
+            if path:match("/safe_haven%.xml$") then
+                EntityAddComponent2(id,"VariableStorageComponent",{name="throw_time",value_int=-1})
+                e.comps.ItemComponent.item_name="$item_safe_haven"
+                e.comps.ItemComponent.ui_sprite="data/ui_gfx/items/safe_haven.png"
+            else EntityAddTag(id,"item_pickup") end
+            if path:match("/physics_gold_orb%.xml$") then
+                EntityAddComponent2(id,"VariableStorageComponent",{_tags="kick_count",name="kick_count",value_int=0})
+            end
+        elseif path:find("data/entities/items/books/",1,true) then
+            e.file=path
+            local forged=path:find("base_forged",1,true)
+            EntityAddTag(id,"tablet")
+            EntityAddTag(id,forged and "forged_tablet" or "normal_tablet")
+            local comp=e.comps.ItemComponent
+            comp.item_name=forged and "$booktitle01" or "$booktitle07"
+            comp.ui_description=forged and "$bookdesc01" or "$bookdesc07"
+            comp.ui_sprite="data/ui_gfx/items/"..(forged and "laboratory" or "emerald").."_tablet.png"
+            EntityAddComponent2(id,"AbilityComponent",{throw_as_item=true})
+            EntityAddComponent2(id,"UIInfoComponent",{})
+        end
+        return id
+    end
+    local s=state()
+    s.bankGold,s.resources.fiber=25,2
+    assert(NHStore.startOrder(s,"relic_chain") and s.bankGold==0 and not s.resources.fiber)
+    assert(NHStore.advanceProduction(s,{run=s.runSerial,orderId=s.order.id,progress=s.order.required}))
+    local chain=s.warehouse[1]
+    assert(chain.item.kind=="relic_chain" and NHStore.commit(s))
+    boot()
+    inventory_open=true
+    tick()
+    local function storeChain(from,to)
+        tick(nil,"move_relic",{container=from,source=from,destination=to,kind="relic_chain",from=1,safeSlot=1,entity=chain.id})
+    end
+    local function openChain()
+        tick(nil,"open_container",{kind="relic_chain",container="safe",entity=chain.id,safeSlot=1})
+        assert(tick().chainId==chain.id)
+    end
+    local function effects() return #EntityGetAllChildren(player,"nh_chain_effect") end
+    local function toolSlot(id)
+        return {parent=quick,lane="tool",xslot=0,yslot=0,entity=id,chainId=chain.id,targetCell=1}
+    end
+    storeChain("warehouse","safe")
+    openChain()
+    assert(model.pouchCapacity==1 and not model.perkCapacity)
+    local poop=EntityLoad("data/entities/items/pickup/poopstone.xml",227,-85)
+    GamePickUpInventoryItem(player,poop)
+    assert(NHTransfers.item_kind(poop)~="relic")
+    tick(nil,"reject_relic",toolSlot(poop))
+    assert(EntityGetRootEntity(poop)==player and not state().safe[1].item.cells[1])
+    EntityKill(poop)
+    local fire=EntityLoad("data/entities/items/pickup/brimstone.xml",227,-85)
+    GamePickUpInventoryItem(player,fire)
+    assert(NHTransfers.item_kind(fire)=="relic")
+    local ok
+    fail_commit=true
+    ok=NHTransfers.deposit(state(),player,"safe",fire,1,nil,{container="safe",slot=1,id=chain.id})
+    fail_commit=false
+    assert(not ok and EntityGetRootEntity(fire)==player and not state().safe[1].item.cells[1])
+    tick(nil,"place",toolSlot(fire))
+    local socket=assert(state().safe[1].item.cells[1])
+    assert(not entities[fire] and socket.item.relic=="brimstone" and effects()==1)
+    assert(tick().secure_loot[1].relics[1]=="1. "..GameTextGetTranslatedOrNot(socket.item.name))
+    storeChain("safe","warehouse")
+    assert(effects()==0 and not tick().chainId and state().warehouse[1].item.cells[1].id==socket.id)
+    assert(model.warehouse.equipment[1].relics[1]=="1. "..GameTextGetTranslatedOrNot(socket.item.name))
+    local native={parent=quick,lane="tool",xslot=0,yslot=0,container="warehouse",kind="relic_chain",storedId=chain.id,safeSlot=1}
+    tick(nil,"secure_withdraw",native)
+    local carried=assert(EntityGetWithTag("noita_hideout_relic_chain")[1])
+    native.entity,native.container=carried,"safe"
+    tick(nil,"place",native)
+    assert(state().safe[1].id==chain.id and effects()==1)
+    OnPlayerDied()
+    assert(effects()==0)
+    new_world()
+    inventory_open=true
+    tick()
+    openChain()
+    assert(effects()==1 and model.cells[1].id==socket.id)
+    local take={parent=quick,lane="tool",xslot=0,yslot=0,chainId=chain.id,sourceCell=1,storedId=socket.id}
+    tick(nil,"take_relic",take)
+    assert(effects()==0 and not state().safe[1].item.cells[1])
+    local result=assert(EntityGetAllChildren(quick)[1])
+    assert(EntityGetFilename(result)=="data/entities/items/pickup/brimstone.xml")
+    native.entity,native.container,native.kind=result,"warehouse","relic"
+    tick(nil,"place",native)
+    local stored=assert(state().warehouse[1])
+    local move={source="warehouse",container="warehouse",from=1,entity=stored.id,targetCell=1,chainId=chain.id}
+    entities[player].x=900
+    tick(nil,"move_chain_relic",move)
+    assert(state().warehouse[1].id==stored.id and effects()==0)
+    entities[player].x=227
+    tick(nil,"move_chain_relic",move)
+    assert(not state().warehouse[1] and state().safe[1].item.cells[1].id==stored.id and effects()==1)
+    move={destination="warehouse",container="warehouse",safeSlot=1,entity=stored.id,sourceCell=1,chainId=chain.id}
+    tick(nil,"move_chain_relic",move)
+    assert(state().warehouse[1].id==stored.id and effects()==0)
+    for _,path in ipairs({"data/entities/items/pickup/brimstone.xml","data/entities/items/pickup/wandstone.xml",
+        "data/entities/items/pickup/safe_haven.xml","data/entities/items/pickup/beamstone.xml",
+        "data/entities/items/pickup/physics_gold_orb.xml","mods/noita_hideout/files/items/relic_chain.xml",
+        "data/entities/items/books/book_07.xml","data/entities/items/books/base_forged.xml"}) do
+        settings,flags={},{}
+        new_world()
+        inventory_open=true
+        local function shiftClick(slot)
+            assert(slot)
+            NHUI.quickTarget=function() return slot end
+            tick()
+            tick(225,nil,nil,"left")
+        end
+        local physical={}
+        for x=0,1 do
+            local id=EntityLoad(path,227,-85)
+            if path:match("/physics_gold_orb%.xml$") then
+                entities[id].comps.VariableStorageComponentkick_count.value_int=4+x
+            elseif path:match("/safe_haven%.xml$") then
+                entities[id].file="data/entities/player.xml"
+            end
+            if EntityHasTag(id,"forged_tablet") then
+                local number=x==0 and "02" or "10"
+                entities[id].comps.ItemComponent.item_name="$booktitle"..number
+                entities[id].comps.ItemComponent.ui_description="$bookdesc"..number.."_forged"
+            end
+            GamePickUpInventoryItem(player,id)
+            entities[id].comps.ItemComponent.slotX=x
+            physical[x+1]=id
+        end
+        for i,id in ipairs(physical) do
+            local slot
+            for _,entry in ipairs(tick().native_slots) do if entry.entity==id then slot=entry end end
+            shiftClick(slot)
+            assert(not EntityGetIsAlive(id) and #state().warehouse==i)
+            if i==1 then assert(EntityGetIsAlive(physical[2])) end
+        end
+        local rows=state().warehouse
+        assert(rows[1].slot~=rows[2].slot and rows[1].id~=rows[2].id)
+        if rows[1].item.kind=="native_valuable" then
+            local row=rows[1]
+            tick(nil,"move_relic",{kind=row.item.kind,entity=row.id,source="warehouse",destination="safe",from=row.slot,safeSlot=1})
+            assert(state().safe[1].id==row.id)
+            tick(nil,"move_relic",{kind=row.item.kind,entity=row.id,source="safe",destination="warehouse",from=1,safeSlot=row.slot})
+            assert(#state().safe==0 and #state().warehouse==2)
+        end
+        for i,row in ipairs(rows) do
+            boot()
+            tick()
+            assert(model.warehouse.equipment[row.slot].id==row.id)
+            shiftClick({key="warehouse",entity=row.id,kind=row.item.kind,safeSlot=row.slot})
+            assert(#GameGetAllInventoryItems(player)==i and #state().warehouse==2-i)
+        end
+        boot()
+        tick()
+        assert(#GameGetAllInventoryItems(player)==2 and #state().warehouse==0)
+        if path:match("/physics_gold_orb%.xml$") then
+            local counts={}
+            for _,id in ipairs(GameGetAllInventoryItems(player)) do
+                counts[entities[id].comps.VariableStorageComponentkick_count.value_int]=true
+                assert(EntityGetFilename(id)==path)
+            end
+            assert(counts[4] and counts[5])
+        elseif path:match("/safe_haven%.xml$") then
+            local id=GameGetAllInventoryItems(player)[1]
+            entities[id].comps.VariableStorageComponent.value_int=GameGetFrameNum()
+            assert(not NHTransfers.deposit(state(),player,"warehouse",id))
+            assert(EntityGetIsAlive(id) and #state().warehouse==0)
+        end
+        if path:find("/books/",1,true) then
+            local descriptions={}
+            for _,id in ipairs(GameGetAllInventoryItems(player)) do
+                assert(NHTransfers.item_kind(id)=="tablet" and EntityGetFilename(id)==path)
+                assert(entities[id].comps.AbilityComponent.throw_as_item)
+                local item=entities[id].comps.ItemComponent
+                descriptions[item.ui_description]=true
+                if EntityHasTag(id,"forged_tablet") then assert(entities[id].comps.UIInfoComponent.name==item.item_name) end
+            end
+            if path:find("base_forged",1,true) then assert(descriptions["$bookdesc02_forged"] and descriptions["$bookdesc10_forged"])
+            else assert(descriptions["$bookdesc07"]) end
+        end
+    end
+    local key=EntityLoad("data/entities/items/pickup/key.xml",227,-85)
+    assert(not NHTransfers.item_kind(key))
+    settings,flags={},{}
+    new_world()
+    tick()
+    for x=0,3 do
+        local id=EntityLoad("mods/noita_hideout/files/items/bandage.xml",227,-85)
+        GamePickUpInventoryItem(player,id)
+        entities[id].comps.ItemComponent.slotX=x
+        entities[id].comps.ItemComponent.uses_remaining=8
+    end
+    local function pickup()
+        controls.mButtonDownInteract=true
+        controls.mButtonFrameInteract=frame+1
+        tick()
+        controls.mButtonDownInteract=false
+    end
+    local function groundStone()
+        local id=EntityLoad("data/entities/items/pickup/brimstone.xml",227,-85)
+        local item=entities[id].comps.ItemComponent
+        item.is_pickable,item.next_frame_pickable,item.item_pickup_radius=true,0,14
+        return id
+    end
+    local first=groundStone()
+    pickup()
+    local row=assert(state().safe[1])
+    assert(not EntityGetIsAlive(first) and row.item.relic=="brimstone")
+    local second=groundStone()
+    pickup()
+    assert(EntityGetIsAlive(second) and #state().safe==1)
+    inventory_open=true
+    tick()
+    NHUI.quickTarget=function() return {key="valuable",entity=row.id,kind="relic",safeSlot=row.slot} end
+    tick(225,nil,nil,"left")
+    assert(#state().safe==0 and state().warehouse[1].id==row.id)
+    inventory_open=false
+    tick()
+    pickup()
+    boot()
+    tick()
+    local saved=state()
+    assert(not EntityGetIsAlive(second) and saved.safe[1].item.relic=="brimstone"
+        and saved.warehouse[1].item.relic=="brimstone" and saved.safe[1].id~=saved.warehouse[1].id)
+    EntityLoad=nativeLoad
+end
+print("Relic chain crafting, rejection, transfer rollback, contents, effects and death persistence passed.")
+
+do
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    local shown
+    NHUI.showTransfer=function(container,kind,slot)
+        assert(kind=="potion")
+        shown=container.."/"..slot
+    end
+    NHPotion.capture=function(id) return entities[id].record end
+    NHPotion.restore=function(record,x,y)
+        local path="data/entities/items/pickup/"..(record.variant or "potion")..".xml"
+        local id=EntityLoad(path,x,y)
+        entities[id].file,entities[id].record=path,record
+        EntityAddTag(id,"potion")
+        return id
+    end
+    local function click(slot)
+        assert(slot)
+        shown=nil
+        NHUI.quickTarget=function() return slot end
+        tick()
+        tick(225,nil,nil,"left")
+        return shown
+    end
+    local function carried(variant)
+        local id=NHPotion.restore({kind="potion",variant=variant,capacity=1000,materials={water=25}},227,-85)
+        GamePickUpInventoryItem(player,id)
+        for _,slot in ipairs(tick().native_slots) do if slot.entity==id then return slot end end
+    end
+    local function stored(container,row)
+        return {key=container,entity=row.id,kind=row.item.kind,safeSlot=row.slot}
+    end
+    local flask=carried("jar")
+    fail_commit=true
+    assert(not click(flask) and EntityGetIsAlive(flask.entity) and #state().docks==0)
+    fail_commit=false
+    assert(click(flask)=="docks/1")
+    assert(click(carried("powder_stash"))=="docks/2")
+    assert(click(carried(nil))=="warehouse/1")
+    local s=state()
+    assert(#s.docks==2 and s.docks[1].item.variant=="jar" and s.docks[2].item.variant=="powder_stash")
+    assert(s.warehouse[1].item.materials.water==25 and not next(s.materials))
+    local dock=s.docks[1]
+    assert(not click(stored("docks",dock)) and #state().docks==1 and #GameGetAllInventoryItems(player)==1)
+    entities[player].x=1000
+    local hand
+    for _,slot in ipairs(tick().native_slots) do if slot.entity then hand=slot end end
+    assert(click(hand)=="safe/1")
+    entities[player].x=227
+    assert(click(stored("valuable",state().safe[1]))=="docks/1")
+    entities[player].x=1000
+    assert(click(carried("powder_stash"))=="safe/1")
+    entities[player].x=227
+    assert(click(stored("valuable",state().safe[1]))=="warehouse/2")
+    assert(#state().safe==0 and #state().warehouse==2 and #state().docks==2)
+end
+print("Shift-click docks compatible containers, falls back to storage and reveals only committed placements.")
+
+do
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    function ComponentObjectGetValue2(c,group,key) return c[group][key] end
+    function ComponentObjectSetValue2(c,group,key,v) c[group]=c[group] or {}; c[group][key]=v end
+    function GetUpdatedEntityID() return player end
+    local mana=false
+    function GameGetGameEffectCount(_,effect) return effect=="MANA_REGENERATION" and mana and 1 or 0 end
+    local dm=EntityAddComponent2(player,"DamageModelComponent",{hp=4,max_hp=4,damage_multipliers={ice=.5,poison=1}})
+    local s=state()
+    s.insuranceActive,s.insuranceSerial=true,1
+    s.resources.arcane_scrap,s.bankGold=13,10
+    for _,id in ipairs({"shield_frost","shield_charger"}) do
+        assert(NHStore.startOrder(s,id))
+        assert(NHStore.advanceProduction(s,{run=s.runSerial,orderId=s.order.id,progress=s.order.required}))
+    end
+    for _,row in ipairs(s.warehouse) do row.item.icon=NHShields.legacyIcons[row.item.kind] end
+    assert(NHStore.commit(s))
+    boot()
+    tick()
+    local sh,ch=s.warehouse[1],s.warehouse[2]
+    local function equip(row)
+        tick(nil,"move_gear",{source="warehouse",destination="gear",container="warehouse",kind=row.item.kind,from=row.slot,entity=row.id})
+    end
+    local shown
+    NHUI.showTransfer=function(dest) shown=dest end
+    local function quickEquip(row)
+        NHUI.quickTarget=function() return {key="warehouse",safeSlot=row.slot,kind=row.item.kind,entity=row.id} end
+        tick()
+        tick(225,nil,nil,"left")
+        assert(shown=="gear")
+        shown=nil
+    end
+    quickEquip(sh)
+    quickEquip(ch)
+    assert(tick().shield.cells==4 and model.shield.maxHp==dm.max_hp and model.gear.charger.count==1 and state().warehouse[1].item.count==3)
+    assert(model.gear.shield.icon==NHShields.types.shield_frost.icon and model.gear.charger.icon==NHShields.chargers.shield_charger.icon)
+    NHUI.quickTarget=function() return {key="warehouse",safeSlot=ch.slot,kind=ch.item.kind,entity=ch.id} end
+    tick(225,nil,nil,"left")
+    assert(state().warehouse[1].item.count==2 and state().gearCharger.item.count==1)
+    local spare=assert(GameGetAllInventoryItems(player)[1])
+    GameKillInventoryItem(player,spare)
+    assert(dm.damage_multipliers.ice==0 and dm.damage_multipliers.poison==0 and EntityHasTag(player,"polymorphable_NOT"))
+    local hook=assert(EntityGetFirstComponentIncludingDisabled(player,"LuaComponent","nh_shield_damage"))
+    local shieldModule=dofile("mods/noita_hideout/files/shield_runtime.lua")
+    local originalCount=GameGetGameEffectCount
+    GameGetGameEffectCount=function(_,kind) return kind=="PROTECTION_POLYMORPH" and 2 or 0 end
+    assert(not shieldModule.allowMimic(player) and EntityHasTag(player,"polymorphable_NOT"))
+    GameGetGameEffectCount=originalCount
+    assert(shieldModule.canMimic(player) and EntityHasTag(player,"polymorphable_NOT"))
+    assert(shieldModule.allowMimic(player) and not EntityHasTag(player,"polymorphable_NOT"))
+    assert(#(EntityGetAllChildren(player,"nh_shield_poly") or {})==0 and dm.damage_multipliers.ice==0)
+    assert(tick().shield.charge==NHShields.cell*4 and EntityHasTag(player,"polymorphable_NOT"))
+    do
+        local equipped=state()
+        local bare=state()
+        bare.gearShield=nil
+        local function join(id)
+            assert(NHCompanions.summon(player,id,"en",function() return true end))
+        end
+        local function leave()
+            local _,pet=NHCompanions.active(player)
+            NHCompanions.clearSupport(player)
+            EntityRemoveFromParent(pet)
+            EntityKill(pet)
+        end
+        -- Shield first, companion first, and removal of either layer.
+        for _,id in ipairs({"dog","bee"}) do
+            local key=id=="dog" and "ice" or "poison"
+            local baseline=id=="dog" and 0.5 or 1
+            join(id)
+            shieldModule.sync(bare,player)
+            assert(dm.damage_multipliers[key]==0)
+            leave()
+            assert(dm.damage_multipliers[key]==baseline)
+            join(id)
+            shieldModule.sync(equipped,player)
+            leave()
+            assert(dm.damage_multipliers[key]==0)
+            shieldModule.sync(bare,player)
+            assert(dm.damage_multipliers[key]==baseline)
+            shieldModule.sync(equipped,player)
+        end
+        join("minotaur")
+        assert(#EntityGetAllChildren(player,"nh_shield_poly")==1)
+        shieldModule.sync(bare,player)
+        assert(EntityHasTag(player,"polymorphable_NOT") and shieldModule.allowMimic(player))
+        shieldModule.sync(bare,player)
+        assert(EntityHasTag(player,"polymorphable_NOT"))
+        shieldModule.sync(equipped,player)
+        assert(shieldModule.allowMimic(player) and not EntityHasTag(player,"polymorphable_NOT"))
+        shieldModule.sync(equipped,player)
+        leave()
+        assert(EntityHasTag(player,"polymorphable_NOT"))
+        shieldModule.sync(bare,player)
+        EntityAddTag(player,"polymorphable_NOT")
+        join("minotaur")
+        assert(not shieldModule.allowMimic(player))
+        leave()
+        assert(EntityHasTag(player,"polymorphable_NOT"))
+        EntityRemoveTag(player,"polymorphable_NOT")
+        shieldModule.sync(equipped,player)
+    end
+    dofile(hook.script_damage_received)
+    local function hit(amount)
+        dm.hp=dm.hp-amount
+        damage_received(amount)
+    end
+    hit(28)
+    assert(dm.hp==4 and tick().shield.charge==NHShields.cell/2 and state().insuranceActive)
+    local restart=frame
+    boot()
+    assert(tick().shield.charge==NHShields.cell/2)
+    while frame<restart+179 do assert(tick().shield.charge==NHShields.cell/2) end
+    mana=true
+    for i=1,30 do tick() end
+    assert(model.shield.charge==NHShields.cell)
+    for i=1,359 do tick() end
+    assert(model.shield.charge==NHShields.cell and model.shield.repair==359)
+    assert(tick().shield.charge==2*NHShields.cell)
+    hit(17)
+    assert(dm.hp==3 and dm.damage_multipliers.ice==.5 and dm.damage_multipliers.poison==1 and EntityHasTag(player,"polymorphable_NOT"))
+    mana=false
+    local ref={kind="shield_charger",container="gear",storedId=state().gearCharger.id,count=1,remaining=8}
+    tick(nil,"use_inventory",ref)
+    advance(299)
+    assert(model.surgery and model.surgery.elapsed==299 and state().gearCharger.item.remaining==8)
+    fail_commit=true
+    tick()
+    fail_commit=false
+    for i=1,65 do tick() end
+    assert(state().gearCharger.item.remaining==8 and model.shield.charge==0)
+    tick(nil,"use_inventory",ref)
+    advance(300)
+    assert(model.shield.charge==NHShields.cell and model.gear.charger.remaining==7 and dm.damage_multipliers.ice==0)
+    local to={source="gear",destination="warehouse",container="warehouse",kind=sh.item.kind,entity=sh.id,safeSlot=1}
+    tick(nil,"move_gear",to)
+    assert(not tick().shield and not EntityHasTag(player,"polymorphable_NOT") and dm.damage_multipliers.ice==.5)
+    assert(state().warehouse[NHStore.slotIndex(state(),"warehouse",1,sh.item.kind)].item.charge==NHShields.cell)
+    local slot={parent=quick,lane="tool",xslot=0,yslot=0,container="warehouse",kind=sh.item.kind,storedId=sh.id,safeSlot=1}
+    tick(nil,"secure_withdraw",slot)
+    slot.entity=assert(GameGetAllInventoryItems(player)[1])
+    slot.container,slot.intoGear="safe",true
+    tick(nil,"place",slot)
+    assert(tick().shield.charge==NHShields.cell and not EntityGetIsAlive(slot.entity))
+    slot.storedId,slot.entity,slot.intoGear=state().gearShield.id,nil,nil
+    tick(nil,"take_gear",slot)
+    assert(not tick().shield and #GameGetAllInventoryItems(player)==1)
+    for _,kind in ipairs({"shield_fire","shield_electric","shield_storm"}) do
+        local profile=state()
+        profile.resources.arcane_scrap=NHShields.types[kind].scrap
+        assert(NHStore.startOrder(profile,kind))
+        assert(NHStore.advanceProduction(profile,{run=profile.runSerial,orderId=profile.order.id,progress=profile.order.required}))
+        assert(NHStore.commit(profile))
+        boot()
+        tick()
+        equip(profile.warehouse[#profile.warehouse])
+        local child=assert(EntityGetAllChildren(player,"nh_shield_elements")[1])
+        assert(EntityGetName(child)==kind and (EntityHasTag(player,"polymorphable_NOT")== (kind=="shield_storm")))
+        if kind~="shield_storm" then
+            local effect=EntityGetFirstComponentIncludingDisabled(child,"GameEffectComponent")
+            assert(effect.effect==(kind=="shield_fire" and "PROTECTION_FIRE" or "PROTECTION_ELECTRICITY"))
+        end
+    end
+    mana=false
+    hit(32) -- Four 2-HP cells with 75% resistance.
+    assert(tick().shield.charge==0 and not EntityGetAllChildren(player,"nh_shield_elements")[1])
+    local spice=EntityLoad("mods/noita_hideout/files/meal_spice.xml",0,0)
+    EntityAddTag(spice,"noita_hideout_meal_spice")
+    EntityAddChild(player,spice)
+    for i=1,539 do tick() end
+    assert(model.shield.charge==NHShields.cell and EntityGetAllChildren(player,"nh_shield_elements")[1])
+
+    local profile=state()
+    local old=profile.gearCharger
+    assert(NHShields.move(profile,{source="gear",destination="warehouse",safeSlot=ch.slot,entity=old.id,kind=old.item.kind}))
+    assert(NHStore.commit(profile))
+    boot()
+    tick()
+    local kind="advanced_shield_charger"
+    local physical=EntityLoad("mods/noita_hideout/files/items/"..kind..".xml",227,-85)
+    GamePickUpInventoryItem(player,physical)
+    local component=entities[physical].comps.ItemComponent
+    component.slotX,component.uses_remaining,component.ui_sprite=1,19,NHShields.legacyIcons[kind]
+    tick()
+    assert(component.ui_sprite==NHShields.chargers[kind].icon and component.uses_remaining==19)
+    local drag={entity=physical,parent=quick,lane="tool",xslot=1,yslot=0,intoGear=true,safeSlot=2,container="safe",kind=kind}
+    fail_commit=true
+    tick(nil,"place",drag)
+    fail_commit=false
+    assert(not state().gearCharger and EntityGetIsAlive(physical) and component.uses_remaining==19)
+    tick(nil,"place",drag)
+    assert(not EntityGetIsAlive(physical) and state().gearCharger.item.remaining==3)
+    local remainder
+    for _,slot in ipairs(tick().native_slots) do if slot.kind==kind then remainder=slot end end
+    assert(remainder and remainder.xslot==1 and remainder.count==2 and remainder.remaining==8)
+    local native={container="native",kind=kind,parent=quick,entity=remainder.entity,lane="tool",xslot=1,yslot=0,count=2,remaining=8}
+    tick(nil,"use_inventory",native)
+    advance(119)
+    assert(model.surgery and model.surgery.elapsed==119 and entities[native.entity].comps.ItemComponent.uses_remaining==16)
+    tick()
+    assert(model.shield.charge==4*NHShields.cell and entities[native.entity].comps.ItemComponent.uses_remaining==15)
+    tick(nil,"use_inventory",native)
+    assert(not model.surgery and state().gearCharger.item.remaining==3)
+end
+print("Shield controller: equip, damage, reload, mana recharge, paid repair, typed immunity and physical transfer passed.")
+
+do
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    local profile=state()
+    EntityAddComponent2(player,"DamageModelComponent",{hp=4,max_hp=4})
+    profile.resources.arcane_scrap,profile.bankGold=20,10
+    for _,id in ipairs({"scatter_revolver","marksman_rifle","ammo_rig","ammo_pack"}) do
+        assert(NHStore.startOrder(profile,id))
+        assert(NHStore.advanceProduction(profile,{run=profile.runSerial,orderId=profile.order.id,progress=profile.order.required}))
+    end
+    assert(profile.resources.arcane_scrap==0 or not profile.resources.arcane_scrap)
+    assert(profile.bankGold==0 and #profile.warehouse==4 and NHStore.commit(profile))
+    boot()
+    tick()
+    local function shift(row)
+        NHUI.quickTarget=function() return {key="warehouse",safeSlot=row.slot,kind=row.item.kind,entity=row.id} end
+        tick()
+        tick(225,nil,nil,"left")
+    end
+    for _,row in ipairs(profile.warehouse) do shift(row) end
+    assert(state().gearRig.item.reserve==0 and state().gearAmmo.item.count==1 and state().warehouse[1].item.count==3)
+    local revolver,rifle
+    for _,slot in ipairs(tick().native_slots) do
+        if slot.kind=="scatter_revolver" then assert(slot.lane=="wand" and slot.rounds==36); revolver=slot end
+        if slot.kind=="marksman_rifle" then assert(slot.lane=="wand" and slot.rounds==60); rifle=slot end
+    end
+    held=assert(revolver).entity
+    assert(rifle and tick().ammo.rounds==36)
+    do
+        local icon=NHFirearms.items.scatter_revolver.icon
+        local sprite=EntityAddComponent2(held,"SpriteComponent",{_tags="enabled_in_hand",image_file="mods/noita_hideout/files/items/scatter_revolver_world.png"})
+        local item=entities[held].comps.ItemComponent
+        item.ui_sprite=icon
+        NHFirearms.repairGunSprite(held,"scatter_revolver")
+        assert(sprite.has_special_scale and sprite.offset_x==4 and sprite.offset_y==8 and sprite.image_file==icon)
+        assert(entities[held].comps.AbilityComponent.sprite_file==sprite.image_file and item.ui_sprite==icon)
+        local previous=GetUpdatedEntityID
+        GetUpdatedEntityID=function() return held end
+        for _,pose in ipairs({{1,-1},{-1,1},{1,1}}) do
+            entities[held].scaleX,entities[held].scaleY=pose[1],pose[2]
+            dofile("mods/noita_hideout/files/equipment_sprite_mirror.lua")
+            assert(sprite.special_scale_x==pose[1]*0.5 and sprite.special_scale_y==pose[2]*0.5)
+        end
+        local rifleSprite=EntityAddComponent2(rifle.entity,"SpriteComponent",{_tags="enabled_in_hand",image_file=NHFirearms.items.marksman_rifle.icon})
+        NHFirearms.repairGunSprite(rifle.entity,"marksman_rifle")
+        assert(rifleSprite.image_file=="mods/noita_hideout/files/items/rifle.png" and rifleSprite.offset_x==11 and rifleSprite.offset_y==10)
+        GetUpdatedEntityID=function() return rifle.entity end
+        entities[rifle.entity].scaleY=-1
+        rifleSprite.special_scale_y=0.75
+        dofile("mods/noita_hideout/files/equipment_sprite_mirror.lua")
+        assert(rifleSprite.special_scale_y==-0.75 and rifleSprite.special_scale_x==0.5)
+        GetUpdatedEntityID=previous
+    end
+    local cards=EntityGetAllChildren(held)
+    assert(#cards==1 and entities[cards[1]].comps.ItemComponent.is_frozen)
+    assert(entities[cards[1]].comps.ItemActionComponent.action_id=="NH_SCATTER_REVOLVER")
+    do
+        local lock=entities[cards[1]].comps.ItemComponent
+        assert(lock.permanently_attached)
+        lock.permanently_attached=false -- Old save with the original card still in place.
+        local loose=EntityGetAllChildren(rifle.entity)[1]
+        EntityRemoveFromParent(loose)
+        advance(60-frame%60)
+        assert(lock.permanently_attached and EntityGetAllChildren(held)[1]==cards[1])
+        local repaired=EntityGetAllChildren(rifle.entity)
+        assert(#repaired==1 and repaired[1]~=loose and EntityGetParent(loose)==0)
+        local core=entities[repaired[1]].comps
+        assert(core.ItemActionComponent.action_id=="NH_MARKSMAN_RIFLE" and core.ItemComponent.permanently_attached and core.ItemComponent.is_frozen)
+        advance(60)
+        assert(#EntityGetAllChildren(rifle.entity)==1 and EntityGetAllChildren(rifle.entity)[1]==repaired[1])
+    end
+    local paid=0
+    function item_pickup(entity,owner)
+        assert(owner==player)
+        paid=paid+2*entities[entity].comps.VariableStorageComponent.value_int
+        EntityKill(entity)
+    end
+    dofile("mods/noita_hideout/files/ammo_gold.lua")
+    local function pickupGold(value)
+        local gold=EntityLoad("gold.xml",227,-85)
+        EntityAddTag(gold,"gold_nugget")
+        EntityAddComponent2(gold,"VariableStorageComponent",{name="gold_value",value_int=value})
+        item_pickup(gold,player)
+    end
+    pickupGold(5)
+    pickupGold(45)
+    assert(tick().ammo.reserve==50 and paid==100)
+    boot()
+    tick()
+    assert(state().gearRig.item.reserve==50)
+    local function usePack()
+        local row=state().gearAmmo
+        tick(nil,"use_inventory",{container="gear",kind=row.item.kind,storedId=row.id,count=1,remaining=row.item.remaining})
+    end
+    usePack()
+    advance(119)
+    assert(model.surgery and state().gearRig.item.reserve==50 and state().gearAmmo.item.remaining==8)
+    tick()
+    assert(state().gearRig.item.reserve==170 and state().gearAmmo.item.remaining==7)
+    usePack()
+    advance(120)
+    assert(state().gearRig.item.reserve==240 and state().gearAmmo.item.remaining==6)
+    usePack()
+    assert(not tick().surgery and state().gearAmmo.item.remaining==6)
+
+    actions={}
+    dofile("mods/noita_hideout/files/firearm_actions.lua")
+    local bullets=0
+    function add_projectile(path)
+        assert(path:find("mods/noita_hideout/files/projectiles/multi_",1,true))
+        bullets=bullets+1
+    end
+    local function shot(n)
+        c={spread_degrees=0,game_effect_entities="",extra_entities="",speed_multiplier=1}
+        actions[n].action()
+    end
+    inventory_open=false
+    tick()
+    reflecting=true; shot(1); reflecting=false
+    assert(tick().ammo.rounds==36)
+    shot(1)
+    advance(120)
+    assert(model.ammo.rounds==35 and model.ammo.reserve==240)
+    tick(21); advance(54)
+    assert(model.ammo.rounds==36 and model.ammo.reserve==239)
+    tick(5); tick(); tick(5); tick()
+    assert(model.ammo.index==3)
+    for count=1,6 do shot(1) end
+    assert(tick().ammo.rounds==0 and bullets==50)
+    advance(53)
+    assert(model.ammo.rounds==0)
+    tick()
+    assert(model.ammo.rounds==36 and model.ammo.reserve==203)
+    shot(1)
+    held=rifle.entity; tick()
+    for count=1,3 do shot(2) end
+    assert(tick().ammo.rounds==57)
+    inventory_open=true
+    tick()
+    local put={parent=quick,lane="wand",entity=revolver.entity,xslot=revolver.xslot,yslot=0,container="warehouse",safeSlot=1,kind="scatter_revolver"}
+    tick(nil,"place",put)
+    local at=assert(NHStore.slotIndex(state(),"warehouse",1,put.kind))
+    local stored=state().warehouse[at]
+    assert(stored.item.rounds==30 and stored.item.mode==3 and not EntityGetIsAlive(revolver.entity))
+    boot(); tick(); shift(stored)
+    for _,slot in ipairs(tick().native_slots) do if slot.kind==put.kind then held=slot.entity end end
+    assert(tick().ammo.rounds==30 and model.ammo.index==3)
+    for _,tier in ipairs({
+        {"improved_ammo_rig","advanced_ammo_pack",480,360,9,30},
+        {"advanced_ammo_rig","improved_ammo_pack",720,240,11,20},
+    }) do
+        settings,flags={},{}
+        new_world()
+        inventory_open=true
+        EntityAddComponent2(player,"DamageModelComponent",{hp=4,max_hp=4})
+        local s=state()
+        s.resources.arcane_scrap,s.bankGold=tier[5],tier[6]
+        for _,kind in ipairs({tier[1],tier[2]}) do
+            assert(NHStore.startOrder(s,kind))
+            assert(NHStore.advanceProduction(s,{run=s.runSerial,orderId=s.order.id,progress=s.order.required}))
+        end
+        assert(s.bankGold==0 and (s.resources.arcane_scrap or 0)==0 and NHStore.commit(s))
+        boot()
+        tick()
+        for _,row in ipairs(s.warehouse) do shift(row) end
+        tick()
+        assert(model.gear.rig.icon==NHFirearms.rigs[tier[1]].icon and model.gear.ammo.icon==NHFirearms.packs[tier[2]].icon)
+        assert(state().gearAmmo.item.count==1 and state().warehouse[1].item.count==3)
+        usePack()
+        advance(120)
+        assert(state().gearRig.item.reserve==tier[4] and state().gearAmmo.item.remaining==7)
+        pickupGold(1000)
+        tick()
+        assert(state().gearRig.item.reserve==tier[3])
+        usePack()
+        assert(not tick().surgery and state().gearAmmo.item.remaining==7)
+        local slot={parent=quick,lane="tool",xslot=0,yslot=0,storedId=state().gearRig.id,kind=tier[1]}
+        tick(nil,"take_gear",slot)
+        slot.entity=assert(GameGetAllInventoryItems(player)[1])
+        assert(NHTransfers.item_kind(slot.entity)==tier[1] and not state().gearRig)
+        assert(EntityGetFirstComponentIncludingDisabled(slot.entity,"VariableStorageComponent","nh_reserve").value_int==tier[3])
+        slot.container,slot.intoGear,slot.safeSlot="safe",true,3
+        tick(nil,"place",slot)
+        boot()
+        assert(tick().gear.rig.reserve==tier[3] and state().gearAmmo.item.remaining==7)
+        local box=EntityLoad("mods/noita_hideout/files/items/ammo_pack.xml",227,-85)
+        GamePickUpInventoryItem(player,box)
+        local item=EntityGetFirstComponentIncludingDisabled(box,"ItemComponent")
+        item.ui_sprite,item.uses_remaining=NHFirearms.legacyIcons.ammo_pack,7
+        tick()
+        assert(item.ui_sprite==NHFirearms.packs.ammo_pack.icon and item.uses_remaining==7)
+    end
+    -- Store real workshop cards in the gun, withdraw it, and switch a full
+    -- magazine through the player's key binding. Partial conversions never pay.
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    local s=state()
+    s.resources.arcane_scrap,s.bankGold=40,100
+    for _,id in ipairs({"marksman_rifle","ammo_rig","ammo_mod_frost","ammo_mod_pierce"}) do
+        assert(NHStore.startOrder(s,id))
+        assert(NHStore.advanceProduction(s,{run=s.runSerial,orderId=s.order.id,progress=s.order.required}))
+    end
+    assert(NHStore.commit(s))
+    boot()
+    tick()
+    local gun,rig,core,flight=unpack(s.warehouse)
+    shift(rig)
+    tick(nil,"open_container",{container="warehouse",entity=gun.id,kind=gun.item.kind,safeSlot=gun.slot})
+    assert(tick().gunId==gun.id)
+    local function fit(row,cell)
+        tick(nil,"move_gun_attachment",{gunId=gun.id,container="warehouse",entity=row.id,from=row.slot,targetCell=cell})
+    end
+    fit(flight,1)
+    assert(not tick().cells[1])
+    fit(core,1)
+    fit(flight,2)
+    assert(tick().cells[1].id=="frost" and model.cells[2].id=="pierce")
+    tick(nil,"move_gun_attachment",{gunId=gun.id,container="warehouse",entity="pierce",sourceCell=2,safeSlot=flight.slot})
+    assert(not tick().cells[2])
+    local returned=state().warehouse[2]
+    assert(returned.item.card.id=="NH_AMMO_PIERCE")
+    fit(returned,2)
+    shift(gun)
+    for _,slot in ipairs(tick().native_slots) do if slot.kind=="marksman_rifle" then held=slot.entity end end
+    local profile=NHFirearms.profileComponent(held)
+    assert(profile.name=="frost/pierce" and profile.value_string=="")
+    inventory_open=false
+    tick()
+    assert(tick().ammo.rounds==60 and state().gearRig.item.reserve==0)
+    tick(5); tick()
+    assert(model.ammo.index==2 and profile.name=="frost/pierce")
+    local mag=EntityGetFirstComponentIncludingDisabled(held,"VariableStorageComponent","nh_magazine")
+    ComponentSetValue2(mag,"value_int",54)
+    pickupGold(10); tick()
+    assert(tick(21).ammo.loading==72)
+    advance(72)
+    assert(model.ammo.rounds==60 and model.ammo.reserve==4 and profile.name=="frost/pierce")
+end
+print("Firearms: recipes, shift equip, locked actions, nugget denominations, timed packs, both reload modes and storage passed.")
+
+do
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    local s=state()
+    s.resources.arcane_scrap,s.bankGold=2,0
+    assert(NHStore.commit(s))
+    local dm=EntityAddComponent2(player,"DamageModelComponent",{hp=4,max_hp=4})
+    local wallet=EntityAddComponent2(player,"WalletComponent",{money=153,mHasReachedInf=false})
+    boot()
+    tick()
+    tick(nil,"shop_buy",{id="rescue_policy"})
+    assert(state().insuranceActive and state().bankGold==0 and state().resources.arcane_scrap==1)
+    assert(tick().rescue.insured and not model.rescue.species and model.rescue.kept==0)
+    tick(nil,"shop_buy",{id="rescue_policy"})
+    assert(state().resources.arcane_scrap==1)
+    boot()
+    tick()
+    inventory_open=false
+    assert(tick().rescue.insured, "Insurance HUD must remain visible outside inventory")
+    EntitySetTransform(player,650,150)
+    local hook=EntityGetFirstComponentIncludingDisabled(player,"LuaComponent","nh_shield_damage")
+    assert(hook.script_damage_about_to_be_received==hook.script_damage_received)
+    dofile(hook.script_damage_received)
+    local life=EntityLoad("mods/noita_hideout/files/tarot_life.xml",650,150)
+    EntityAddChild(player,life)
+    local effect=EntityAddComponent2(life,"GameEffectComponent",{effect="RESPAWN",frames=-1,mIsSpent=false})
+    local hit,critical=damage_about_to_be_received(7,0,0,0,25)
+    assert(hit==7 and critical==25 and not ComponentGetIsEnabled(effect) and not effect.mIsSpent)
+    dm.hp=-3
+    damage_received(7)
+    assert(dm.hp==2 and wallet.money==0)
+    tick()
+    local x,y=EntityGetTransform(player)
+    local cabin=dofile("mods/noita_hideout/files/travel/cabin.lua")
+    local mx,my=cabin.point(cabin.infirmary)
+    assert(x==mx and y==my and not state().insuranceActive and state().closedThrough<state().runSerial)
+    assert(ComponentGetIsEnabled(effect) and not effect.mIsSpent)
+    local cases=EntityGetWithTag("noita_hideout_lost_gold_case")
+    local case=assert(cases[1])
+    assert(#cases==1 and entities[case].x==650 and entities[case].y==150)
+    assert(EntityGetFirstComponentIncludingDisabled(case,"VariableStorageComponent","nh_lost_gold").value_string=="153")
+    boot()
+    tick()
+    assert(not dm.wait_for_kill_flag_on_death and #EntityGetWithTag("noita_hideout_lost_gold_case")==1)
+end
+print("Insurance shop, reload, damage callback, preserved run and exact lost-gold cache passed.")
+
+do
+    settings,flags={},{}
+    new_world()
+    local s=state()
+    s.safe={}
+    s.warehouse={{id=s.nextItemId,slot=1,item=NHCompanions.withCount({species="tarot_garden",remaining=40},2)}}
+    s.nextItemId=s.nextItemId+1
+    local shield=NHShields.order[1]
+    s.gearShield={id=s.nextItemId,item={kind=shield,charge=0,repair=0,delay=0}}
+    s.gearRig={id=s.nextItemId+1,item={kind="ammo_rig",reserve=0}}
+    s.nextItemId=s.nextItemId+2
+    assert(NHStore.commit(s))
+    local dm=EntityAddComponent2(player,"DamageModelComponent",{hp=2,max_hp=4,max_hp_cap=0})
+    boot()
+    inventory_open=true
+    tick()
+    local card=state().warehouse[1]
+    tick(nil,"use_inventory",{container="warehouse",slot=1,storedId=card.id,kind="summon_card",species="tarot_garden",remaining=40,count=2})
+    assert(dm.max_hp==6 and dm.hp==4)
+    s=state()
+    assert(s.warehouse[1].item.count==1 and s.warehouse[1].item.remaining==40)
+    assert(s.warehouse[2].item.count==1 and s.warehouse[2].item.remaining==39)
+    assert(s.gearRig.item.reserve==240)
+    local meter=EntityGetFirstComponentIncludingDisabled(player,"VariableStorageComponent","nh_equipped_shield")
+    assert(meter.value_int==NHShields.types[shield].cells*NHShields.cell)
+    -- A worn tarot card survives physical withdrawal and can be used again.
+    local target=tool()
+    target.safeSlot,target.storedId,target.container=2,s.warehouse[2].id,"warehouse"
+    target.kind="summon_card"
+    tick(nil,"secure_withdraw",target)
+    local physical=assert(EntityGetWithTag("nh_companion_tarot_garden")[1])
+    assert(entities[physical].comps.ItemComponent.uses_remaining==39)
+    held=physical
+    inventory_open=false
+    tick()
+    tick(nil,nil,nil,"right")
+    assert(entities[physical].comps.ItemComponent.uses_remaining==38 and dm.max_hp==9)
+end
+print("Tarot controller: stored and carried use consume one charge, refill gear and preserve worn cards.")
+
+for _,location in ipairs({"warehouse","held"}) do
+    settings,flags={},{}
+    new_world()
+    local s=state()
+    local kind="advanced_supply_pack"
+    local row={id=s.nextItemId,slot=1,item=NHLootBags.item(kind,2)}
+    s.warehouse={row}
+    s.gearShield={id=row.id+1,item={kind="shield_basic",charge=0,repair=0,delay=0}}
+    s.gearRig={id=row.id+2,item={kind="ammo_rig",reserve=0}}
+    s.nextItemId=row.id+3
+    assert(NHStore.commit(s))
+    boot()
+    inventory_open=true
+    tick()
+    local rng=ProceduralRandomi
+    function ProceduralRandomi(_,_,lo,hi) return hi end
+    if location=="warehouse" then
+        tick(nil,"use_inventory",{container=location,slot=1,storedId=row.id,kind=kind,count=2})
+        assert(state().warehouse[1].item.count==1)
+    else
+        local target=tool()
+        target.safeSlot,target.storedId,target.container,target.kind=1,row.id,"warehouse",kind
+        tick(nil,"secure_withdraw",target)
+        held=assert(EntityGetWithTag("noita_hideout_"..kind)[1])
+        inventory_open=false
+        tick()
+        tick(nil,nil,nil,"right")
+        assert(entities[held].comps.ItemComponent.uses_remaining==1)
+    end
+    ProceduralRandomi=rng
+    assert(state().gearRig.item.reserve==240)
+    assert(tick().shield.charge==NHShields.types.shield_basic.cells*NHShields.cell)
+    assert(#EntityGetWithTag("noita_hideout_advanced_shield_charger")==1 and #EntityGetWithTag("noita_hideout_advanced_ammo_pack")==1)
+end
+
+do
+    settings,flags={},{}
+    new_world()
+    local s=state()
+    s.bankGold=5000
+    s.materials={midas=1,water=200}
+    s.resources={arcane_scrap=1,container_scrap=1}
+    assert(NHStore.commit(s))
+    boot()
+    inventory_open=true
+    local offer=assert(has_project(tick().recipes,"philosopher_stone"))
+    assert(offer.alchemyMode=="rubedo" and offer.ready and #offer.inputs==4 and offer.outputs[1].amount==10)
+    tick(nil,"craft",{id="philosopher_stone"})
+    assert(state().bankGold==0 and state().resources.nh_philosopher_stone==10 and not state().materials.midas)
+    tick(nil,"craft",{id="rubedo_immortality"})
+    boot()
+    local view=tick()
+    local materials={}
+    for _,row in ipairs(view.materials) do materials[row.key]=row end
+    assert(not materials.nh_elixir_of_immortality and not materials.nh_philosopher_stone)
+    assert(has_project(view.recipes,"rubedo_immortality").outputs[1].stock==100)
+    assert(has_project(view.recipes,"philosopher_stone").outputs[1].stock==9)
+end
+print("Rubedo controller: localized prices and outputs, immediate craft, persistent hideout-only stock passed.")
+
+do
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    local profile=state()
+    profile.resources.arcane_scrap=12
+    assert(NHStore.startOrder(profile,"battle_staff"))
+    assert(NHStore.advanceProduction(profile,{run=profile.runSerial,orderId=profile.order.id,progress=profile.order.required}))
+    assert(NHStore.commit(profile))
+    boot(); tick()
+    local target
+    NHUI.quickTarget=function() return target end
+    local function shift(slot) target=slot; tick(); tick(225,nil,nil,"left"); tick() end
+    local row=state().warehouse[1]
+    shift({key="warehouse",safeSlot=row.slot,kind=row.item.kind,entity=row.id})
+    local staff=assert(EntityGetWithTag("noita_hideout_battle_staff")[1])
+    local staffCore=entities[EntityGetAllChildren(staff)[1]].comps
+    assert(staffCore.ItemActionComponent.action_id=="NH_BATTLE_STAFF" and staffCore.ItemComponent.permanently_attached)
+    local mag=entities[staff].comps.VariableStorageComponentnh_magazine
+    mag.value_int,mag.value_float=65,4
+    local ability,item=entities[staff].comps.AbilityComponent,entities[staff].comps.ItemComponent
+    ability.sprite_file="data/items_gfx/wands/wand_0064.png"
+    local sprite=EntityAddComponent2(staff,"SpriteComponent",{_tags="enabled_in_hand"})
+    NHFirearms.repairStaff(staff,player)
+    assert(sprite.image_file=="mods/noita_hideout/files/items/staff_angles.xml" and sprite.image_file==ability.sprite_file)
+    assert(sprite.visible and sprite.special_scale_x==0.5 and sprite.offset_x==0 and item.ui_sprite==NHFirearms.items.battle_staff.icon)
+    local mirror=assert(entities[staff].comps["LuaComponentenabled_in_hand,enabled_in_world,nh_equipment_mirror"])
+    assert(mirror.script_source_file=="mods/noita_hideout/files/equipment_sprite_mirror.lua")
+    assert(mag.value_int==65 and mag.value_float==4)
+    ability.use_gun_script,item.is_frozen=false,true
+    local wands={}
+    for col=0,3 do
+        local wand=EntityLoad("test.xml",0,0)
+        EntityAddTag(wand,"wand");GamePickUpInventoryItem(player,wand)
+        EntityAddComponent2(wand,"ItemComponent",{slotX=col,slotY=0})
+        wands[col]=wand
+    end
+    NHFirearms.repairStaff(staff,player)
+    assert(not ability.use_gun_script and not item.is_frozen and NHFirearms.nativeLane("battle_staff",staff)=="tool")
+    EntityKill(wands[2]);NHFirearms.repairStaff(staff,player)
+    assert(ability.use_gun_script and item.slotX==2 and #EntityGetAllChildren(staff)==1)
+    EntityRemoveFromParent(staff); ability.use_gun_script=false
+    NHFirearms.repairStaff(staff,player); assert(ability.use_gun_script and item.slotX==2)
+    GamePickUpInventoryItem(player,staff)
+    for _,slot in ipairs(tick().native_slots) do
+        if slot.entity==staff then assert(slot.lane=="wand" and slot.xslot==2); shift(slot); break end
+    end
+    row=assert(state().warehouse[1]);assert(row.item.kind=="battle_staff" and row.item.mode==4 and row.item.rounds==65 and not EntityGetIsAlive(staff))
+    shift({key="warehouse",safeSlot=row.slot,kind=row.item.kind,entity=row.id})
+    staff=assert(EntityGetWithTag("noita_hideout_battle_staff")[1]);EntityRemoveFromParent(staff)
+    item=entities[staff].comps.ItemComponent
+    item.is_pickable,item.next_frame_pickable,item.item_pickup_radius=true,0,18
+    EntitySetTransform(staff,EntityGetTransform(player))
+    local filler=EntityLoad("test.xml",0,0)
+    EntityAddTag(filler,"wand"); GamePickUpInventoryItem(player,filler)
+    EntityAddComponent2(filler,"ItemComponent",{slotX=2,slotY=0})
+    local inRadius=EntityGetInRadius
+    EntityGetInRadius=function() return EntityGetIsAlive(staff) and {staff} or {} end
+    inventory_open=false;tick()
+    controls.mButtonDownInteract,controls.mButtonFrameInteract=true,frame+1
+    tick();controls.mButtonDownInteract=false
+    EntityGetInRadius=inRadius
+    local saved=assert(state().safe[1]).item
+    assert(not EntityGetIsAlive(staff) and saved.kind=="battle_staff" and saved.rounds==65 and saved.mode==4)
+end
+print("Battle staff: warehouse quick transfer, full and freed wand lanes, old drops and ammo/mode round trip passed.")
+
+do
+    settings,flags={},{}
+    new_world()
+    local profile=state()
+    local slot=assert(NHStore.freeSafeSlot(profile))
+    local id=profile.nextItemId
+    profile.safe[1]={slot=slot,id=id,item=NHFirearms.recipe("battle_staff").item}
+    profile.nextItemId=id+1
+    assert(NHStore.commit(profile));boot()
+    local poly=EntityLoad("polymorph.xml",227,-85)
+    EntityAddTag(poly,"polymorphed_player");EntityAddComponent2(poly,"DamageModelComponent",{hp=2,max_hp=2})
+    local effect={frames=3600,tags={nh_staff_mimic=true}}
+    local previous=GameGetGameEffect
+    GameGetGameEffect=function(body,kind) return body==poly and kind=="POLYMORPH" and effect or 0 end
+    entities[player].tags.player_unit=nil
+    assert(tick().mimicFrames==3600 and tick(43).mimicFrames==3600)
+    effect.frames=240;assert(tick(40).mimicFrames==240)
+    EntityAddTag(poly,"nh_staff_mimic_hit");assert(not tick() and effect.frames==1)
+    entities[player].tags.player_unit=true;EntityKill(poly)
+    assert(not tick().mimicFrames and state().safe[1].slot==slot and state().safe[1].id==id)
+    GameGetGameEffect=previous
+end
+print("Mimic controller: native timer, hit release and untouched inventory passed.")
+
+do
+    local path = "data/entities/misc/healthbar_dummy.xml"
+    local template = '<Entity><LifetimeComponent lifetime="1" />' ..
+        '<DamageModelComponent hp="0" wait_for_kill_flag_on_death="1" other_mod="keep">' ..
+        '<damage_multipliers fire="0" /></DamageModelComponent><BossHealthBarComponent in_world="1" /></Entity>'
+    local enabled, xml, reads, writes = false, nil, 0, 0
+    function ModIsEnabled(id) assert(id == "new_enemies"); return enabled end
+    function ModDoesFileExist(file) assert(enabled and file == path); return xml ~= nil end
+    function ModTextFileGetContent(file) assert(file == path); reads = reads + 1; return xml end
+    function ModTextFileSetContent(file, value) assert(file == path); writes = writes + 1; xml = value end
+    OnModPostInit()
+    enabled = true
+    OnModPostInit()
+    assert(reads == 0 and writes == 0)
+    xml = template
+    OnModPostInit()
+    local script = assert(xml:match('<LuaComponent script_source_file="([^"]+)" execute_every_n_frame="1" />'))
+    local expected = template:gsub('lifetime="1"', 'lifetime="2"'):gsub('hp="0"', 'hp="1" max_hp="1"')
+        :gsub('<BossHealthBarComponent in_world="1" />', '<BossHealthBarComponent _enabled="0" gui="0" in_world="0" />' ..
+            '<LuaComponent script_source_file="' .. script .. '" execute_every_n_frame="1" />')
+    assert(xml == expected and writes == 1)
+    OnModPostInit()
+    xml = template:gsub('hp="0"', 'hp="0" max_hp="10"')
+    OnModPostInit()
+    xml = template:gsub('lifetime="1"', 'lifetime="5"')
+    OnModPostInit()
+    xml = template:gsub("BossHealthBarComponent", "SpriteComponent")
+    OnModPostInit()
+    assert(writes == 1)
+
+    local check = assert(loadfile(script))
+    local damage, bar = {hp=750, max_hp=1000}, {enabled=false, gui=false, in_world=false}
+    setfenv(check, {
+        GetUpdatedEntityID=function() return 11 end,
+        EntityGetFirstComponentIncludingDisabled=function(id, kind)
+            assert(id == 11)
+            if kind == "DamageModelComponent" then return damage end
+            assert(kind == "BossHealthBarComponent")
+            return bar
+        end,
+        ComponentGetValue2=function(component, key) assert(component == damage); return component[key] end,
+        ComponentSetValue2=function(component, key, value)
+            assert(component == bar and (key == "gui" or key == "in_world"))
+            component[key] = value
+        end,
+        EntitySetComponentIsEnabled=function(id, component, value)
+            assert(id == 11 and component == bar)
+            bar.enabled = value
+        end,
+    })
+    check()
+    assert(bar.enabled and bar.gui and bar.in_world and damage.hp == 750 and damage.max_hp == 1000)
+    for _, max in ipairs({0, -90000}) do
+        damage, bar = {hp=0, max_hp=max}, {enabled=false, gui=false, in_world=false}
+        check()
+        assert(not bar.enabled and not bar.gui and not bar.in_world and damage.max_hp == max)
+    end
+end
+print("New Enemies: valid and retired boss proxies, optional mod and unchanged custom templates passed.")

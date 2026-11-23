@@ -4,7 +4,7 @@ local player,item,frame=10,20,0
 local health={hp=1,max_hp=4}
 local slot={uses_remaining=1}
 local carried_parent,slot_x,slot_y
-local kind,held,alive,open,negative,curseMaximum,hook,failHook
+local kind,held,alive,open,negative,curseMaximum,hook
 local used,cleanses=0,0
 function GameGetFrameNum() return frame end
 function GameIsInventoryOpen() return open end
@@ -19,29 +19,12 @@ function EntityGetFirstComponentIncludingDisabled(id,component,tag)
     assert(id==player and component=="LuaComponent" and tag=="noita_hideout_surgery_damage")
     return hook
 end
-function EntityGetFirstComponent(id,component,tag)
-    local result=EntityGetFirstComponentIncludingDisabled(id,component,tag)
-    return result and result.enabled and result or nil
-end
-function EntityAddComponent2(id,component,data)
-    assert(id==player and component=="LuaComponent" and not hook and data.execute_every_n_frame==-1)
-    if failHook then return nil end
-    data.enabled=true
-    hook=data
-    return hook
-end
 function EntityRemoveComponent(id,component) assert(id==player and component==hook); hook=nil end
 function ComponentGetValue2(component,key)
     if key=="inventory_slot" then assert(component==slot);return slot_x,slot_y end
     return component[key]
 end
 function ComponentSetValue2(component,key,value) component[key]=value end
-function GetUpdatedEntityID() return player end
-function GetUpdatedComponentID() return hook end
-function EntitySetComponentIsEnabled(id,component,enabled)
-    assert(id==player and component==hook)
-    hook.enabled=enabled
-end
 function GameKillInventoryItem(p,id)
     assert(p==player and id==item and (held==item or carried_parent) and not hook)
     used=used+1
@@ -61,14 +44,10 @@ NHSurgeryCleanse={
 }
 local function setup(id)
     cast.reset()
-    kind,held,alive,open,negative,curseMaximum,failHook=id,item,true,false,false,nil,false
+    kind,held,alive,open,negative,curseMaximum=id,item,true,false,false,nil
     health.hp,health.max_hp,slot.uses_remaining=1,40,1
     used,cleanses=0,0
     carried_parent,slot_x,slot_y=nil,nil,nil
-end
-local function hit(amount)
-    dofile(hook.script_damage_received)
-    damage_received(amount,"damage",0,false,0)
 end
 local function assertInterrupted(current)
     assert(cast.update(current)=="interrupted" and not cast.view() and not hook)
@@ -78,29 +57,25 @@ end
 for _,tier in ipairs({{"field_surgery_kit",180,.2},{"tactical_surgery_kit",240,.35},{"advanced_surgery_kit",300,.5}}) do
     setup(tier[1])
     assert(not cast.start(player,nil) and not cast.start(player,999))
-    assert(cast.start(player,item) and hook)
+    health.hp,negative=20,true
+    assert(cast.start(player,item) and cast.view())
     local start=frame
-    hit(0); hit(-4) -- Absorbed hits and healing do not interrupt.
-    assert(not cast.update(player) and cast.view().elapsed==0)
-    frame=start+tier[2]-1
+    for elapsed=1,tier[2]-1 do
+        frame=start+elapsed
+        if elapsed%15==0 then health.hp=health.hp-0.25 end
+        assert(not cast.update(player) and cast.view().elapsed==elapsed and negative and used==0)
+    end
     assert(not cast.update(player) and cast.view().total==tier[2] and cast.view().elapsed==tier[2]-1)
     assert(cast.start(player,item) and not cast.update(player) and cast.view().elapsed==tier[2]-1)
     frame=frame+1
+    health.hp=health.hp-4 -- A direct hit on the completion frame.
+    local beforeHeal=health.hp
     assert(cast.update(player)=="completed" and not cast.view() and not hook)
-    assert(used==1 and health.hp==1+40*tier[3] and not cast.update(player))
+    assert(used==1 and cleanses==1 and not negative and health.hp==beforeHeal+40*tier[3] and not cast.update(player))
 end
 
 setup("field_surgery_kit")
 negative=true
-assert(cast.start(player,item))
-frame=frame+180
-hit(1)
-health.hp=health.hp+3 -- Damage followed by a greater heal in the last frame still cancels.
-assertInterrupted(player)
-assert(negative and health.hp==4)
-assert(cast.start(player,item))
-health.hp=3 -- Direct HP loss that did not send a damage message.
-assertInterrupted(player)
 assert(cast.start(player,item)); held=nil; assertInterrupted(player)
 held=item
 assert(cast.start(player,item)); open=true; assertInterrupted(player)
@@ -139,19 +114,18 @@ assert(cast.start(player,item))
 health.hp,health.max_hp=10,20 -- Hearty rescales HP without dealing damage.
 frame=frame+1
 assert(not cast.update(player) and cast.view().elapsed==1)
-hit(0.1)
-assertInterrupted(player)
+frame=frame+179
+assert(cast.update(player)=="completed" and health.hp==14)
 
 setup("tactical_surgery_kit")
-failHook=true
-handled,reason=cast.start(player,item)
-assert(handled and reason=="interrupted" and not cast.view() and used==0)
-failHook=false
 assert(cast.start(player,item))
 local restored=dofile("mods/noita_hideout/files/surgery.lua") -- World reloaded during a cast.
+hook={} -- A player saved by a version that used a damage listener.
+dofile("mods/noita_hideout/files/surgery_damage.lua")
+damage_received(1)
 restored.reset(player)
 assert(not hook and not restored.view() and not restored.update(player) and used==0)
-assert(restored.start(player,item) and hook)
+assert(restored.start(player,item) and restored.view())
 restored.reset()
 assert(not hook and not restored.view() and used==0)
 print("Surgery: three durations and percentages, damage, clean interrupt, charge handling, health cap and reload passed.")
@@ -185,19 +159,19 @@ local function pay()
     quantity=quantity-1
     return true
 end
-assert(cast.begin(player,kind,available,pay) and hook)
+assert(cast.begin(player,kind,available,pay) and cast.view())
 frame=frame+239
 assert(not cast.update(player) and attempts==0 and cast.view().elapsed==239)
 frame=frame+1
 assertInterrupted(player)
 assert(attempts==1 and quantity==1 and negative and health.hp==1)
-assert(cast.begin(player,kind,available,pay) and hook)
+assert(cast.begin(player,kind,available,pay) and cast.view())
 present=false
 frame=frame+1
 assertInterrupted(player)
 assert(attempts==1 and quantity==1 and negative and health.hp==1)
 present,accept=true,true
-assert(cast.begin(player,kind,available,pay) and hook)
+assert(cast.begin(player,kind,available,pay) and cast.view())
 frame=frame+240
 assert(cast.update(player)=="completed" and not cast.update(player))
 assert(attempts==2 and quantity==0 and cleanses==1 and not negative and health.hp==15 and used==0 and held==81)

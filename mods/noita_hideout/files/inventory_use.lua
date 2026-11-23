@@ -1,19 +1,22 @@
 -- Operations on an NHStore.load() draft. The caller commits the charge before
 -- applying the effect. No inventory item needs to be spawned or equipped.
 local M={}
+local equipment=NHEquipment or dofile("mods/noita_hideout/files/equipment.lua")
+local bags=NHLootBags or dofile("mods/noita_hideout/files/loot_bags.lua")
 local foods={}
 for _,food in ipairs(dofile("mods/noita_hideout/files/cooking.lua")) do foods[food.id]=true end
 
 function M.supports(kind)
-    return foods[kind] or kind=="bandage" or kind=="dose" or kind=="summon_card" or kind=="remote_terminal"
+    return (NHShields and NHShields.supply(kind)~=nil) or bags.types[kind]~=nil or foods[kind] or kind=="bandage" or kind=="dose" or kind=="summon_card" or equipment.links[kind]~=nil
         or NHMedkits.types[kind]~=nil or NHSurgeryKits.types[kind]~=nil or NHThrowables.types[kind]~=nil
 end
 
-local function maxUses(kind)
+local function maxUses(kind,species)
+    if foods[kind] then return NHFoods.byId[kind].uses end
     if kind=="dose" then return NHStore.doseDurability end
-    if kind=="summon_card" then return NHCompanions.durability end
-    if kind=="remote_terminal" then return NHEquipment.remoteTerminal.uses end
-    local kit=NHMedkits.types[kind] or NHSurgeryKits.types[kind]
+    if kind=="summon_card" then return NHCompanions.cardCapacity(species) end
+    if equipment.links[kind] then return equipment.links[kind].uses end
+    local kit=NHMedkits.types[kind] or NHSurgeryKits.types[kind] or (NHShields and NHShields.supply(kind))
     return kit and kit.uses
 end
 
@@ -24,6 +27,10 @@ local function location(state,player,ref)
         if not ref.slot or not ref.storedId then return end
         index=NHStore.slotIndex(state,ref.container,ref.slot,ref.kind)
         local row=index and state[ref.container][index]
+        if not row or row.id~=ref.storedId then return end
+        item=row.item
+    elseif ref.container=="gear" then
+        local row=state[NHShields.field(ref.kind)]
         if not row or row.id~=ref.storedId then return end
         item=row.item
     elseif ref.container=="pouch" and ref.cell and ref.kind=="dose" then
@@ -40,8 +47,9 @@ local function location(state,player,ref)
         item=cells[index]
     end
     if not item or item.kind~=ref.kind or (ref.count or 1)~=(item.count or 1) then return end
-    local full=maxUses(item.kind)
-    if (ref.remaining or full)~=(item.remaining or full) then return end
+    local full=maxUses(item.kind,item.species)
+    local remaining=equipment.linkUses(item.kind,item.remaining) or item.remaining or full
+    if (ref.remaining or full)~=remaining then return end
     if item.kind=="dose" and (item.subtype or "fire")~=(ref.subtype or "fire") then return end
     if item.kind=="summon_card" and item.species~=ref.species then return end
     return item,index,cells,pouch,wallet
@@ -85,9 +93,16 @@ function M.spend(draft,player,ref)
     local item,index,cells,pouch,wallet=location(draft,player,ref)
     if not item then return nil,"Inventory slot changed." end
     local count=item.count or 1
-    local remaining=item.remaining or maxUses(item.kind) or 1
+    local remaining=equipment.linkUses(item.kind,item.remaining) or item.remaining or maxUses(item.kind,item.species) or 1
     local source=cells and cells[index] or item
-    if count>1 and remaining>1 then
+    if NHMedkits.capacity(item.kind) then
+        local left=NHMedkits.charges(item)-1
+        if left>0 then NHMedkits.unpack(item,left)
+        elseif ref.container=="gear" then draft[NHShields.field(ref.kind)]=nil
+        else table.remove(draft[ref.container],index) end
+    elseif foods[item.kind] and NHFoods.bites(item)>1 then
+        NHFoods.setBites(item,NHFoods.bites(item)-1)
+    elseif count>1 and remaining>1 then
         -- Only full syringes and summon cards can stack. Keep the untouched
         -- units in place and put the worn one in the same container.
         local slot,capacity
@@ -117,6 +132,8 @@ function M.spend(draft,player,ref)
         source.remaining=remaining-1
     elseif count>1 then
         source.count=count-1
+    elseif ref.container=="gear" then
+        draft[NHShields.field(ref.kind)]=nil
     elseif cells then
         cells[index]=nil
         if pouch then pouch.doses=pouch.doses-1 end

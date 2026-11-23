@@ -1,0 +1,5 @@
+<Entity name="$nh_hideout_magic_tube">
+    <Base file="mods/noita_hideout/files/projectiles/tube_round.xml" />
+    <SpriteComponent image_file="mods/noita_hideout/files/projectiles/round.png" offset_x="2" offset_y="2" emissive="1" />
+    <VariableStorageComponent _tags="nh_tube_payload" value_string="tube_cement" />
+</Entity>

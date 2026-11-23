@@ -1,0 +1,5 @@
+<Entity tags="nh_transit_protection">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="PROTECTION_ALL" frames="30" />
+    <LifetimeComponent lifetime="32" />
+</Entity>

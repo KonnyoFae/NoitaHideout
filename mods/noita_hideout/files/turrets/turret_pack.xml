@@ -1,0 +1,3 @@
+<Entity name="$nh_hideout_turret_pack" tags="nh_deployed_turret,nh_decoy,prey,mortal,hittable,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/turrets/decoy_base.xml" />
+</Entity>

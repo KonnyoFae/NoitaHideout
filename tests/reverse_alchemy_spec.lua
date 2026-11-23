@@ -98,7 +98,8 @@ end
 local synthesis,decomposition={},{}
 local powderSeparation
 local ids={}
-local secondsPerBatch={
+local secondsPerBatch={philosopher_stone=1,rubedo_midas=1,rubedo_immortality=1,supply_logistics=1,strike_logistics=1,
+    reinforcement_logistics=1,intel_logistics=1,
     stable=8, diminution=8, mana=8, flummoxium=10,
     pheromone=15, levitatium=15, levitatium_metals=15,
     hastium=30, unstable_polymorphine=30, guiding_powder=30,
@@ -111,8 +112,9 @@ for _,recipe in ipairs(NHStore.recipes) do
     if recipe.category=="alchemy" then
         local seconds=assert(secondsPerBatch[recipe.reverseOf or recipe.id],recipe.id)
         assert(NHStore.productionFrames(recipe)==seconds*60,recipe.id)
-        assert(not recipe.materials.magic_liquid_hp_regeneration_unstable,recipe.id)
-        assert(not recipe.materials.gold and not recipe.materials.midas_precursor,recipe.id)
+        local outputs=recipe.materials or recipe.resourceYield
+        assert(not outputs.magic_liquid_hp_regeneration_unstable,recipe.id)
+        assert(not outputs.gold and not outputs.midas_precursor,recipe.id)
         for _,input in ipairs(recipe.inputs) do assert(input.name~="magic_liquid_hp_regeneration_unstable",recipe.id) end
         if recipe.reverseOf then
             assert(not decomposition[recipe.reverseOf],recipe.id)

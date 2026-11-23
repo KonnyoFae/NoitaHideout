@@ -1,0 +1,4 @@
+<Sprite filename="mods/noita_hideout/files/companions/dog_idle.png" offset_x="33" offset_y="35" default_animation="idle">
+    <RectAnimation name="idle" pos_x="0" pos_y="0" frame_width="66" frame_height="66"
+        frame_count="8" frames_per_row="8" frame_wait="0.125" loop="1" />
+</Sprite>

@@ -81,4 +81,17 @@ assert(NHStore.commit(s))
 s=assert(NHStore.load())
 assert(s.levels.warehouse_containers==3 and quote().costs[3].amount==3 and quote().costs[4].amount==2)
 assert(s.warehouse[1].id==loaded.id and s.warehouse[1].item.materials.water==1)
+local store={kind="potion",slot=loaded.slot,id=loaded.id,mode="store_contents"}
+s.resources.container_scrap=NHStore.maxResourceAmount
+assert(not NHStore.salvage(s,store) and s.warehouse[1].item.materials.water==1)
+s.resources.container_scrap=3
+s.warehouse[1].item.materials.slime=27
+s.materials={water=100}
+for i=1,15 do s.materials["filler_"..i]=1 end
+assert(not NHStore.salvage(s,store) and not s.materials.slime and s.materials.water==100 and s.resources.container_scrap==3)
+s.materials.filler_15=nil
+assert(NHStore.salvage(s,store) and NHStore.commit(s))
+s=assert(NHStore.load())
+assert(not NHStore.salvage(s,store) and s.materials.slime==27 and s.materials.water==101 and s.resources.container_scrap==4)
+assert(#s.warehouse==0 and #s.safe==1 and #s.docks==1)
 print("Empty container eligibility, deterministic payment, stale quotes, salvage and expansion costs passed.")

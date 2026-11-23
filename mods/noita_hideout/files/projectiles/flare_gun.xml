@@ -1,0 +1,19 @@
+<Entity name="$nh_hideout_flare_gun">
+    <Base file="mods/noita_hideout/files/projectiles/bullet_base.xml">
+        <VelocityComponent gravity_y="65" />
+        <ProjectileComponent speed_min="410" speed_max="410" lifetime="150" damage="0.04"
+            muzzle_flash_file="data/entities/particles/muzzle_flashes/muzzle_flash_launcher.xml" />
+    </Base>
+    <LuaComponent execute_every_n_frame="-1" execute_on_removed="1"
+        script_source_file="mods/noita_hideout/files/projectiles/impact.lua" />
+    <AudioComponent file="data/audio/Desktop/projectiles.bank" event_root="player_projectiles/bullet_launcher" />
+    <ParticleEmitterComponent emitted_material_name="spark_red"
+        is_trail="1" trail_gap="1" x_pos_offset_min="0" x_pos_offset_max="0"
+        y_pos_offset_min="0" y_pos_offset_max="0" x_vel_min="0" x_vel_max="0"
+        y_vel_min="0" y_vel_max="0" gravity.y="0"
+        count_min="1" count_max="1" lifetime_min="0.05" lifetime_max="0.08"
+        emission_interval_min_frames="1" emission_interval_max_frames="1"
+        render_on_grid="1" fade_based_on_lifetime="1" create_real_particles="0"
+        emit_cosmetic_particles="1" is_emitting="1" />
+    <VariableStorageComponent _tags="nh_throwable_impact" value_string="flare_gun" value_bool="0" />
+</Entity>

@@ -1,0 +1,12 @@
+<Entity name="$nh_hideout_bfg" tags="nh_support_weapon,nh_loaded_gun,noita_hideout_bfg,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/bfg.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/bfg.png" offset_x="4" offset_y="10" />
+        <ItemComponent item_name="$nh_hideout_bfg" uses_remaining="4" ui_description="$nh_hideout_bfg_desc"
+            ui_sprite="mods/noita_hideout/files/items/bfg.png" />
+        <UIInfoComponent name="$nh_hideout_bfg" />
+        <AbilityComponent ui_name="$nh_hideout_bfg" />
+    </Base>
+    <HotspotComponent _tags="shoot_pos" offset.x="11" offset.y="-3" />
+    <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
+</Entity>

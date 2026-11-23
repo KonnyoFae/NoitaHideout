@@ -1,0 +1,10 @@
+<Entity name="waterstone" tags="nh_chain_effect">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="BREATH_UNDERWATER" frames="-1" />
+    <GameEffectComponent effect="STAINS_DROP_FASTER" frames="-1" />
+    <MagicConvertMaterialComponent kill_when_finished="1" from_material="" from_material_tag="[hot]" steps_per_frame="2" to_material="smoke" clean_stains="0" is_circle="1" radius="64" loop="1" />
+    <MagicConvertMaterialComponent kill_when_finished="1" from_material="" from_material_tag="[lava]" steps_per_frame="2" to_material="lavarock_static" clean_stains="0" is_circle="1" radius="64" loop="1" />
+    <MagicConvertMaterialComponent kill_when_finished="1" from_material="" from_material_tag="[molten]" steps_per_frame="2" to_material="rock_static" clean_stains="0" is_circle="1" radius="64" loop="1" />
+    <LuaComponent script_source_file="data/scripts/items/waterstone.lua" execute_every_n_frame="5" />
+    <MagicConvertMaterialComponent kill_when_finished="0" extinguish_fire="1" is_circle="1" loop="1" radius="64" />
+</Entity>

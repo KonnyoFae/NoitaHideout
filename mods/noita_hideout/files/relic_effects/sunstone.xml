@@ -1,0 +1,8 @@
+<Entity name="sunstone" tags="nh_chain_effect">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="REMOVE_FOG_OF_WAR" frames="-1" />
+    <AreaDamageComponent aabb_min.x="-48" aabb_min.y="-48" aabb_max.x="48" aabb_max.y="48" damage_per_frame="0.06" update_every_n_frame="1" entities_with_tag="mortal" death_cause="$damage_sun" damage_type="DAMAGE_CURSE" />
+    <MagicConvertMaterialComponent kill_when_finished="0" from_material_tag="[sand_ground]" steps_per_frame="2" to_material="liquid_fire" clean_stains="0" is_circle="1" radius="72" loop="1" />
+    <MagicConvertMaterialComponent kill_when_finished="0" from_material_tag="[sand_other]" steps_per_frame="2" to_material="liquid_fire" clean_stains="0" is_circle="1" radius="72" loop="1" />
+    <MagicConvertMaterialComponent kill_when_finished="0" ignite_materials="1" steps_per_frame="2" fan_the_flames="1" clean_stains="0" is_circle="1" radius="72" loop="1" />
+</Entity>

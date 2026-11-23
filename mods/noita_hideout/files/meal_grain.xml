@@ -1,0 +1,8 @@
+<Entity tags="noita_hideout_meal_grain">
+    <InheritTransformComponent />
+    <VariableStorageComponent name="grain" value_int="0" value_float="0" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/meal_tick.lua" execute_every_n_frame="60" />
+
+    <UIIconComponent name="$nh_hideout_meal_grain" description="$nh_hideout_meal_grain"
+        icon_sprite_file="mods/noita_hideout/files/items/bread.png" is_perk="0" display_in_hud="1" display_above_head="0" />
+</Entity>

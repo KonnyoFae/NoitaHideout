@@ -1,0 +1,5 @@
+<Entity tags="nh_bee_guard">
+    <SpriteComponent image_file="data/projectiles_gfx/swarm_wasp.xml" />
+    <EnergyShieldComponent radius="5" energy="0.45" max_energy="0.45" recharge_speed="0.10" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/companions/bee_orbit.lua" execute_every_n_frame="1" />
+</Entity>

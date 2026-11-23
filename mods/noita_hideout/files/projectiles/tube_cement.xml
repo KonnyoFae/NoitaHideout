@@ -1,0 +1,9 @@
+<Entity tags="nh_tube_cement">
+    <!-- Scatter water first, then fill the remaining air with cement. Both bursts preserve existing liquids. -->
+    <Base file="data/entities/projectiles/chunk_of_soil.xml">
+        <ProjectileComponent>
+            <config_explosion never_cache="1" explosion_radius="16" create_cell_material="water" create_cell_probability="25"
+                load_this_entity="mods/noita_hideout/files/projectiles/tube_cement_fill.xml" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

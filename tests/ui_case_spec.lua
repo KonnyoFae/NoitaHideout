@@ -1,44 +1,78 @@
 local width, height = 427, 240
 local click, action, argument
-local drawn,panels,tips = {},{},{}
+local drawn,panels,tips,badges,glyphRuns = {},{},{},{},{}
 local frame = 0
 local pointer = {x = 0, y = 0}
 function GameGetFrameNum() return frame end
 function InputIsMouseButtonDown() return pointer.down == true end
-function InputIsMouseButtonJustDown(which) return (which==2 and pointer.right) or (which==1 and pointer.pressed) or false end
+function InputIsMouseButtonJustDown(which) return which==pointer.wheel or (which==2 and pointer.right) or (which==1 and pointer.pressed) or false end
 function InputIsMouseButtonJustUp() return pointer.released == true end
 function GameGetCameraBounds() return 0, 0, width, height end
 function DEBUG_GetMouseWorld() return pointer.x, pointer.y end
 function GuiCreate() return {} end
-function GuiStartFrame() drawn,panels,tips = {},{},{} end
+function GuiStartFrame() drawn,panels,tips,badges,glyphRuns = {},{},{},{},{} end
 function GuiGetScreenDimensions() return width, height end
 function GuiZSet() end
 function GuiZSetForNextWidget() end
-local scroll,scroll_key,scroll_offsets=nil,nil,{}
+local scroll,scroll_key
+local widgetOptions,animation={},nil
+function dofile_once(path)
+    assert(path=="data/scripts/lib/utilities.lua")
+    GUI_OPTION={AlwaysClickable=3,NoPositionTween=6,Layout_NoLayouting=15}
+end
+function GuiOptionsAddForNextWidget(_,option) widgetOptions[option]=true end
+function GuiAnimateBegin() assert(not animation); animation={} end
+function GuiAnimateAlphaFadeIn(_,_,speed,step,reset) animation.hidden=speed==0 and step==0 and reset end
+function GuiAnimateEnd() assert(animation); animation=nil end
 function GuiIdPushString(_,key) assert(not scroll_key); scroll_key=key end
 function GuiIdPop() assert(scroll_key and not scroll); scroll_key=nil end
-function GuiBeginScrollContainer(_,id,x,y,w,h)
+function GuiBeginScrollContainer(_,id,x,y,w,h,focusable)
     assert(scroll_key and not scroll and w>0 and h>0)
-    scroll={id=id,x=x,y=y,w=w,h=h,key=scroll_key,offset=scroll_offsets[scroll_key] or 0}
+    scroll={id=id,x=x,y=y,w=w,h=h,key=scroll_key,offset=0}
+    scroll.options,scroll.hidden,scroll.focusable=widgetOptions,animation and animation.hidden,focusable
+    widgetOptions={}
     panels[id]=scroll
 end
 function GuiEndScrollContainer() assert(scroll); scroll=nil end
 local next_color,image_colors={},{}
-function GuiColorSetForNextWidget(_,r,g,b) next_color={r,g,b} end
+local shieldImages,shieldText={},{}
+local shieldStripes={}
+local ammoText={}
+local rescueText={}
+local hudImages,noticeText={},{}
+function GuiColorSetForNextWidget(_,r,g,b,a) next_color={r,g,b,a} end
 local tipbox
 function GuiImageNinePiece(_,id,x,y,w,h)
     panels[id]={x=x,y=y,w=w,h=h}
     if id==200 then tipbox={x=x,y=y,w=w,h=h} end
 end
 local tiles={}
-function GuiImage(_,id,x,y,sprite,alpha,scale)
+local tracks={}
+function GuiImage(_,id,x,y,sprite,alpha,scale,scaleY,rotation,playback,frameName)
+    if id==7100 or id==7102 or id==7110 or id==7112 or id==7352 then tracks[id]={x=x,y=y,h=scaleY,frame=frame} end
+    if scroll_key and scroll_key:match("^shield_stripes_") then
+        shieldStripes[#shieldStripes+1]={cell=tonumber(scroll_key:match("(%d+)$")),x=x,y=y,w=scale,h=scaleY,a=alpha,color=next_color}
+    end
+    if sprite=="mods/noita_hideout/files/slot_digits.xml" then
+        assert(rotation==0 and playback==1 and scaleY==scale)
+        local base=id-id%32
+        if id==base then glyphRuns[base]={text="",x=x,y=y,h=10*scale,scale=scale} end
+        local run=assert(glyphRuns[base])
+        local char=frameName=="slash" and "/" or frameName=="times" and "×" or frameName
+        assert(char:match("^%d$") or char=="/" or char=="×")
+        assert(math.abs(x-run.x-(id-base)*7*scale)<0.001 and run.y==y)
+        run.text,run.w=run.text..char,x+6*scale-run.x
+    end
+    if id>5700 and id<5740 then shieldImages[id]={x=x,y=y,w=scale,h=scaleY,a=alpha} end
+    if id>=5800 and id<=5845 then hudImages[id]={x=x,y=y,w=scale,h=scaleY,a=alpha,color=next_color} end
     image_colors[id],next_color=next_color,{}
     drawn[sprite]=true
     if sprite=="data/ui_gfx/inventory/quick_inventory_box.png" then tiles[id]={x=x,y=y,scale=scale} end
 end
 function GuiTooltip(_,title,body) tips[title]=body or "" end
 function GuiGetImageDimensions() return 20,20 end
-function MagicNumbersGetValue(k) return k=="UI_FULL_INVENTORY_OFFSET_X" and "170" or "20" end
+local hudSettings={UI_FULL_INVENTORY_OFFSET_X=170,UI_BARS2_OFFSET_X=-40,UI_BARS_SCALE=1,GUI_HP_MULTIPLIER=25}
+function MagicNumbersGetValue(k) return tostring(hudSettings[k] or 20) end
 function GuiGetTextDimensions(_, value, scale)
     local w = 0
     for letter in value:gmatch("[^\128-\191][\128-\191]*") do
@@ -46,7 +80,15 @@ function GuiGetTextDimensions(_, value, scale)
     end
     return w * (scale or 1), 9 * (scale or 1)
 end
-function GuiText(_, _, _, value) drawn[value] = true end
+function GuiText(_, x, y, value, scale)
+    drawn[value]=true
+    noticeText[value]={x=x,y=y,scale=scale or 1,color=next_color}
+    if value:match("^保险") or value:match("^同行") or value:match("^本次保金") or value:match("^保金上限") then
+        rescueText[value]={x=x,y=y,scale=scale or 1}
+    end
+    if y==62 or y==72 then ammoText[value]={x=x,y=y,color=next_color} end
+    if value:match("^%[.*%]%+%[.*%]$") then shieldText={value=value,x=x,y=y} end
+end
 local buttons={}
 function GuiButton(_, id, x, y, value, scale)
     if scroll then x,y=x+scroll.x,y+scroll.y-scroll.offset end
@@ -72,23 +114,69 @@ local function render(model, widget)
         assert(not action, "multiple actions on a single input")
         action, argument = command, item
     end)
-    assert(not scroll and not scroll_key,"a navigation action leaked the scroll container")
+    for _,run in pairs(glyphRuns) do badges[run.text]=run; drawn[run.text]=true end
+    assert(not scroll and not scroll_key and not animation and not next(widgetOptions),"unclosed GUI scope")
     return action, argument
 end
-local function reveal(model,id)
-    local b=assert(buttons[id])
-    local box=b.scroll
-    if box then
-        scroll_offsets[box.key]=math.max(0,b.y+box.offset-box.y-box.h+9*b.scale)
-        render(model)
-        b=assert(buttons[id])
-        assert(b.y>=box.y-0.001 and b.y+9*b.scale<=box.y+box.h+0.001,"action cannot scroll into view")
+do
+    local a={rounds=24,max=36,reserve=162,modes=NHFirearms.modes.guns.scatter_revolver,index=3,keyName="B"}
+    local m={open=false,near=false,lang="en",ammo=a}
+    render(m)
+    assert(drawn["Scatter  24/36  ·  4 shots"] and drawn["[B] Mode   [R] Reload  Reserve 162"])
+    a.loading=18
+    render(m)
+    assert(drawn["Reload 0.3s  Reserve 162"])
+    m.lang,a.menu,a.hover="zh",true,2
+    render(m)
+    assert(drawn["> 马格南 · 3 <"] and drawn["霰弹 · 6"] and drawn["松开确认"])
+    a.menu,a.modes,a.index=false,NHFirearms.staffModes,4
+    a.mimicTarget={x=90,y=65,status="ready",form="test.xml"};render(m)
+    assert(drawn["可拟态"] and noticeText["可拟态"].x<90 and noticeText["可拟态"].y<65)
+    a.mimicTarget.status="unsupported";a.mimicTarget.form=nil;render(m);assert(drawn["未收录形态"] and not drawn["可拟态"])
+    m.lang="en";render(m);assert(drawn["Unsupported form"])
+    a.mimicTarget=nil;render(m);assert(not drawn["Unsupported form"])
+    render({mimicFrames=61,lang="zh"});assert(drawn["拟态剩余 2 秒"])
+    render({mimicFrames=1,lang="en"});assert(drawn["Mimic: 1s"])
+end
+-- Inspect through the same wheel input a player uses. Hidden controls are
+-- intentionally absent from the widget tree until the viewport reaches them.
+local function seekWorkshop(m,found)
+    if found() then return true end
+    local track=tracks[7102]
+    if not track or track.frame~=frame then return false end
+    for _,key in ipairs({5,4}) do
+        pointer={x=track.x-2,y=track.y+3,wheel=key}
+        for _=1,24 do
+            render(m)
+            if found() then pointer.wheel=nil; return true end
+        end
     end
-    return b
+    pointer.wheel=nil
+    return false
+end
+local function reveal(model,id)
+    assert(seekWorkshop(model,function() return buttons[id] end),"cannot reach button "..id)
+    return buttons[id]
+end
+local function see(m,text)
+    return seekWorkshop(m,function() return drawn[text] or tips[text] end)
 end
 local function green_button(id)
     local b=buttons[id]
     return b and b.color[1]==0.62 and b.color[2]==0.95 and b.color[3]==0.75
+end
+
+local function wheelAt(m,track,button,ticks)
+    render(m)
+    local bar=tracks[track]
+    assert(bar and bar.frame==frame,debug.traceback("missing active scrollbar "..track))
+    pointer={x=bar.x-2,y=bar.y+3,wheel=button}
+    for _=1,ticks or 1 do render(m) end
+    pointer.wheel=nil
+end
+local function listItem(name)
+    for id,b in pairs(buttons) do if b.name==name then return id end end
+    error("missing list item "..name)
 end
 
 local function native(lane,col,x,id,kind)
@@ -96,6 +184,50 @@ local function native(lane,col,x,id,kind)
 end
 local model={lang="en",open=false,near=false,status=""}
 assert(not render(model,2))
+do
+    local function overlay(cells,charge,repair,maxHp)
+        shieldImages,shieldText,shieldStripes={},{},{}
+        model.shield={cells=cells,charge=charge*NHShields.cell,repair=repair,maxHp=maxHp}
+        render(model)
+    end
+    overlay(2,2,0,4)
+    local innerRight=width-41
+    assert(shieldImages[5711].x+shieldImages[5711].w==innerRight and shieldImages[5712].x==innerRight-40)
+    assert(shieldImages[5711].y==21 and shieldImages[5711].h==4 and shieldImages[5711].a==0.82)
+    assert(shieldText.value=="[50]+[50]" and shieldText.x+GuiGetTextDimensions(nil,shieldText.value)==innerRight and shieldText.y+9<=shieldImages[5711].y-3)
+    overlay(2,2,0,40)
+    assert(shieldImages[5702].x==innerRight-40 and shieldText.value=="[500]+[500]")
+    overlay(3,3,0,40)
+    assert(shieldImages[5703].x==innerRight-60)
+    overlay(4,2.5,0,4)
+    assert(shieldText.value=="[100]+[25]" and shieldImages[5704].x==innerRight-80)
+    assert(shieldImages[5713].w==10 and not shieldImages[5714])
+    assert(#shieldStripes>0)
+    local rows={}
+    for _,stripe in ipairs(shieldStripes) do
+        local fill=assert(shieldImages[5710+stripe.cell])
+        assert(stripe.x>=fill.x and stripe.x+stripe.w<=fill.x+fill.w)
+        assert(stripe.y>=fill.y and stripe.y+stripe.h<=fill.y+fill.h)
+        assert(stripe.color[1]>stripe.color[2] and stripe.color[3]>stripe.color[1])
+        rows[stripe.y]=true
+    end
+    assert(rows[21] and rows[24])
+    overlay(4,1,120,5)
+    assert(shieldText.value=="[0]+[62.5]" and shieldImages[5732] and not shieldImages[5712])
+    overlay(2,0,0,4)
+    assert(shieldText.value=="[0]+[0]" and not shieldImages[5711] and not shieldImages[5731])
+    width=640
+    hudSettings.UI_BARS2_OFFSET_X,hudSettings.UI_BARS_POS_Y,hudSettings.UI_BARS_SCALE=-65,28,2
+    overlay(3,3,0,1000000)
+    assert(shieldImages[5711].x+shieldImages[5711].w==width-66 and shieldImages[5711].y==29 and shieldImages[5711].h==8)
+    assert(shieldText.x>=width/2 and shieldText.y+9<shieldImages[5711].y)
+    width=427
+    hudSettings.UI_BARS2_OFFSET_X,hudSettings.UI_BARS_POS_Y,hudSettings.UI_BARS_SCALE=-40,20,1
+    model.shield=nil
+    shieldImages,shieldText={},{}
+    render(model)
+    assert(not next(shieldImages) and not next(shieldText))
+end
 model.open,model.mode,model.pouch_location,model.case_count=true,"case","safe",2
 model.capacity,model.revision,model.secure_loot=4,1,{[3]={kind="pouch",name="Injector pouch #17",id=17}}
 model.native_slots={native("wand",0,0,42,"wand"),native("tool",4,0,43,"dose"),
@@ -104,8 +236,16 @@ local function point(x,y,event)
     pointer={x=x,y=y,down=event=="press",pressed=event=="press",released=event=="release"}
     return render(model)
 end
-local cx,cy=width-187-5,height-72-5
+local cx,cy=5,height-72-5
 render(model)
+local shift
+function InputIsKeyDown(key) return key==shift end
+shift=229
+pointer={x=28,y=28,pressed=true,down=true}
+assert(NHUI.quickTarget().entity==42 and not NHUI.useTarget())
+assert(not render(model) and NHUI.quickTarget().entity==42)
+shift=nil
+assert(not point(cx+12,cy+30,"release"))
 point(28,28,"press")
 local cmd,arg=point(cx+12,cy+30,"release")
 assert(cmd=="place" and arg.entity==42 and arg.safeSlot==1)
@@ -125,7 +265,7 @@ model.popup,model.pouchId,model.pouchName=true,17,"Injector pouch #17"
 model.maxUses,model.pouchCapacity,model.cells=3,4,{{remaining=3,count=2}}
 render(model)
 for i=1002,1003 do assert(tiles[i].x-tiles[i-1].x==20) end -- case
-for i=1005,1007 do assert(tiles[i].x-tiles[i-1].x==20) end -- pouch
+for i=1006,1008 do assert(tiles[i].x-tiles[i-1].x==20) end -- pouch
 point(cx+58,cy+30,"press")
 cmd,arg=point(148,28,"release")
 assert(cmd=="take_pouch" and arg.xslot==2 and arg.safeSlot==3 and arg.pouchId==17)
@@ -169,9 +309,9 @@ assert(render(model,38)=="close_container")
 model.popup=false
 point(198,28,"press")
 assert(not point(298,28,"release"),"vanilla reorder")
-render(model,36)
+assert(not buttons[36])
 point(198,28,"press")
-cmd,arg=point(cx+12,cy+30,"release")
+cmd,arg=point(cx+73,cy+30,"release")
 assert(arg.safeSlot==4)
 point(cx+12,cy+36,"press")
 model.open=false
@@ -180,7 +320,8 @@ model.open=true
 assert(not point(148,28,"release"))
 print("Native inventory drag, spell row, exact slot, upgrade pages and close cancellation passed.")
 
--- Left warehouse, native tile pitch, automatic filing and materials tab.
+model.capacity=3
+-- Right warehouse, native tile pitch, automatic filing and materials tab.
 model.near,model.warehouse=true,{}
 model.warehouse_capacity={wand=48,spell=48,containers=48,supplies=48,equipment=48,collection=48,materials=16}
 model.debug=true
@@ -191,7 +332,7 @@ model.recipes={
     {id="medical",category="medical",name="Medkit",icon="mods/noita_hideout/files/items/medkit.png",output=1,duration=5,ready=true,inputs={{name="Slime",available=300,amount=100}}},
     {id="injector",category="medical",name="Fire injector",output=1,duration=120,ready=false,reason="Need stock",inputs={}},
     {id="grenade",category="weapons",name="Magic grenade",icon="mods/noita_hideout/files/items/grenade.png",output=8,duration=10,ready=false,unlocked=false,reason="Build the station",inputs={}},
-    {id="pouch",category="equipment",name="Injector pouch",output=1,duration=120,ready=true,
+    {id="pouch",category="containers",name="Injector pouch",output=1,duration=120,ready=true,
         inputs={{name="Slime",amount=50,available=100},{name="Empty container",amount=1,available=2}}},
     {id="reverse_stable",category="alchemy",alchemyMode="decomposition",name="Decompose Teleportatium",duration=120,ready=true,
         inputs={{name="Teleportatium",available=600,amount=500}},
@@ -210,22 +351,53 @@ model.warehouse.spell={{kind="spell",name="Bomb",id=32}}
 point(origin.x+1,origin.y+1,"press")
 cmd,arg=point(298,28,"release")
 assert(cmd=="secure_withdraw" and arg.container=="warehouse" and arg.storedId==32 and arg.xslot==5)
--- Each category pages independently and the next empty page remains writable.
+-- Scrolling keeps exact destination slots in an otherwise empty warehouse.
 local page_size=math.floor((panels[70].w-16)/20)*4
 model.warehouse_capacity.spell=page_size*7
-local item_panel,item_pager=panels[70],panels[299]
-render(model,301)
+local item_panel=panels[70]
+do
+    render(model)
+    local bar=assert(tracks[7112])
+    pointer={x=bar.x-4,y=bar.y+4}
+    for _,pulse in ipairs({false,5,4}) do
+        pointer.wheel=pulse
+        render(model)
+        local hit=assert(panels[2],"hover must register a native wheel target even before the first notch")
+        assert(hit.key=="nh_wheel/stash/spell" and hit.hidden and hit.focusable==false)
+        assert(hit.options[GUI_OPTION.AlwaysClickable] and hit.options[GUI_OPTION.NoPositionTween])
+        assert(pointer.x>=hit.x and pointer.x<hit.x+hit.w and pointer.y>=hit.y and pointer.y<hit.y+hit.h)
+    end
+    pointer.y,pointer.wheel=bar.y-2,5
+    render(model)
+    assert(not panels[2],"a header must leave the native wheel alone")
+    pointer.y,pointer.wheel=bar.y+4,nil
+    model.open=false
+    render(model)
+    assert(not panels[2],"closing the inventory must release the wheel")
+    model.open=true
+    render(model)
+end
+wheelAt(model,7112,5)
 point(198,28,"press")
 cmd,arg=point(origin.x+1,origin.y+1,"release")
-assert(cmd=="place" and arg.safeSlot==1+page_size)
--- Directly select page 5; the arrows step from that selection.
-render(model,306)
+assert(cmd=="place" and arg.safeSlot==1+3*page_size/4)
+wheelAt(model,7112,5)
 point(198,28,"press")
 cmd,arg=point(origin.x+1,origin.y+1,"release")
-assert(cmd=="place" and arg.safeSlot==4*page_size+1)
-render(model,300)
+assert(cmd=="place" and arg.safeSlot==1+6*page_size/4)
+-- A committed placement reveals the actual row even when the stash was folded.
+render(model,71)
+NHUI.showTransfer("warehouse","spell",page_size*5+1)
 render(model)
-assert(drawn["[4]"])
+assert(buttons[76].color[1]==1 and not buttons[301])
+render(model,39)
+model.capacity=14
+NHUI.showTransfer("safe","potion",13)
+render(model)
+assert(tracks[7110].frame==frame and tiles[1001])
+model.capacity=3
+NHUI.showTransfer("safe","potion",1)
+render(model)
 -- The pouch files into equipment even while another category is displayed.
 -- Its popup still accepts interaction inside the warehouse.
 model.native_slots[2].kind="pouch"
@@ -256,10 +428,10 @@ cmd,arg=point(origin.x+21,origin.y+1,"release")
 assert(cmd=="move_pouch" and arg.pouchId==17 and arg.source=="safe" and arg.destination=="warehouse" and arg.safeSlot==2)
 model.secure_loot[1]=original_slot
 model.docks,model.materials={},{}
-render(model,80)
+NHUI.showTransfer("docks","potion",2)
 render(model)
 assert(drawn.Flask and drawn["Powder pouch"] and drawn.Empty)
-assert(item_pager.x==panels[299].x and item_pager.y==panels[299].y)
+assert(not panels[299])
 assert(item_panel.x==panels[70].x and item_panel.y==panels[70].y and item_panel.w==panels[70].w and item_panel.h==panels[70].h)
 local flask,powder=tiles[1004],tiles[1005]
 assert(powder.y==flask.y and powder.x>flask.x+20)
@@ -282,13 +454,13 @@ render(model)
 local load_button=buttons[187]
 for n=2,9 do model.materials[n]={key="m"..n,name="M"..n,amount=n==2 and 1000 or 1250000,slot=1} end
 render(model)
-assert(drawn["1k"] and drawn["1.2M"] and drawn["[1]"] and drawn["2"] and buttons[188].x>load_button.x and buttons[188].y==load_button.y)
+assert(drawn["1k"] and drawn["1.2M"] and buttons[188].x>load_button.x and buttons[188].y==load_button.y)
 local button2=buttons[188]
 point(button2.x+1,button2.y+1)
 assert(drawn["M2  1000"])
-render(model,303)
+wheelAt(model,7112,5)
 assert(drawn["M9"] and not drawn["M2"])
-render(model,300)
+wheelAt(model,7112,4)
 point(flask.x+1,flask.y+1)
 assert(drawn["Flask  20/50"] and drawn["water  12"] and drawn["slime  8"])
 assert(image_colors[2004][1]==128/255 and image_colors[2004][2]==32/255 and image_colors[2004][3]==16/255)
@@ -346,12 +518,25 @@ render(model)
 -- The shop keeps the balance and both transfers fixed above its goods.
 local function testShopTransfers()
     model.walletGold,model.bankGold,model.shopGoods=234,120345,{}
-    render(model,220)
+    render(model,212)
+    model.open=false
     render(model)
-    assert(drawn.Shop and drawn.Savings and drawn["120345"] and panels[299])
+    model.open=true
+    render(model)
+    assert(drawn.Convert and drawn["Savings:"] and drawn["120k"] and tips["Savings:"]=="120345" and panels[70])
     assert(not buttons[224] and not buttons[270] and not buttons[276])
     assert(tips["[Deposit]"]:find("234",1,true))
     assert(tiles[1004].x==first_tile.x,"shopping keeps warehouse items accessible")
+    local depositX,withdrawX=buttons[274].x,buttons[275].x
+    for _,pair in ipairs({{0,"0"},{999,"999"},{1000,"1k"},{1150,"1.15k"},{12345,"12.3k"},
+        {999999,"999k"},{1000000,"1M"},{1234567890,"1.23B"},{1000000000000,"1T"},{NHStore.maxGold,"9P"}}) do
+        model.bankGold=pair[1]
+        render(model)
+        assert(drawn[pair[2]] and tips["Savings:"]==string.format("%.0f",pair[1]))
+        assert(buttons[274].x==depositX and buttons[275].x==withdrawX)
+    end
+    model.bankGold=120345
+    render(model)
     local function press(id)
         local b=buttons[id]
         local action,arg=point(b.x+1,b.y+1,"press")
@@ -401,7 +586,14 @@ local function testShopTransfers()
             local panel=panels[210]
             local a,b=buttons[274],buttons[275]
             assert(not a.scroll and not b.scroll and a.y==b.y and a.x>=panel.x and b.y+9*b.scale<=panel.y+panel.h)
-            assert(a.x+GuiGetTextDimensions(nil,a.name,a.scale)<b.x)
+            local title=noticeText[lang=="zh" and "存款余额：" or "Savings:"]
+            local balance=noticeText["100"]
+            assert(buttons[220].y<buttons[212].y or (buttons[220].y==buttons[212].y and buttons[220].x<buttons[212].x))
+            assert(title.y==a.y and balance.y==a.y)
+            assert(title.x+GuiGetTextDimensions(nil,lang=="zh" and "存款余额：" or "Savings:",title.scale)<a.x)
+            assert(a.x+GuiGetTextDimensions(nil,a.name,a.scale)<balance.x)
+            assert(balance.x+GuiGetTextDimensions(nil,"100",balance.scale)<b.x)
+            assert(math.abs(buttons[269].y-a.y-13*buttons[220].scale)<0.01)
             assert(b.x+GuiGetTextDimensions(nil,b.name,b.scale)<=panel.x+panel.w)
         end
     end
@@ -432,7 +624,7 @@ local function testShopTransfers()
     point(pointer.x,pointer.y,"release")
     render(model,212)
     render(model)
-    assert(drawn["[1]"] and not buttons[274])
+    assert(not buttons[274] and panels[70])
 end
 testShopTransfers()
 render(model,71)
@@ -445,12 +637,14 @@ assert(not drawn["[+] Stash"])
 -- Three bottom panels stay separate at different widths, including the open pouch.
 model.near,model.popup=true,true
 render(model,71)
+assert(buttons[274] and buttons[275])
+render(model,212)
 for _,size in ipairs({{640,360},{427,240},{320,240}}) do
     width,height=size[1],size[2]
     render(model)
     local stash,bench,secure,pouch=panels[70],panels[210],panels[10],panels[37]
-    assert(stash.x>=0 and stash.x+stash.w<bench.x and bench.x+bench.w<secure.x)
-    assert(secure.x+secure.w<=width and pouch.x>=bench.x+bench.w and pouch.y+pouch.h<secure.y)
+    assert(secure.x==5 and secure.x+secure.w<bench.x and bench.x+bench.w<stash.x)
+    assert(stash.x+stash.w==width-5 and pouch.x==secure.x and pouch.y+pouch.h<secure.y)
     assert(bench.y+bench.h==stash.y+stash.h and bench.y+bench.h==secure.y+secure.h)
     assert(tiles[1002].x-tiles[1001].x==20 and tiles[1007].x+20<=pouch.x+pouch.w)
     for i=250,255 do
@@ -466,7 +660,7 @@ assert(drawn.Teleportatium and not drawn.Medkit and green_button(244))
 assert(not render(model,214))
 assert(not render(model,244))
 render(model)
-assert(drawn["Teleportatium ×500"] and drawn["300 / 250"] and drawn["Craft time"] and drawn["2:00"] and green_button(214))
+assert(drawn["Teleportatium ×500"] and drawn["300 / 250"] and drawn["Delivery"] and drawn["Instant"] and green_button(214))
 assert(drawn["< Synthesis"] and drawn.Synthesize)
 local action,param=render(model,214)
 assert(action=="craft" and param.id=="stable")
@@ -483,7 +677,7 @@ action,param=render(model,214)
 assert(action=="craft" and param.id=="reverse_stable")
 model.lang="zh"
 render(model)
-assert(drawn["预计用时"] and drawn["每批产出"] and drawn["2:00"] and drawn["< 分解"] and drawn["确认分解"])
+assert(drawn["交付"] and drawn["每批产出"] and drawn["即时完成"] and drawn["< 分解"] and drawn["确认分解"])
 render(model,240)
 render(model)
 assert(drawn["炼成"] and drawn["分解"])
@@ -552,35 +746,36 @@ render(model,240)
 table.remove(model.recipes)
 render(model,255)
 
--- Both alchemy lists page independently, including when production is active.
+-- Both alchemy lists scroll independently, including when production is active.
 for _,mode in ipairs({"synthesis","decomposition"}) do
-    for i=2,6 do
+    for i=2,18 do
         model.recipes[#model.recipes+1]={id=mode..i,category="alchemy",alchemyMode=mode,name=mode.." "..i,
             output=1,duration=120,ready=true,inputs={}}
     end
 end
 model.order_active,model.order_name,model.order_remaining=true,"Medkit",65
-render(model,243)
+width,height=640,360
+wheelAt(model,7100,5,8)
 render(model)
-assert(drawn["decomposition 6"] and drawn["2/2"] and drawn["1:05"] and not green_button(244))
-assert(panels[210].y>=0 and buttons[244].y+9<=height)
+assert(drawn["decomposition 18"] and drawn["1:05"] and not green_button(244))
+assert(panels[210].y>=0 and (buttons[244].y+9<=height or (buttons[244].scroll and buttons[244].scroll.y+buttons[244].scroll.h<=height)))
 render(model,254)
 render(model)
-assert(drawn.Teleportatium and drawn["1/2"] and drawn["1:05"] and not drawn["decomposition 6"])
-render(model,243)
+assert(drawn.Teleportatium and drawn["1:05"] and not drawn["decomposition 18"])
 model.order_active=false
-render(model,244)
+wheelAt(model,7100,5,8)
+render(model,listItem("synthesis 18"))
 action,param=render(model,214)
-assert(action=="craft" and param.id=="synthesis6")
+assert(action=="craft" and param.id=="synthesis18")
 render(model,240)
 render(model)
-assert(drawn["synthesis 6"] and drawn["2/2"])
+assert(drawn["synthesis 18"] and not drawn.Teleportatium)
 render(model,255)
 render(model)
-assert(drawn["decomposition 6"] and drawn["2/2"])
-render(model,244)
+assert(drawn["decomposition 18"])
+render(model,listItem("decomposition 18"))
 action,param=render(model,214)
-assert(action=="craft" and param.id=="decomposition6")
+assert(action=="craft" and param.id=="decomposition18")
 render(model,240)
 render(model,251)
 render(model)
@@ -592,7 +787,7 @@ assert(not render(model,214) and drawn["Need stock"])
 render(model,240)
 render(model,244)
 action,param=render(model,214)
-assert(action=="craft" and param.id=="medical" and drawn["0:05"])
+assert(action=="craft" and param.id=="medical" and drawn["Instant"])
 assert(drawn["mods/noita_hideout/files/items/medkit.png"])
 do
     local recipe={id="injector_essence",category="medical",name="Fire injector (fire essence)",output=1,duration=120,
@@ -637,26 +832,29 @@ model.order_active=true
 assert(not render(model,214) and drawn["Making: Medkit"] and drawn["Build the station"] and drawn["0:05"])
 model.order_active=false
 render(model,240)
-render(model,253)
+render(model,266)
 render(model)
-assert(drawn["Injector pouch"] and green_button(244) and not buttons[214])
+assert(not drawn["Gear 1"] and drawn["Injector pouch"] and green_button(244) and not buttons[214])
 render(model,244)
 render(model)
 assert((drawn["Empty container"] or tips["Empty container"]) and drawn["2 / 1"] and drawn["100 / 50"])
 action,param=render(model,214)
 assert(action=="craft" and param.id=="pouch")
 render(model,240)
--- Future equipment recipes share the same pagination and return navigation.
-for i=1,5 do
+-- Equipment is separate from container recipes.
+for i=1,18 do
     model.recipes[#model.recipes+1]={id="gear"..i,category="equipment",name="Gear "..i,output=1,duration=120,ready=true,inputs={}}
 end
-render(model,243)
-render(model,244)
+render(model,253)
+render(model)
+assert(not drawn["Injector pouch"])
+wheelAt(model,7100,5,8)
+render(model,listItem("Gear 18"))
 action,param=render(model,214)
-assert(action=="craft" and param.id=="gear5")
+assert(action=="craft" and param.id=="gear18")
 render(model,240)
 render(model)
-assert(green_button(244) and buttons[244].name=="Gear 5" and not buttons[245])
+assert(green_button(listItem("Gear 18")) and not drawn["Gear 1"])
 render(model,213)
 assert(render(model,216)=="preview_items")
 assert(render(model,217)=="restock")
@@ -668,23 +866,82 @@ render(model,211)
 model.debug=false
 render(model)
 assert(not render(model,217) and drawn.Workshop and not drawn["Reissue test pouch"])
+do
+    local travel=dofile("mods/noita_hideout/files/travel/routes.lua")
+    function GetParallelWorldPosition(x) return math.floor(x/35840+0.5),0 end
+    function BiomeMapGetName(x,y)
+        if y==1536 then return "$biome_excavationsite" end
+        if y==512 then return "$biome_coalmine" end
+        return "$biome_holymountain"
+    end
+    local stations=""
+    for n=1,10 do stations=stations..(n*35840)..",1024;" end
+    stations=stations.."-35840,1024;0,1024;"
+    local view=travel.collect(stations,0,0)
+    local function clickText(name)
+        assert(drawn[name],name.." at "..width.."x"..height)
+        local p=noticeText[name]
+        pointer={x=p.x+1,y=p.y+1,pressed=true}
+        local cmd,arg=render(model)
+        pointer.pressed=nil
+        return cmd,arg
+    end
+    local sw,sh,lang=width,height,model.lang
+    for _,size in ipairs({{640,360},{320,180}}) do
+        width,height,model.lang=size[1],size[2],"zh"
+        model.travel=view
+        render(model)
+        local panel=assert(panels[7350])
+        assert(drawn["[+] 藏身处"] and panel.y+panel.h<=panels[210].y and panel.x+panel.w<panels[70].x)
+        assert(drawn["[-] 主世界"] and drawn["已解锁 2 站"] and drawn["煤矿矿坑入口圣山"] and drawn["来自矿场"])
+        assert(not clickText("[-] 主世界")); render(model)
+        assert(not drawn["煤矿矿坑入口圣山"] and drawn["[+] 主世界"])
+        wheelAt(model,7352,5,10)
+        assert(not clickText("[+] 东 10 平行世界")); render(model)
+        wheelAt(model,7352,5,1)
+        local cmd,index=clickText("煤矿矿坑入口圣山")
+        assert(cmd=="travel_to" and view.rows[index].x==10*35840 and view.rows[index].y==1024)
+        view.gateKind,view.gateX,view.gateY="mountain",10*35840,1024
+        render(model)
+        assert(drawn["> 煤矿矿坑入口圣山"])
+        local bar=tracks[7352]
+        pointer={x=bar.x+1,y=bar.y+1,pressed=true}
+        assert(not render(model),"scrollbar clicks may not pick a route")
+        pointer={x=0,y=0}
+        render(model,211); render(model)
+        assert(not panels[7350] and drawn["[-] 藏身处"])
+        render(model,211); render(model); assert(panels[7350])
+        model.travel=nil; render(model)
+        assert(not panels[7350] and drawn["[-] 藏身处"])
+        view.gateKind=nil
+    end
+    render(model,211); render(model)
+    model.travel=travel.collect("",0,0); render(model)
+    assert(drawn["矿井入口 · 藏身处"] and tracks[7352].frame~=frame)
+    render({open=false}); model.travel=nil; render(model)
+    assert(drawn["[+] 藏身处"] and not panels[7350],"restore original folded preference")
+    render(model,211)
+    width,height,model.lang=sw,sh,lang
+    render(model)
+end
 -- Purchases use savings; an active workshop order does not gate the shop.
 model.shopGoods={
-    {id="water",category="materials",name="Water",quantity=250,price=20,ready=true},
-    {id="dose",category="supplies",name="Fire injector",quantity=1,price=160,ready=true},
+    {id="water",category="materials",name="Water",quantity=250,price=5,ready=true},
+    {id="dose",category="supplies",name="Fire injector",quantity=1,price=80,ready=true},
+    {id="rescue_policy",category="services",name="Rescue insurance",quantity=1,scrap=1,ready=true},
 }
-for i=2,6 do
+for i=2,18 do
     model.shopGoods[#model.shopGoods+1]={id="bulk"..i,category="materials",name="Material "..i,
         quantity=10,price=5,ready=true}
 end
 model.bankGold,model.walletGold,model.order_active=200,0,true
 assert(not render(model,220))
 render(model)
-assert(drawn.Shop and buttons[256].name=="Materials" and buttons[257].name=="Consumables"
+assert(drawn.Convert and buttons[256].name=="Materials" and buttons[257].name=="Consumables"
     and green_button(244) and buttons[244].name=="Water" and not buttons[258])
 assert(not render(model,244))
 render(model)
-assert(drawn["Water"] and drawn["250"] and drawn["Materials"] and drawn["20"] and drawn["200"])
+assert(drawn["Water"] and drawn["250"] and drawn["Materials"] and drawn["5"] and drawn["200"])
 model.bankGold=NHStore.maxGold
 for _,lang in ipairs({"zh","en"}) do
     model.lang=lang
@@ -694,46 +951,95 @@ for _,lang in ipairs({"zh","en"}) do
         local bench,b=panels[210],reveal(model,258)
         assert(bench.y>=0 and b.x>=bench.x and b.x+GuiGetTextDimensions(nil,b.name)<=bench.x+bench.w
             and b.y+9<=bench.y+bench.h and green_button(258))
-        assert(drawn[lang=="zh" and "确认购买" or "Confirm purchase"])
-        assert(drawn[lang=="zh" and "存款余额" or "Savings"] and drawn[lang=="zh" and "价格" or "Price"])
-        assert(drawn["9007199254740991"])
+        assert(b.name==(lang=="zh" and "确认转化" or "Convert gold"))
+        assert(drawn[lang=="zh" and "存款余额：" or "Savings:"] and drawn[lang=="zh" and "耗金" or "Gold cost"])
+        assert(drawn["9P"] and tips[lang=="zh" and "存款余额：" or "Savings:"]=="9007199254740991")
     end
 end
 action,param=render(model,258)
 assert(action=="shop_buy" and param.id=="water")
-model.bankGold,model.walletGold,model.shopGoods[1].ready,model.shopGoods[1].reason=19,10000,false,"Not enough stored gold."
-assert(not render(model,258) and drawn["Not enough stored gold."] and drawn["19"])
+model.bankGold,model.walletGold,model.shopGoods[1].ready,model.shopGoods[1].reason=4,10000,false,"Not enough stored gold."
+assert(not render(model,258) and drawn["Not enough stored gold."] and drawn["4"])
 model.bankGold,model.shopGoods[1].reason=100,"Material storage is full."
 assert(not render(model,258) and drawn["Material storage is full."])
 render(model,240)
-render(model,243)
-render(model)
-assert(buttons[244].name=="Material 6" and drawn["2/2"])
+wheelAt(model,7100,5,8)
+assert(drawn["Material 18"] and not drawn.Water)
 render(model,257)
 model.bankGold=200
 render(model)
 assert(buttons[244].name=="Fire injector" and not buttons[245] and not buttons[243])
 render(model,244)
 render(model)
-assert(drawn.Supplies and drawn["160"] and drawn["1"])
+assert(drawn.Supplies and drawn["80"] and drawn["1"])
 action,param=render(model,258)
 assert(action=="shop_buy" and param.id=="dose")
 render(model,240)
+render(model,265)
+render(model,244)
+render(model)
+assert(drawn["Arcane scrap"] and drawn.Uninsured and not drawn["Gold cost"])
+reveal(model,258)
+action,param=render(model,258)
+assert(action=="shop_buy" and param.id=="rescue_policy")
+render(model,240)
+do
+    local oldRecipes,oldGoods=model.recipes,model.shopGoods
+    local oldWidth,oldHeight,oldLang=width,height,model.lang
+    width,height,model.lang,model.order_active=640,360,"zh",false
+    model.recipes,model.shopGoods={},{}
+    for _,recipe in ipairs(NHStormProducts.recipes) do
+        local key,n=next(recipe.resources)
+        local outputs={}
+        if recipe.materials then outputs[1]={name="点金水",amount=recipe.materials.midas} end
+        for res,amount in pairs(recipe.resourceYield) do
+            outputs[#outputs+1]={name=NHStore.alchemyResources[res].zh,amount=amount}
+        end
+        model.shopGoods[#model.shopGoods+1]={id=recipe.id,category=recipe.category,name=recipe.zh,icon=recipe.icon,output=recipe.count,
+            inputs={{name=NHStore.alchemyResources[key].zh,available=50,amount=n}},outputs=outputs,ready=true}
+    end
+    for _,offer in ipairs(NHStormProducts.offers) do
+        model.shopGoods[#model.shopGoods+1]={id=offer.id,category=offer.category,name=offer.zh,icon=offer.icon,
+            resourceName=NHStore.alchemyResources[offer.resource].zh,quantity=1,resourceStock=50,yield=offer.yield,ready=true}
+    end
+    render(model,269)
+    for i,id in ipairs({"refine_red_mercury","refine_mana_arcane","refine_mana_container","sell_red_mercury","sell_crystallized_mana"}) do
+        render(model)
+        assert(buttons[243+i] and not buttons[7206])
+        render(model,243+i)
+        render(model)
+        assert(see(model,"50 / 1"))
+        local confirm=i<=3 and 214 or 258
+        if i<=3 then
+            for _,out in ipairs(model.shopGoods[i].outputs) do assert(see(model,out.name.." ×20")) end
+        else assert(see(model,"500")) end
+        reveal(model,confirm)
+        local cmd,req=render(model,confirm)
+        assert(cmd==(i<=3 and "craft" or "shop_buy") and req.id==id)
+        render(model,240)
+    end
+    model.recipes,model.shopGoods=oldRecipes,oldGoods
+    width,height,model.lang,model.order_active=oldWidth,oldHeight,oldLang,true
+end
 render(model,256)
 render(model)
-assert(drawn["2/2"] and buttons[244].name=="Material 6")
+assert(drawn["Material 18"] and not drawn.Water)
 render(model,212)
 model.order_active=false
 width=320
 -- Return to the remembered spell page. Clamp it if the high slots disappear.
 render(model,76)
 render(model)
-assert(drawn["[4]"])
+assert(tracks[7112].frame==frame)
 model.warehouse_capacity.spell=1
 render(model)
-assert(drawn["[1]"])
-render(model,301)
-assert(drawn["[1]"])
+assert(tracks[7112].frame~=frame and not buttons[301])
+local shortList=tiles[1008]
+pointer={x=shortList.x+2,y=shortList.y+2,wheel=5}
+render(model)
+assert(panels[2] and panels[2].key=="nh_wheel/stash/spell" and tracks[7112].frame~=frame,
+    "a list that fits still owns the wheel under its cells without drawing a scrollbar")
+pointer.wheel=nil
 local first=tiles[1008] -- three secure cells and four pouch cells precede this item grid
 point(198,28,"press")
 action,param=point(first.x+21,first.y+1,"release")
@@ -759,27 +1065,29 @@ render(model)
 assert(drawn["Now: 48 slots"] and drawn["Next: 72 slots"] and drawn["350 / 200"] and green_button(241))
 action,param=render(model,241)
 assert(action=="buy_upgrade" and param.id=="warehouse_wand" and param.level==0)
-render(model,243)
+render(model,271)
 render(model)
 do
     local station
     for _,entry in ipairs(model.progression.expansion) do if entry.id=="grenade" then station=entry end end
     local stockDetail="Combined stock, in preferred order\nAlchemical gunpowder  80\nRegular gunpowder  60"
     station.costs[1].detail=stockDetail
-    assert(buttons[248].name=="Grenade station")
-    render(model,248)
+    render(model,listItem("Weapon station"))
     render(model)
     assert(drawn["140 / 150"] and tips["Gunpowder (total)"]==stockDetail)
     render(model,240)
 end
-render(model,243)
 render(model)
-assert(buttons[244].name=="Salvage bench" and not green_button(244))
-render(model,244)
+assert(not green_button(listItem("Salvage bench")))
+render(model,listItem("Salvage bench"))
 assert(not render(model,241) and drawn["Insufficient stock"])
 render(model,240)
-render(model,245) -- Future support station.
-assert(not render(model,241) and drawn["In development"])
+render(model,272)
+render(model)
+assert(drawn.Farmland and not drawn["Bombardment station"])
+render(model,273)
+render(model,244)
+assert(not render(model,241) and drawn["Insufficient stock"] and drawn["0 / 100"] and drawn["0 / 5"])
 render(model,219)
 render(model)
 assert(green_button(244))
@@ -845,6 +1153,16 @@ do
     view.essence.stock=0
     command,request=render(model,260)
     assert(command=="salvage" and request.mode=="essence" and request.id==32)
+    render(model,7081);render(model)
+    assert(buttons[7081].name=="[x] Quick extract")
+    assert(not point(spell_tile.x+2,spell_tile.y+2,"press"))
+    point(pointer.x,pointer.y,"release")
+    view.quick_essence=true
+    command,request=point(spell_tile.x+2,spell_tile.y+2,"press")
+    assert(command=="salvage" and request.mode=="quick_essence" and request.id==32 and request.slot==1)
+    pointer.pressed=false;assert(not render(model))
+    point(pointer.x,pointer.y,"release")
+    render(model,7081)
     model.essences={}
     for i,key in ipairs(NHEssences.order) do
         local amount=i==1 and 1234000 or (i==#NHEssences.order and NHStore.maxResourceAmount or 0)
@@ -882,7 +1200,7 @@ do
                 end
             end
             assert(cell,"missing essence: "..entry.name)
-            assert(cell.x>=panels[70].x and cell.right<panels[70].x+panels[70].w and cell.bottom<=panels[299].y+0.01)
+            assert(cell.x>=panels[70].x and cell.right<panels[70].x+panels[70].w and cell.bottom<=panels[70].y+panels[70].h)
             local signature=table.concat(color,"/")
             assert(not colors[signature],"two essence types share a color")
             colors[signature]=true
@@ -898,19 +1216,18 @@ do
     width=640
     render(model,82)
     checkGrid("en",false)
-    assert(drawn["[1]"] and not drawn["[2]"])
-    -- Further types use the existing warehouse pager.
+    assert(not buttons[300] and not buttons[301])
     for i=18,21 do model.essences[i]={name="Extra "..i.." essence",amount=i} end
-    render(model,301)
+    wheelAt(model,7112,5)
     render(model)
-    assert(drawn["Extra 21"] and drawn["[2]"] and not drawn.Healing)
+    assert(drawn["Extra 21"] and not drawn.Healing)
     for i=21,18,-1 do model.essences[i]=nil end
     width,height=320,180
     checkGrid("en",true)
     model.lang="zh"
     for i,key in ipairs(NHEssences.order) do model.essences[i].name=NHEssences.types[key].zh end
     checkGrid("zh",true)
-    assert(drawn["强化"] and drawn["酸液"] and panels[70].y>=0 and buttons[300].y<height)
+    assert(drawn["强化"] and drawn["酸液"] and panels[70].y>=0 and not buttons[300])
     width=640
     checkGrid("zh",false)
     width,height,model.lang=sw,sh,"en"
@@ -926,6 +1243,43 @@ render(model)
 assert(drawn["Container scrap +1"] and drawn["Current scrap 7"])
 model.warehouse.containers[2].salvage_yield=nil -- refilled before confirmation
 assert(not render(model,260))
+do
+    local flask=model.warehouse.containers[2]
+    flask.salvage_yield,flask.materials_fit,flask.store_contents=1,true,{}
+    for i=1,18 do flask.store_contents[i]={name="Material "..i,amount=i} end
+    pointer.right=true; render(model); pointer.right=false
+    render(model)
+    assert(drawn["Store in bulk storage"] or tips["Store in bulk storage"])
+    assert(not buttons[260] and not panels[20000])
+    local heading=noticeText.Dismantle.y
+    wheelAt(model,7102,5,12)
+    assert(panels[2].key=="nh_wheel/salvage/potion/store_contents" and noticeText.Dismantle.y==heading)
+    assert(drawn["Material 18"] and (drawn["Store and dismantle"] or tips["Store and dismantle"]))
+    flask.materials_fit=false
+    assert(not render(model,260) and (drawn["Material storage full"] or tips["Material storage full"]))
+    flask.materials_fit=true
+    local command,req=render(model,260)
+    assert(command=="salvage" and req.mode=="store_contents" and req.id==162)
+    pointer={x=0,y=0}
+    render(model,7081)
+    render(model)
+    assert(buttons[7081].name=="[x] Store and dismantle" and buttons[7080].y==buttons[7081].y)
+    command,req=point(empty_flask.x+1,empty_flask.y+1,"press")
+    assert(command=="salvage" and req.mode=="store_contents" and req.slot==2 and req.id==162)
+    assert(not NHUI.quickTarget() and not NHUI.useTarget())
+    pointer.pressed=false
+    assert(not render(model),"holding the button must not dismantle another container")
+    assert(not point(pointer.x,pointer.y,"release"))
+    render(model,75)
+    render(model,77)
+    render(model)
+    assert(buttons[7081].name=="[ ] Store and dismantle")
+    model.salvage_enabled=false
+    render(model,7081)
+    render(model)
+    assert(buttons[7081].name=="[ ] Store and dismantle")
+    model.salvage_enabled=true
+end
 model.perkCapacity,model.perkCells=1,{}
 model.native_slots[2].kind="perk"
 point(108,28,"press")
@@ -1064,7 +1418,7 @@ local function testFarmPanel(lang)
     model.farm.plots[1].blocked=true
     render(model)
     local full=lang=="zh" and "农产库存已满" or "Crop storage full"
-    assert(drawn[full] or tips[full])
+    assert(see(model,full))
     render(model,411)
     checkStockColumns(lang,"4","1.33")
     assert(drawn["13"] and drawn["4"] and drawn["0"] and not buttons[415])
@@ -1091,6 +1445,24 @@ local function testFarmPanel(lang)
     checkStockColumns(lang,"9007.1T","0")
     assert(drawn[lang=="zh" and "产物" or "Item"])
     GuiGetTextDimensions=measure
+
+    local crops=model.farm.crops
+    model.farm.crops={}
+    for i=1,32 do model.farm.crops[i]={name="C"..i,stock=i,perMinute=i} end
+    wheelAt(model,7102,4,16)
+    local tabY=buttons[411].y
+    assert(drawn.C1 and not drawn.C32)
+    local firstY=noticeText.C3.y
+    wheelAt(model,7102,5)
+    assert(not drawn.C1 and not drawn.C2 and math.abs(firstY-noticeText.C3.y-39*buttons[411].scale)<0.01)
+    wheelAt(model,7102,5,16)
+    assert(drawn.C32 and not drawn.C3 and buttons[411].y==tabY)
+    assert(panels[2].hidden and panels[2].key=="nh_wheel/farm/stock/")
+    pointer={x=buttons[411].x+1,y=tabY+1,wheel=4}
+    render(model)
+    assert(not panels[2] and drawn.C32,"hovering a fixed tab must not scroll the stock table")
+    pointer={x=0,y=0}
+    model.farm.crops=crops
 end
 testFarmPanel("en")
 testFarmPanel("zh")
@@ -1108,9 +1480,11 @@ local function testLivestockPanel(lang)
     render(model)
     assert(buttons[451] and buttons[452] and panels[210].y>=0)
     render(model,451)
+    render(model)
+    reveal(model,444)
     render(model,444)
     render(model)
-    assert(buttons[258] and drawn["120"] and drawn["3:00"] and drawn["2:00"] and drawn["2 / 1"])
+    assert(see(model,"120") and see(model,"3:00") and see(model,"2:00") and see(model,"2 / 1"))
     assert(panels[210].y>=0 and reveal(model,258).y<height)
     local action,request=render(model,258)
     assert(action=="shop_buy" and request.id=="chick" and request.pen==first)
@@ -1120,18 +1494,18 @@ local function testLivestockPanel(lang)
     render(model,223)
     render(model,451)
     render(model)
-    assert(drawn["0 / 1"] and drawn["1 / 2"] and drawn["3:00"] and drawn["5:00"] and buttons[444])
+    assert(drawn["0 / 1"] and drawn["1 / 2"] and drawn["3:00"] and drawn["5:00"] and reveal(model,444))
     model.farm=NHFarm.view(stock,lang,180*60)
     render(model)
-    assert(drawn["1 / 0"] and drawn["2:00"] and buttons[444])
+    assert(see(model,"1 / 0") and see(model,"2:00") and reveal(model,444))
     assert(NHFarm.sync(stock,300*60))
     model.farm=NHFarm.view(stock,lang,300*60)
     render(model)
-    assert(drawn["2:00"] and buttons[444],"partly filled adult housing still sells youngstock")
+    assert(see(model,"2:00") and reveal(model,444),"partly filled adult housing still sells youngstock")
     model.farm.pens[1].blocked=true
     render(model)
     local full=lang=="zh" and "畜产库存已满" or "Produce storage full"
-    assert(drawn[full] or tips[full])
+    assert(see(model,full))
     render(model,441)
     checkStockColumns(lang,"1","1.17")
     assert(drawn["23"] and drawn["1"] and panels[210].y>=0)
@@ -1161,12 +1535,12 @@ local function testSpecialPens(lang)
         render(model,440)
         render(model,450+i)
         render(model)
-        assert(drawn["3%"] and (i==1 or drawn["5%"] and drawn["92%"]))
-        assert(drawn[i==1 and "5 / 2" or "150 / 1"])
+        assert(see(model,"3%") and (i==1 or see(model,"5%") and see(model,"10%")))
+        assert(see(model,i==1 and "5 / 2" or "150 / 1"))
         reveal(model,444)
         render(model,444)
         render(model)
-        assert(drawn[tostring(good.price)] and drawn["3%"])
+        assert(see(model,tostring(good.price)) and see(model,"3%"))
         reveal(model,258)
         local action,arg=render(model,258)
         assert(action=="shop_buy" and arg.id==good.id and arg.pen==good.pen)
@@ -1178,7 +1552,7 @@ local function testSpecialPens(lang)
     render(model,452)
     render(model)
     local pending=lang=="zh" and "已找到，待入库" or "Found, awaiting space"
-    assert((drawn[pending] or tips[pending]) and drawn["3"] and drawn["8:00"] and drawn["13:00"] and buttons[444])
+    assert(see(model,pending) and see(model,"3") and see(model,"8:00") and see(model,"13:00") and reveal(model,444))
 end
 testSpecialPens("zh")
 testSpecialPens("en")
@@ -1206,25 +1580,35 @@ local function testGelPool(lang)
     render(model)
     local bonus=zh and "香料 + 激活剂" or "Spice + injector"
     local card=zh and "凝胶少女卡" or "Gel maiden card"
-    assert(tips[bonus] and tips[bonus]:find(zh and "消耗品库" or "supplies",1,true))
-    assert(tips[card] and tips[card]:find(zh and "独立" or "separately",1,true))
-    assert(drawn["4 / 6"] and drawn["4:00"] and drawn["30%"] and drawn["3%"] and drawn["1 / 2"] and buttons[444])
+    assert(see(model,bonus) and tips[bonus]:find(zh and "消耗品库" or "supplies",1,true))
+    assert(see(model,card) and tips[card]:find(zh and "独立" or "separately",1,true))
+    assert(see(model,"4 / 6") and see(model,"4:00") and see(model,"30%") and see(model,"3%") and see(model,"1 / 2") and reveal(model,444))
     model.farm.gelPending,model.farm.gelSpicePending=3,2
     render(model)
     local meds=zh and "待入库激活剂" or "Injectors awaiting space"
     local spices=zh and "待入库香料" or "Spice awaiting space"
-    assert((drawn[meds] or tips[meds]) and (drawn[spices] or tips[spices]) and drawn["3"] and drawn["2"])
-    assert(panels[20000] and panels[20000].h>0,"the gel pool details scroll on a narrow screen")
+    assert(see(model,meds) and see(model,spices) and see(model,"3") and see(model,"2"))
+    wheelAt(model,7102,4,8)
+    local anchor=buttons[223].y
+    assert(not buttons[444] and not panels[20000])
+    local cycle=zh and "当前产出间隔" or "Current cycle"
+    local y=assert(noticeText[cycle]).y
+    wheelAt(model,7102,5)
+    assert(math.abs(y-noticeText[cycle].y-39*buttons[223].scale)<0.01)
+    assert(buttons[223].y==anchor and panels[2].hidden and panels[2].options[GUI_OPTION.AlwaysClickable])
+    wheelAt(model,7102,5,12)
+    assert(buttons[444] and not buttons[443] and panels[2].key=="nh_wheel/livestock/pens/gel_pool")
     model.farm.pens[1].blocked=true
     render(model)
     local full=zh and "草药或纤维库存已满" or "Herb or fiber stock full"
-    assert(drawn[full] or tips[full])
+    assert(see(model,full))
     model.farm=NHFarm.view(stock,lang,0)
     local slot=assert(NHLivestock.freePen(stock,"gel_pool"))
     model.shopGoods={{id="gel_pool",name=zh and "凝胶幼体" or "Gel hatchling",category="livestock",price=320,quantity=1,ready=true,pen=slot}}
+    reveal(model,444)
     render(model,444)
     render(model)
-    assert(drawn["1 / 2"] and drawn["4:00"] and drawn["2:00"] and drawn["320"])
+    assert(see(model,"1 / 2") and see(model,"4:00") and see(model,"2:00") and see(model,"320"))
     reveal(model,258)
     local action,arg=render(model,258)
     assert(action=="shop_buy" and arg.id=="gel_pool" and arg.pen==slot)
@@ -1233,9 +1617,8 @@ local function testGelPool(lang)
     render(model,223)
     render(model,451)
     render(model)
-    assert(drawn["2 / 2"] and drawn["1 / 1"] and drawn["1:00"] and drawn["4:00"])
-    assert(buttons[447] and not buttons[444],"a full pool permits expansion even while its young are maturing")
-    reveal(model,447)
+    assert(see(model,"2 / 2") and see(model,"1 / 1") and see(model,"1:00") and see(model,"4:00"))
+    assert(reveal(model,447) and not buttons[444],"a full pool permits expansion even while its young are maturing")
     render(model,447)
     render(model)
     assert(buttons[240] and (drawn[title] or tips[title]))
@@ -1243,12 +1626,12 @@ local function testGelPool(lang)
     render(model,223)
     render(model,451)
     render(model)
-    assert(drawn["2 / 0"] and drawn["2:00"] and not drawn["4:00"])
+    assert(see(model,"2 / 0") and see(model,"2:00") and not see(model,"4:00"))
     stock.levels.gel_pool=3
     for i=3,6 do NHLivestock.deliver(stock,"gel_pool",assert(NHLivestock.freePen(stock,"gel_pool")),120*60) end
     model.farm=NHFarm.view(stock,lang,120*60)
     render(model)
-    assert(drawn["6 / 6"] and not buttons[444] and not buttons[447])
+    assert(see(model,"6 / 6") and not buttons[444] and not buttons[447])
     model.progression=original
 end
 testGelPool("zh")
@@ -1263,7 +1646,7 @@ local function testCardWalletPanel()
         return {id=id,kind="summon_card",name=species,species=species,remaining=remaining,count=count}
     end
     model.warehouse.collection={card(201,"dryad",80,9754),card(202,"flower_fairy",3),card(203,"minotaur",80)}
-    local affinity={dryad=10,flower_fairy=40,griffin=100}
+    local affinity={dryad=100,flower_fairy=400,griffin=1000}
     model.affinityPoints=function(id) return affinity[id] or 0 end
     model.warehouse.equipment={model.secure_loot[1]}
     render(model,213)
@@ -1275,11 +1658,11 @@ local function testCardWalletPanel()
     local first=tiles[1004]
     point(first.x+1,first.y+1)
     assert(drawn["Dryad"] and drawn["Count 9754"] and drawn["Durability 80/80"])
-    assert(drawn["Affinity 10/100   Next at 40"] and drawn["Toxic sludge immunity"])
-    assert(drawn["Heals 1 HP every 12 s"] and drawn["25% gift chance per 25 s of travel"])
-    affinity.dryad=100
+    assert(drawn["Affinity 100/10000   Next at 400"] and drawn["Toxic sludge immunity"] and drawn["Slice immunity"])
+    assert(drawn["Heals 1% of max HP per second"] and drawn["Every 2 min: tier 1 gift box"])
+    affinity.dryad=1000
     point(first.x+1,first.y+1)
-    assert(drawn["Affinity 100/100"] and drawn["Heals 1 HP every 6 s"] and drawn["25% gift chance per 15 s of travel"])
+    assert(drawn["Affinity 1000/10000"] and drawn["Heals 2% of max HP per second"] and drawn["Every 2 min: tier 3 gift box"])
     local action,req=drag_tiles(1,1)
     assert(action=="open_container" and req.walletId==95 and req.container=="safe")
     model.walletId,model.walletCapacity,model.pouchName,model.popup=95,4,"Card wallet #95",true
@@ -1288,23 +1671,23 @@ local function testCardWalletPanel()
     assert(drawn[NHCompanions.cardIcon("griffin")],"wallet cells use the species portrait")
     assert(tiles[1007].x-tiles[1004].x==60)
     point(tiles[1006].x+1,tiles[1006].y+1)
-    assert(drawn["Affinity 100/100"] and drawn["Restores 15% flight fuel per second"])
-    model.cells[3],affinity.bee=card(nil,"bee",80),100
+    assert(drawn["Affinity 1000/10000"] and drawn["Restores 17% flight fuel per second"])
+    model.cells[3],affinity.bee=card(nil,"bee",80),1000
     point(tiles[1006].x+1,tiles[1006].y+1)
-    assert(drawn[NHCompanions.cardIcon("bee")] and drawn["Faster movement"] and drawn["Restores 15% flight fuel per second"])
-    model.cells[3],affinity.dragon=card(nil,"dragon",80),100
+    assert(drawn[NHCompanions.cardIcon("bee")] and drawn["Faster movement"] and drawn["Restores 19% flight fuel per second"])
+    model.cells[3],affinity.dragon=card(nil,"dragon",80),1000
     point(tiles[1006].x+1,tiles[1006].y+1)
     assert(drawn[NHCompanions.cardIcon("dragon")] and drawn["Fire immunity"] and drawn["Projectile shield at 100% of normal recharge"])
     model.cells[3],affinity.slime=card(nil,"slime",80),0
     point(tiles[1006].x+1,tiles[1006].y+1)
-    assert(drawn[NHCompanions.cardIcon("slime")] and drawn["Underwater breathing"] and not drawn["Heals 1 HP every 6 s"])
-    affinity.slime=100
+    assert(drawn[NHCompanions.cardIcon("slime")] and drawn["Suffocation immunity"] and not drawn["Heals 2% of max HP per second"])
+    affinity.slime=1000
     point(tiles[1006].x+1,tiles[1006].y+1)
-    assert(drawn["Heals 1 HP every 6 s"] and drawn["25% gift chance per 15 s of travel"])
+    assert(drawn["Heals 2% of max HP per second"] and drawn["Every 2 min: tier 3 gift box"])
     model.lang="zh"
     render(model)
     point(tiles[1009].x+1,tiles[1009].y+1)
-    assert(drawn["好感度 40/100   下一阶段 100"] and drawn["每 3 秒恢复 1 HP"])
+    assert(drawn["好感度 400/10000   下一阶段 1000"] and drawn["每秒恢复最大生命的 1.5%"])
     model.lang="en"
     render(model)
     action,req=drag_tiles(8,4)
@@ -1332,13 +1715,65 @@ local function testCardWalletPanel()
         model.lang,width,height=lang,320,180
         render(model,213)
         render(model)
-        assert(tips[lang=="zh" and "共 7 种召唤卡，每种各发一张满耐久卡。" or "One full-charge card for each of the 7 companions."])
+        assert(tips[lang=="zh" and "共 9 种召唤卡，每种各发一张满耐久卡。" or "One full-charge card for each of the 9 companions."])
         assert(render(model,480)=="test_cards")
         render(model)
         assert(panels[70].y>=0 and panels[210].y>=0 and buttons[481].y<height)
     end
 end
 testCardWalletPanel()
+
+do
+    width,height,model.lang=640,360,"en"
+    local frost=NHFirearms.mods.byId.frost
+    model.walletId,model.popup=nil,false
+    model.secure_loot={{id=78,kind="marksman_rifle",rounds=10},{id=79,kind="spell",icon=frost.icon,name=frost.en,actionId=frost.action}}
+    render(model)
+    local action,req=drag_tiles(1,1)
+    assert(action=="open_container" and req.entity==78 and req.container=="safe")
+    model.gunId,model.popup,model.pouchName,model.pouchCapacity,model.cells=78,true,"Gun attachments",2,{}
+    render(model)
+    assert(drag_tiles(2,5)==nil)
+    action,req=drag_tiles(2,4)
+    assert(action=="move_gun_attachment" and req.gunId==78 and req.targetCell==1 and req.from==2 and req.entity==79)
+    model.secure_loot[2],model.cells[1]=nil,frost
+    render(model)
+    action,req=drag_tiles(4,2)
+    assert(action=="move_gun_attachment" and req.gunId==78 and req.sourceCell==1 and req.safeSlot==2 and req.entity=="frost")
+    model.gunId,model.popup=nil,false
+end
+
+do
+    width,height,model.lang=640,360,"en"
+    model.walletId,model.popup=nil,false
+    model.secure_loot={{id=96,kind="relic_chain",name="Relic chain",relics={"1. Kiuaskivi"}}}
+    render(model)
+    point(tiles[1001].x+1,tiles[1001].y+1)
+    assert(drawn["1. Kiuaskivi"])
+    local action,req=drag_tiles(1,1)
+    assert(action=="open_container" and req.entity==96 and req.container=="safe")
+    model.chainId,model.popup,model.pouchCapacity,model.pouchName=96,true,2,"Relic chain"
+    model.cells={{id=301,kind="relic",name="Kiuaskivi",icon="data/ui_gfx/items/brimstone.png"}}
+    render(model)
+    assert(drawn["data/ui_gfx/items/brimstone.png"])
+    action,req=drag_tiles(4,5)
+    assert(action=="move_chain_relic" and req.chainId==96 and req.entity==301 and req.sourceCell==1 and req.targetCell==2)
+    action,req=drag_tiles(4,2)
+    assert(action=="move_chain_relic" and req.destination=="safe" and req.safeSlot==2)
+    local c=tiles[1004]
+    point(c.x+1,c.y+1,"press")
+    action,req=point(148,28,"release")
+    assert(action=="take_relic" and req.sourceCell==1 and req.storedId==301)
+    local carried=model.native_slots[2]
+    for _,kind in ipairs({"other","relic"}) do
+        carried.kind=kind
+        point(108,28,"press")
+        c=tiles[1005]
+        action,req=point(c.x+1,c.y+1,"release")
+        assert(action==(kind=="other" and "reject_relic" or "place") and req.entity==carried.entity and req.chainId==96)
+    end
+    model.chainId,model.popup=nil,false
+end
 print("UI: test supplies, collection, 80/80 stacks and exact-wallet transfers passed.")
 
 local function testFixedWorkshop()
@@ -1375,12 +1810,15 @@ local function testFixedWorkshop()
             render(model,212)
             render(model,251)
             render(model,244)
-            scroll_offsets={}
             render(model)
             check()
-            local box=assert(buttons[214].scroll)
+            wheelAt(model,7102,4,16)
+            local box=assert(tracks[7102])
             assert(box.y>buttons[213].y and box.y+box.h<stash.y+stash.h)
-            assert(buttons[214].y>box.y+box.h,"long recipes must have more content below the viewport")
+            assert(not buttons[214] and not panels[20000],"hidden crafting controls must not receive clicks")
+            local backY=buttons[240].y
+            wheelAt(model,7102,5)
+            assert(panels[2].key=="nh_wheel/recipe/long_recipe" and buttons[240].y==backY)
             reveal(model,214)
             check()
             local action,arg=render(model,214)
@@ -1414,7 +1852,7 @@ local function testWarehouseTabs()
                 render(model,selected)
                 render(model)
                 local panel=panels[70]
-                assert(panel.x+panel.w<panels[210].x and panels[210].x+panels[210].w<panels[10].x)
+                assert(panels[10].x+panels[10].w<panels[210].x and panels[210].x+panels[210].w<panel.x)
                 local right=panel.x
                 local seen={}
                 for i,id in ipairs(ids) do
@@ -1490,20 +1928,20 @@ local function testBandageBatchDisplay()
     local function bandages(id,count)
         return {id=id,name="绷带",kind="bandage",icon="mods/noita_hideout/files/items/bandage.png",count=count}
     end
-    model.secure_loot={bandages(1,5)}
-    model.warehouse.supplies={bandages(2,8),bandages(3)}
+    model.secure_loot={bandages(1,2)}
+    model.warehouse.supplies={bandages(2,4),bandages(3)}
     render(model,78)
     render(model)
-    assert(drawn["×8"] and drawn["×5"] and not drawn["×1"])
-    for tile,title in pairs({[1001]="绷带 ×5",[1003]="绷带 ×8",[1004]="绷带"}) do
+    assert(drawn["×4"] and drawn["×2"] and drawn["8/8"] and not drawn["×1"])
+    for tile,title in pairs({[1001]="绷带 ×2",[1003]="绷带 ×4",[1004]="绷带"}) do
         point(tiles[tile].x+1,tiles[tile].y+1)
         assert(drawn[title])
     end
 
     model.recipes={
-        {id="bandage",name="绷带",category="medical",output=8,duration=3,ready=true,
+        {id="bandage",name="绷带",category="medical",output=4,duration=3,ready=true,
             inputs={{name="纤维",amount=4,available=4},{name="糖分",amount=2,available=2}}},
-        {id="field_medkit",name="小医疗包",category="medical",output=1,duration=5,ready=true,
+        {id="field_medkit",name="小医疗包",category="medical",output=4,duration=5,ready=true,
             inputs={{name="绷带",amount=1,available=9},{name="草药",amount=2,available=2}}}
     }
     pointer={x=0,y=0}
@@ -1511,40 +1949,74 @@ local function testBandageBatchDisplay()
     render(model,251)
     render(model,244)
     render(model)
-    assert(drawn["绷带 ×8"] and drawn["0:03"] and drawn["4 / 4"] and drawn["2 / 2"])
+    assert(drawn["绷带 ×4"] and drawn["即时完成"] and drawn["4 / 4"] and drawn["2 / 2"])
     render(model,240)
     render(model,245)
     render(model)
-    assert(drawn["小医疗包 ×1"] and drawn["0:05"] and drawn["9 / 1"])
+    assert(drawn["小医疗包 ×4"] and drawn["即时完成"] and drawn["9 / 1"])
 end
 testBandageBatchDisplay()
 
+do
+    local p={id=21,kind="storm_mercury_pressure",count=8,name="高压红水银"}
+    p.trade=NHStore.supplyTrade.quote(p)
+    model.warehouse.supplies={p}
+    render(model,7081)
+    render(model)
+    local tile=tiles[1003]
+    point(tile.x+1,tile.y+1)
+    assert(not NHUI.useTarget() and not NHUI.quickTarget())
+    local cmd,req=point(tile.x+1,tile.y+1,"press")
+    assert(cmd=="supply_trade" and req.mode=="convert" and req.quantity==1 and req.id==21)
+    shift=225
+    cmd,req=point(tile.x+1,tile.y+1,"press")
+    assert(req.mode=="convert" and req.quantity==8)
+    pointer.pressed,pointer.down,pointer.right=false,false,true
+    cmd,req=render(model)
+    assert(not cmd)
+    local box={id=22,kind="supply_pack",count=3,name="基础补给箱"}
+    box.trade=NHStore.supplyTrade.quote(box)
+    model.warehouse.supplies={box}
+    pointer.right=false
+    assert(not point(tile.x+1,tile.y+1,"press") and not NHUI.quickTarget())
+    shift=nil
+    assert(not point(tile.x+1,tile.y+1,"press"))
+    point(tile.x+1,tile.y+1,"release")
+    model.rightUse=assert(NHUI.useTarget())
+    pointer.right=true
+    cmd,req=render(model)
+    assert(cmd=="use_inventory" and req.kind=="supply_pack" and req.container=="warehouse" and req.storedId==22)
+    pointer.right=false
+    render(model,7081)
+end
+
 local function testTieredMedkitDisplay()
-    model.secure_loot={{id=1,kind="tactical_medkit",name="战术医疗包",remaining=7}}
-    model.warehouse.supplies={{id=2,kind="advanced_medkit",name="高端医疗包",remaining=12}}
+    model.secure_loot={{id=1,kind="tactical_medkit",name="战术医疗包",remaining=5}}
+    model.warehouse.supplies={{id=2,kind="advanced_medkit",name="高端医疗包",remaining=6}}
     render(model,78)
     render(model)
-    assert(drawn["7/9"] and drawn["12/12"])
+    assert(drawn["5/6"] and drawn["6/6"])
     point(tiles[1001].x+1,tiles[1001].y+1)
-    assert(drawn["剩余次数 7/9"] and drawn["每次恢复最大生命值的 15%"])
+    assert(drawn["剩余次数 5/6"] and drawn["用时 1.5 秒，恢复最大生命的 25%"])
     point(tiles[1003].x+1,tiles[1003].y+1)
-    assert(drawn["剩余次数 12/12"] and drawn["每次恢复最大生命值的 25%"])
+    assert(drawn["剩余次数 6/6"] and drawn["用时 2 秒，恢复最大生命的 40%"])
 
     width,height=320,180
     pointer={x=0,y=0}
     local kit=NHMedkits.types.advanced_medkit
     model.recipes={{id="advanced_medkit",name=kit.zh,category="medical",medkit=kit,output=1,duration=180,ready=true,
         inputs={{name="治疗精华",amount=3,available=200,essence="essence_healing"},{name="草药",amount=8,available=8},
-            {name="战术医疗包 (7/9)",amount=1,available=2,detail="优先消耗剩余次数最少的一包。"}}}}
+            {name="战术医疗包 (5/6)",amount=1,available=2,detail="优先消耗剩余次数最少的一包。"}}}}
     render(model,212)
     render(model,251)
     render(model)
     assert(green_button(244))
     render(model,244)
     render(model)
-    assert(drawn["3:00"] and drawn["12"] and drawn["25% 最大生命"] and drawn["200 / 3"] and drawn["8 / 8"] and drawn["2 / 1"])
-    assert(tips["战术医疗包 (7/9)"]:find("剩余次数最少",1,true))
+    assert(drawn["即时完成"] and drawn["200 / 3"] and drawn["8 / 8"] and drawn["2 / 1"])
+    assert(tips["战术医疗包 (5/6)"]:find("剩余次数最少",1,true))
     reveal(model,214)
+    assert(drawn["6"] and drawn["40% 最大生命"])
     local cmd,arg=render(model,214)
     assert(cmd=="craft" and arg.id=="advanced_medkit")
 end
@@ -1559,9 +2031,11 @@ local function testSurgeryDisplay()
     render(model,240)
     render(model,244)
     render(model)
-    assert(drawn["50% 最大生命"] and drawn["5 秒"] and drawn["3:00"])
+    assert(drawn["即时完成"])
+    reveal(model,214)
+    assert(drawn["50% 最大生命"] and drawn["5 秒"])
     assert(drawn["清除负面状态"] or tips["清除负面状态"])
-    assert(drawn["受伤中断，手术包保留"] or tips["受伤中断，手术包保留"])
+    assert(drawn["受伤时仍可继续手术"] or tips["受伤时仍可继续手术"])
     reveal(model,214)
     local cmd,arg=render(model,214)
     assert(cmd=="craft" and arg.id==medical.id)
@@ -1576,7 +2050,7 @@ local function testSurgeryDisplay()
     assert(drawn["打开物品栏：仓库和工坊"] and not drawn["手术中  3.5 秒"])
 end
 testSurgeryDisplay()
-print("UI: surgery recipe, interruption information and in-world cast display passed.")
+print("UI: surgery recipe, damage information and in-world cast display passed.")
 
 local function testRightUse()
     width,height=427,240
@@ -1601,6 +2075,17 @@ local function testRightUse()
     local native_use=use()
     assert(native_use.container=="native" and native_use.entity==41 and native_use.lane=="tool" and native_use.xslot==0)
     pointer={x=21,y=22}; assert(not NHUI.useTarget(),"wands keep native handling")
+    local oldSlot={x=tiles[1001].x+1,y=tiles[1001].y+1}
+    render(m,39)
+    panels,tiles={},{}
+    render(m)
+    assert(buttons[39].name=="[+] Equipment" and panels[10].x==5 and panels[10].h==20)
+    assert(not panels[4200] and not tiles[1001],"folded case must hide perks and storage slots")
+    pointer=oldSlot
+    assert(not NHUI.useTarget(),"folded case must release its former slots")
+    render({open=false});render(m)
+    assert(buttons[39].name=="[+] Equipment")
+    render(m,39);render(m)
     local saved=over(1001)
     assert(saved.container=="safe" and saved.slot==1 and saved.storedId==10 and saved.count==7)
     m.rightUse=saved
@@ -1653,7 +2138,7 @@ print("UI: exact right-click sources, moving cursor, stale stacks, occlusion, le
 do
     local m={open=false,lang="en",near=false,remote_linked=true}
     render(m)
-    assert(drawn["Remote link active · Open inventory"])
+    assert(drawn["Small terminal · Open inventory"])
     m.open,m.near,m.mode,m.status=true,true,"case",""
     m.capacity,m.maxUses,m.revision=2,3,1
     m.secure_loot={{id=91,kind="remote_terminal",name="Remote hideout terminal",remaining=18}}
@@ -1664,7 +2149,7 @@ do
     assert(buttons[71].name:find("Stash · Remote",1,true) and drawn["18/20"])
     pointer={x=tiles[1001].x+2,y=tiles[1001].y+2}
     render(m)
-    assert(drawn["Connections left 18/20"])
+    assert(drawn["Deployments left 18/20"])
     local target=assert(NHUI.useTarget())
     assert(target.kind=="remote_terminal" and target.remaining==18 and target.storedId==91)
     render(m,79)
@@ -1676,7 +2161,7 @@ do
     assert(move=="move_terminal" and request.source=="safe" and request.destination=="warehouse" and request.entity==91)
     m.open,m.near,m.remote_linked=false,false,false
     render(m)
-    assert(not drawn["Remote link active · Open inventory"] and not NHUI.useTarget())
+    assert(not drawn["Small terminal · Open inventory"] and not NHUI.useTarget())
 end
 
 local function testContainerGrid(capacity,isWallet,standalone)
@@ -1742,3 +2227,317 @@ for _,size in ipairs({{640,360},{320,180}}) do
     end
 end
 print("UI: four-column containers fit both screen sizes, preserve perk clearance and dispatch the last cell of every tier.")
+
+do
+    local m={open=true,mode="case",lang="en",near=false,status="",revision=1,capacity=2,
+        secure_loot={{id=50,kind="shield_basic",name="I",charge=120000}},native_slots={},gear={
+        charger={id=51,kind="shield_charger",name="Charger",count=1,remaining=5},
+        link={id=52,kind="data_link",name="Data link",count=1}}}
+    for _,size in ipairs({{320,180},{640,360}}) do
+        width,height=size[1],size[2]
+        pointer={x=0,y=0}
+        render({open=false})
+        render(m)
+        local function mouse(tile,event)
+            local p=tiles[1000+tile]
+            pointer={x=p.x+2,y=p.y+2,down=event=="press",pressed=event=="press",released=event=="release"}
+            return render(m)
+        end
+        render(m,5102)
+        mouse(1,"press")
+        local function hoverTab(id)
+            local b=buttons[id]
+            pointer={x=b.x+1,y=b.y+1,down=true}
+            render(m)
+        end
+        hoverTab(5101)
+        local shield,charger,link=tiles[1001],tiles[1002],tiles[1005]
+        local tileWidth=charger.x-shield.x
+        assert(drawn["Shield<Charger"] and shield.y==charger.y and tileWidth==20*shield.scale)
+        assert(link.y==shield.y and link.x==charger.x+1.5*tileWidth)
+        assert(noticeText["Data link"].x==link.x and link.x+tileWidth<=panels[10].x+panels[10].w)
+        assert(buttons[5101].y+9*buttons[5101].scale<shield.y)
+        local action,req=mouse(1,"release")
+        assert(action=="move_gear" and req.source=="safe" and req.destination=="gear" and req.entity==50)
+        mouse(2,"press")
+        assert(not mouse(2,"release"))
+        m.rightUse=assert(NHUI.useTarget())
+        action,req=render(m)
+        assert(action=="use_inventory" and req.storedId==51 and req.container=="gear" and req.remaining==5)
+        mouse(2,"press")
+        hoverTab(5102)
+        action,req=mouse(2,"release")
+        assert(action=="move_gear" and req.destination=="safe" and req.safeSlot==2)
+        NHUI.showTransfer("gear","shield_charger",2)
+        render(m)
+        mouse(2)
+        assert(NHUI.useTarget().container=="gear")
+        m.lang="zh"
+        render(m)
+        assert(drawn["护盾<充能器"] and drawn["弹挂<弹药盒"] and noticeText["数据链"].x==link.x)
+        mouse(5)
+        local equipped=assert(NHUI.useTarget())
+        assert(equipped.kind=="data_link" and equipped.storedId==52 and equipped.container=="gear")
+        mouse(5,"press")
+        hoverTab(5102)
+        action,req=mouse(2,"release")
+        assert(action=="move_gear" and req.entity==52 and req.destination=="safe")
+        m.lang="en"
+    end
+end
+
+do
+    local m={open=true,mode="case",lang="en",gear={},near=false,status="",revision=1,
+        capacity=13,secure_loot={},native_slots={},maxUses=8}
+    for i=1,13 do m.secure_loot[i]={id=100+i,kind="medkit",remaining=8,count=1,name="Kit"} end
+    for _,size in ipairs({{320,180},{640,360}}) do
+        width,height=size[1],size[2]
+        render({open=false})
+        NHUI.showTransfer("safe","medkit",12)
+        render(m)
+        local first=tiles[1001]
+        local panel=panels[10]
+        assert(buttons[39].y<buttons[5102].y and buttons[5101].y==buttons[5102].y)
+        assert(buttons[5102].y+9*buttons[5102].scale<first.y and not drawn["Drag items to transfer"])
+        for i=1,12 do
+            local box=tiles[1000+i]
+            assert(box.x==first.x+(i-1)%4*20*box.scale and box.y==first.y+math.floor((i-1)/4)*20*box.scale)
+            assert(box.x>=panel.x and box.x+20*box.scale<=panel.x+panel.w)
+            assert(box.y+20*box.scale<=panel.y+panel.h)
+            pointer={x=box.x+1,y=box.y+1}
+            local source=assert(NHUI.useTarget())
+            assert(source.slot==i and source.storedId==100+i)
+        end
+        assert(tracks[7110].frame==frame)
+        NHUI.showTransfer("safe","medkit",13)
+        render(m)
+        pointer={x=first.x+1,y=first.y+40*first.scale+1}
+        assert(NHUI.useTarget().slot==13)
+        pointer={x=first.x+21*first.scale,y=first.y+40*first.scale+1}
+        assert(not NHUI.useTarget())
+        m.capacity=12
+        render(m)
+        pointer={x=tiles[1002].x+1,y=tiles[1002].y+1}
+        assert(not buttons[35] and not buttons[36] and NHUI.useTarget().slot==2)
+        local heightWithTwelve=panels[10].h
+        m.capacity=4
+        render(m)
+        assert(panels[10].h==heightWithTwelve and not drawn["Drag items to transfer"])
+        m.capacity=13
+    end
+end
+
+do
+    local function insideCorner(tileId,text,lower)
+        local tile,b=assert(tiles[tileId]),assert(badges[text],text)
+        local pad,size=2*tile.scale,20*tile.scale
+        local glyphs=#text-(lower and 1 or 0) -- UTF-8 multiplication sign occupies two bytes
+        local expected=tile.scale*math.min(0.5,16/(7*glyphs-1))
+        assert(math.abs(b.h-10*expected)<0.001 and b.w<=size-2*pad+0.001)
+        if lower then
+            assert(math.abs(tile.x+size-pad-b.x-b.w)<0.001 and math.abs(tile.y+size-pad-b.y-b.h)<0.001)
+        else
+            assert(math.abs(tile.x+pad-b.x)<0.001 and math.abs(tile.y+pad-b.y)<0.001)
+        end
+    end
+    local m={open=true,mode="case",lang="zh",near=false,status="",revision=1,capacity=1,native_slots={},
+        gear={charger={kind="shield_charger",remaining=6,count=1},rig={kind="ammo_rig",reserve=11},
+            ammo={kind="ammo_pack",remaining=3,count=1}},
+        secure_loot={{id=91,kind="summon_card",species="dryad",remaining=80,count=9754}}}
+    for _,size in ipairs({{320,180},{640,360}}) do
+        width,height=size[1],size[2]
+        pointer={x=0,y=0}
+        NHUI.showTransfer("gear","ammo_pack",4)
+        render(m)
+        insideCorner(1002,"6/8",false)
+        insideCorner(1003,"11/240",false)
+        insideCorner(1004,"3/8",false)
+        assert(not badges["×1"])
+        NHUI.showTransfer("safe","summon_card",1)
+        render(m)
+        insideCorner(1001,"80/80",false)
+        insideCorner(1001,"×9754",true)
+        assert(badges["80/80"].y+badges["80/80"].h<badges["×9754"].y)
+    end
+end
+
+do
+    local m={open=true,mode="case",lang="zh",near=false,status="",revision=1,capacity=12,native_slots={},gear={},secure_loot={},
+        rescue={insured=true,species="cat",kept=321,limit=10000}}
+    for _,size in ipairs({{320,180},{640,360}}) do
+        width,height=size[1],size[2]
+        pointer={x=0,y=0}
+        NHUI.showTransfer("gear","ammo_pack",4)
+        render(m)
+        local panel=panels[10]
+        local label="保险 已投保 · 保金 321"
+        assert(drawn[label] and not drawn["同行 猫娘"] and not drawn["保金上限 10000"])
+        local t=assert(rescueText[label])
+        assert(t.y==44 and t.x>=5 and t.x+GuiGetTextDimensions(nil,label,t.scale)<=width-84)
+        assert(tips[label]:find("猫娘",1,true) and tips[label]:find("10000",1,true))
+        local shortHeight=panel.h
+        m.rescue={insured=false,kept=0,limit=0}
+        m.status="获得召唤卡：狮鹫少女"
+        render(m)
+        assert(drawn["保险 未投保"] and panels[10].h==shortHeight and not drawn[m.status])
+        NHUI.showTransfer("safe","medkit",1)
+        render(m)
+        assert(drawn["保险 未投保"])
+        m.open=false
+        render(m)
+        assert(drawn["保险 未投保"] and not panels[10])
+        m.open=true
+        m.rescue={insured=true,species="cat",kept=321,limit=10000}
+    end
+end
+
+do
+    width,height=427,240
+    local m={open=false,near=false,lang="zh"}
+    NHUI.notify("获得召唤卡：狮鹫少女")
+    render(m)
+    local label="获得召唤卡：狮鹫少女"
+    assert(drawn[label] and hudImages[5801].a>0.85 and not panels[10])
+    local text=noticeText[label]
+    assert(text.x>=0 and text.x+GuiGetTextDimensions(nil,label,text.scale)<width)
+    frame=frame+268
+    render(m)
+    assert(drawn[label] and hudImages[5801].a>0 and hudImages[5801].a<0.5)
+    assert(noticeText[label].color[4]>0 and noticeText[label].color[4]<0.6)
+    -- A repeated reward restarts its duration even when the message is identical.
+    NHUI.notify(label)
+    render(m)
+    assert(hudImages[5801].a>0.85)
+    frame=frame+300
+    render(m)
+    assert(not drawn[label])
+    -- The preview uses camera coordinates and changes tint with placement validity.
+    m.deployment={kind="turret_pack",x=150,y=120,valid=true}
+    render(m)
+    assert(hudImages[5830].x==140 and hudImages[5830].y==104)
+    assert(hudImages[5830].color[2]>hudImages[5830].color[1])
+    m.deployment.valid=false
+    render(m)
+    assert(hudImages[5830].color[1]>hudImages[5830].color[2])
+    m.deployment={kind="remote_terminal",x=150,y=120,valid=true,
+        icon="mods/noita_hideout/files/terminals/comms_small.png",width=24,height=24,offsetX=12,offsetY=18.75}
+    render(m)
+    assert(hudImages[5830].x==138 and hudImages[5830].y==101.25 and hudImages[5830].w==24)
+    assert(hudImages[5830].color[2]>hudImages[5830].color[1] and drawn[m.deployment.icon])
+    m.deployment.valid=false
+    render(m)
+    assert(hudImages[5830].color[1]>hudImages[5830].color[2])
+    m.deployment=nil
+    render(m)
+    assert(not drawn[NHTurrets.types.turret_pack.icon])
+end
+
+do
+    local card=NHCompanions.withCount({species="tarot_hermit",remaining=40},2)
+    card.id,card.slot=10001,1
+    local m={open=true,mode="case",lang="zh",near=false,status="",revision=1,capacity=12,native_slots={},gear={},secure_loot={card}}
+    NHUI.showTransfer("safe","summon_card",1)
+    render(m)
+    assert(drawn["40/40"] and drawn["×2"])
+    card.remaining,card.count=39,1
+    render(m)
+    assert(drawn["39/40"] and not drawn["39/80"])
+end
+
+do
+    local m={open=false,lang="en",terminals={{x=100,y=40,text="10:00",warning=false,alpha=1}}}
+    render(m)
+    assert(drawn["10:00"] and noticeText["10:00"].y==40 and noticeText["10:00"].color[2]==1)
+    m.terminals[1].text,m.terminals[1].warning,m.terminals[1].alpha="2:59",true,0.25
+    render(m)
+    assert(drawn["2:59"] and noticeText["2:59"].color[1]==1 and noticeText["2:59"].color[2]==0.2 and noticeText["2:59"].color[4]==0.25)
+    m.terminals={}
+    render(m)
+    assert(not drawn["2:59"])
+end
+print("Remote terminal countdown renders above world position, flashes red and vanishes on expiry.")
+
+do
+    local values={x=2,y=8,hp=150,maxHP=300,rounds=750,capacity=3000}
+    local m={open=false,lang="zh",turretStatus=values}
+    pointer={x=200,y=180}
+    hudImages={}
+    render(m)
+    assert(drawn["耐久 150/300"] and drawn["弹药 750/3000"])
+    assert(hudImages[5840].x>=0 and hudImages[5840].y>=0)
+    assert(hudImages[5840].y+hudImages[5840].h<hudImages[5843].y)
+    assert(hudImages[5841].w==hudImages[5844].w and hudImages[5842].w==hudImages[5841].w/2)
+    assert(hudImages[5845].w==hudImages[5844].w/4)
+    local red,yellow=hudImages[5842].color,hudImages[5845].color
+    assert(red[1]>0.8 and red[2]<0.35 and red[3]<0.35)
+    assert(yellow[1]>0.8 and yellow[2]>0.75 and yellow[3]<0.3)
+    m.lang="en"
+    values.hp,values.maxHP,values.rounds,values.capacity=500,500,0,500
+    hudImages={}
+    render(m)
+    assert(drawn["HP 500/500"] and drawn["Ammo 0/500"])
+    assert(hudImages[5841].w==hudImages[5842].w and hudImages[5844] and not hudImages[5845])
+    local empty=noticeText["Ammo 0/500"].color
+    assert(empty[1]==yellow[1] and empty[2]==yellow[2] and empty[3]==yellow[3])
+    pointer={x=hudImages[5844].x+3,y=hudImages[5844].y}
+    render(m)
+    assert(not drawn["HP 500/500"] and not drawn["Ammo 0/500"])
+    pointer={x=0,y=0}
+end
+
+do
+    dofile("mods/noita_hideout/files/ui.lua")
+    local m={open=true,mode="case",lang="zh",near=true,capacity=2,secure_loot={},native_slots={},revision=1,status="",
+        warehouse={},warehouse_capacity={wand=48,spell=48,containers=48,supplies=48,equipment=48,collection=48,materials=16},
+        essences={},docks={},materials={},
+        progression={expansion={},upgrade={}},shopGoods={},recipes={
+            {id="philosopher_stone",category="alchemy",alchemyMode="rubedo",name="贤者之石",output=10,outputs={{key="nh_philosopher_stone",name="贤者之石",amount=10,stock=9}},
+                inputs={{name="点金水",amount=1,available=1},{name="存钱罐金币",amount=5000,available=5000}},catalysts={},ready=true},
+            {id="supply_logistics",category="alchemy",alchemyMode="logistics",name="补给资源包",output=50,inputs={},outputs={{key="supply_logistics",name="补给资源包",amount=50,stock=12}},ready=true},
+            {id="stable",category="alchemy",alchemyMode="synthesis",name="稳定传送液",output=500,inputs={},outputs={},ready=true}}}
+    pointer={x=0,y=0}
+    render(m)
+    assert(buttons[274] and buttons[275] and not buttons[267])
+    render(m,212); render(m)
+    assert(drawn["红化"])
+    render(m,267)
+    render(m)
+    assert(drawn["贤者之石"] and not drawn["稳定传送液"])
+    render(m,244)
+    render(m)
+    assert(drawn["< 红化"] and drawn["确认红化"] and drawn["即时完成"])
+    local command,request=render(m,214)
+    assert(command=="craft" and request.id=="philosopher_stone")
+    render(m,240)
+    render(m,268)
+    render(m)
+    assert(drawn["补给资源包"] and not drawn["贤者之石"])
+    render(m,244)
+    render(m)
+    assert(drawn["成品库存"] and drawn["制作资源包"])
+    command,request=render(m,214)
+    assert(command=="craft" and request.id=="supply_logistics")
+end
+print("Rubedo and logistics UI: recipe filtering, resource balances and craft actions passed.")
+
+do
+    dofile("mods/noita_hideout/files/ui.lua")
+    local m={open=true,mode="case",lang="en",near=true,capacity=2,secure_loot={},native_slots={},revision=1,
+        warehouse={},warehouse_capacity={wand=10,spell=10,containers=10,supplies=10,equipment=10,collection=10,materials=16},
+        docks={},materials={{key="a",name="Grain",amount=2},{key="b",name="Sugar",amount=6}},
+        essences={{key="first",name="First",amount=10},{key="second",name="Second",amount=50}},
+        progression={expansion={},upgrade={}},shopGoods={},recipes={},status=""}
+    pointer={x=0,y=0}
+    render(m)
+    for id,category in pairs({[75]="wand",[76]="spell",[77]="containers",[78]="supplies",[79]="equipment",[83]="collection"}) do
+        render(m,id)
+        local cmd,request=render(m,7080)
+        assert(cmd=="organize_warehouse" and request.category==category)
+    end
+    render(m,80)
+    assert(not render(m,7080))
+    assert(noticeText.Sugar.x<noticeText.Grain.x and m.materials[1].key=="a")
+    render(m,82)
+    assert(not render(m,7080))
+    assert(noticeText.Second.x<noticeText.First.x and m.essences[1].key=="first")
+end

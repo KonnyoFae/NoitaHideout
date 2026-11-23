@@ -1,0 +1,6 @@
+<Entity>
+    <Base file="data/entities/projectiles/rocket_tank.xml">
+        <ProjectileComponent friendly_fire="0" never_hit_player="1" explosion_dont_damage_shooter="1" bounces_left="0" />
+        <HomingComponent target_tag="nh_turret_no_targets" />
+    </Base>
+</Entity>

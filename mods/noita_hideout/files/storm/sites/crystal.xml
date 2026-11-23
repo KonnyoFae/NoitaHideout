@@ -1,0 +1,9 @@
+<Entity name="成熟法力晶体" tags="storm_ripe_crystal,hittable">
+    <Base file="mods/noita_hideout/files/storm/sites/crystal_glow.xml" />
+    <SpriteComponent image_file="mods/noita_hideout/files/items/storm_mana.png" offset_x="8" offset_y="8" emissive="1" />
+    <HitboxComponent aabb_min_x="-6" aabb_max_x="6" aabb_min_y="-8" aabb_max_y="8" />
+    <DamageModelComponent hp="0.04" max_hp="0.04" wait_for_kill_flag_on_death="1" blood_material="air" />
+    <VariableStorageComponent name="port" value_int="0" />
+    <VariableStorageComponent name="pure" value_int="0" />
+    <LuaComponent script_damage_received="mods/noita_hideout/files/storm/sites/shatter.lua" execute_every_n_frame="-1" />
+</Entity>

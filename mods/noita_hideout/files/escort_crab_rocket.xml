@@ -1,0 +1,6 @@
+<Entity>
+  <Base file="data/entities/projectiles/rocket_tiny.xml">
+    <HomingComponent target_tag="enemy" />
+    <ProjectileComponent friendly_fire="0" explosion_dont_damage_shooter="1" />
+  </Base>
+</Entity>

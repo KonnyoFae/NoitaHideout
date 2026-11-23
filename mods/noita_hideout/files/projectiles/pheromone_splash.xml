@@ -1,0 +1,8 @@
+<Entity tags="nh_pheromone_splash">
+    <Base file="data/entities/projectiles/chunk_of_soil.xml">
+        <ProjectileComponent>
+            <config_explosion never_cache="1" explosion_radius="23" create_cell_material="magic_liquid_charm"
+                create_cell_probability="70" load_this_entity="data/entities/particles/charm_oneoff.xml" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

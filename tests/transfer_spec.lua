@@ -101,6 +101,14 @@ local function state()
     return {warehouse = {}, safe = {}, pouches = {}, nextItemId = 1, runSerial = 1, revision = 0, profile = 1}
 end
 local s = state()
+do
+    local single=state()
+    single.warehouse={{id=1,slot=1,item={kind="potion",name="potion",count=2}}}
+    single.nextItemId=2
+    assert(NHTransfers.withdraw(single,player,1,"warehouse",nil,true))
+    assert(#single.warehouse==0)
+    EntityKill(next_entity)
+end
 local e = make("potion", true)
 reject_capture = true
 assert(not NHTransfers.deposit(s, player) and entities[e].alive and not entities[e].marker)
@@ -134,6 +142,17 @@ assert(#s.warehouse == 0 and entities[original_delivery].alive)
 assert(not NHTransfers.withdraw(s, player, 1))
 local token = entities[original_delivery].marker.value_string
 assert(s.transit.issued[token] and globals["noita_hideout.delivered." .. token] == "1")
+do
+    local list=GameGetAllInventoryItems
+    local duplicate=make("potion")
+    entities[duplicate].marker={value_string=token}
+    EntityAddTag(duplicate,"noita_hideout_transfer_item")
+    pick(original_delivery)
+    GameGetAllInventoryItems=function() return {original_delivery,original_delivery} end
+    assert(NHTransfers.reconcile(s,player))
+    assert(EntityGetIsAlive(original_delivery) and not EntityGetIsAlive(duplicate))
+    GameGetAllInventoryItems=list
+end
 -- A broken/used up delivery stays spent if its world receipt exists.
 entities[original_delivery].alive = false
 assert(NHTransfers.reconcile(s, player) and #s.warehouse == 0)
@@ -283,18 +302,18 @@ function EntityLoad(path)
     return id
 end
 local bundles=state()
-bundles.warehouse[1]={id=1,slot=1,item={kind="bandage",count=8}}
+bundles.warehouse[1]={id=1,slot=1,item={kind="bandage",count=4}}
 bundles.nextItemId=2
 local ok,bundle=NHTransfers.withdraw(bundles,player,1,"warehouse")
-assert(ok and #bundles.warehouse==0 and entities[bundle].item.uses_remaining==8)
+assert(ok and #bundles.warehouse==0 and entities[bundle].item.uses_remaining==32)
 pick(bundle)
 entities[bundle].item.uses_remaining=7
 assert(NHTransfers.deposit(bundles,player,"safe",bundle,1))
-assert(#bundles.safe==1 and bundles.safe[1].item.count==7 and not EntityGetIsAlive(bundle))
+assert(#bundles.safe==1 and bundles.safe[1].item.count==1 and bundles.safe[1].item.remaining==7 and not EntityGetIsAlive(bundle))
 ok,bundle=NHTransfers.withdraw(bundles,player,1,"safe")
 assert(ok and #bundles.safe==0 and entities[bundle].item.uses_remaining==7)
 pick(bundle)
-assert(NHTransfers.deposit(bundles,player,"warehouse",bundle,1) and bundles.warehouse[1].item.count==7)
+assert(NHTransfers.deposit(bundles,player,"warehouse",bundle,1) and bundles.warehouse[1].item.remaining==7)
 print("Bandages: whole bundles retain their roll count through the quickbar, secure case and warehouse.")
 
 for _,kind in ipairs({"tactical_medkit","advanced_medkit"}) do
@@ -332,3 +351,148 @@ for _,kind in ipairs(NHThrowables.order) do
     assert(outfit.warehouse[1].item.kind==kind and outfit.warehouse[1].item.count==3)
 end
 print("Throwables: all six stacks retain their quantity across quickbar, secure case and supplies storage.")
+
+do
+    local s=state()
+    s.nextItemId=3
+    s.warehouse={{id=1,slot=1,item={kind="bread",remaining=1,count=3}}}
+    s.safe={{id=2,slot=1,item={kind="bandage",count=2}}}
+    assert(not NHTransfers.moveStored(s,"warehouse",1,"safe",true))
+    assert(s.warehouse[1].item.count==3 and s.nextItemId==3)
+    s.safe={}
+    fail=true
+    assert(not NHTransfers.moveStored(s,"warehouse",1,"safe",true))
+    assert(not NHTransfers.withdraw(s,player,1,"warehouse",nil,true))
+    assert(#s.safe==0 and s.warehouse[1].item.remaining==1 and s.nextItemId==3)
+    fail=false
+    assert(NHTransfers.moveStored(s,"warehouse",1,"safe",true))
+    assert(s.safe[1].id~=1 and s.safe[1].item.remaining==1 and s.safe[1].item.count==1)
+    assert(s.warehouse[1].item.remaining==NHFoods.byId.bread.uses and s.warehouse[1].item.count==2)
+    assert(NHTransfers.moveStored(s,"safe",1,"warehouse",false))
+    assert(s.warehouse[1].item.count==3 and s.warehouse[1].item.remaining==1 and #s.safe==0)
+    local ok,id=NHTransfers.withdraw(s,player,1,"warehouse",nil,true)
+    assert(ok and entities[id].item.uses_remaining==1)
+    entities[id].alive,globals=false,{}
+    assert(NHTransfers.reconcile(s,player) and #s.warehouse==1 and s.warehouse[1].item.count==3)
+    s.warehouse={{id=1,slot=1,item={kind="spell",card={id="BOMB",stack=4}}}}
+    assert(NHTransfers.moveStored(s,"warehouse",1,"safe",true))
+    assert(not s.safe[1].item.card.stack and s.warehouse[1].item.card.stack==3)
+    s.safe={}
+    s.warehouse={}
+    for i=1,NHStore.warehouseCapacity(s,"supplies") do
+        s.warehouse[i]={id=s.nextItemId,slot=i,item={kind="bandage",count=4}}
+        s.nextItemId=s.nextItemId+1
+    end
+    local id=EntityLoad("mods/noita_hideout/files/items/bandage.xml")
+    pick(id)
+    assert(NHTransfers.deposit(s,player,"warehouse",id,nil,"safe"))
+    assert(s.safe[1].item.kind=="bandage" and not EntityGetIsAlive(id))
+end
+print("Quick transfers preserve split stacks on full slots, rejected writes and world rewind.")
+
+-- Deployment packs split one at a time without duplicating the source stack.
+for _,kind in ipairs(NHTurrets.order) do
+    local s=state()
+    s.nextItemId=2
+    s.warehouse={{id=1,slot=1,item=NHTurrets.recipe(kind).item}}
+    assert(NHTransfers.moveStored(s,"warehouse",1,"safe",true))
+    assert(s.warehouse[1].item.count==3 and s.safe[1].item.count==1)
+    assert(NHTransfers.moveStored(s,"safe",1,"warehouse",false))
+    assert(#s.safe==0 and s.warehouse[1].item.count==4)
+    local ok,id=NHTransfers.withdraw(s,player,1,"warehouse",nil,true)
+    assert(ok and entities[id].item.uses_remaining==1 and s.warehouse[1].item.count==3)
+    pick(id)
+    assert(NHTransfers.deposit(s,player,"safe",id,1))
+    assert(s.safe[1].item.count==1 and not EntityGetIsAlive(id))
+    assert(NHTransfers.moveStored(s,"safe",1,"warehouse",false))
+    assert(s.warehouse[1].item.count==4)
+    fail=true
+    assert(not NHTransfers.withdraw(s,player,1,"warehouse",nil,true))
+    fail=false
+    assert(s.warehouse[1].item.count==4)
+end
+print("Deployment packs retain exact quantities through safe, warehouse and single-item quick transfers.")
+
+NHStormProducts.register()
+local pickup=dofile("mods/noita_hideout/files/pickup.lua")
+dofile("mods/noita_hideout/files/bag_pickup.lua")
+entities[player].tags={player_unit=true}
+function EntityRemoveTag(id,tag) entities[id].tags[tag]=nil end
+local loadProduct=EntityLoad
+function EntityLoad(path,x,y)
+    local id=loadProduct(path,x,y)
+    local kind=path:match("/(storm_[%w_]+)%.xml$")
+    if kind then entities[id].tags={[kind]=true} end
+    return id
+end
+local function product(kind,n)
+    local id=EntityLoad("mods/noita_hideout/files/items/"..kind..".xml")
+    entities[id].item.uses_remaining=n
+    return id
+end
+for kind in pairs(NHStormProducts.types) do
+    local profile=state()
+    profile.nextItemId=2
+    profile.warehouse={{id=1,slot=1,item={kind=kind,count=7}}}
+    local source=product(kind,3)
+    pick(source)
+    fail=true
+    assert(not NHTransfers.deposit(profile,player,"warehouse",source))
+    assert(#profile.warehouse==1 and profile.warehouse[1].item.count==7 and EntityGetIsAlive(source))
+    fail=false
+    assert(NHTransfers.deposit(profile,player,"warehouse",source))
+    assert(profile.warehouse[1].item.count==8 and profile.warehouse[2].item.count==2)
+    assert(NHTransfers.moveStored(profile,"warehouse",1,"safe",true))
+    assert(profile.warehouse[1].item.count==7 and profile.safe[1].item.count==1)
+    local ok,id=NHTransfers.withdraw(profile,player,1,"warehouse")
+    assert(ok and entities[id].item.uses_remaining==7)
+    pick(id)
+    local other=product(kind=="storm_mana_pure" and "storm_mana" or "storm_mana_pure",1)
+    pick(other)
+    source=product(kind,3)
+    pick(source)
+    item_pickup(source,player)
+    pickup.finishPickups(profile,player)
+    assert(entities[id].item.uses_remaining==8 and entities[source].item.uses_remaining==2)
+    assert(entities[other].item.uses_remaining==1)
+    EntityKill(other)
+    local legacy=product(kind,-1)
+    pick(legacy)
+    item_pickup(legacy,player)
+    pickup.finishPickups(profile,player)
+    assert(not EntityGetIsAlive(legacy) and entities[source].item.uses_remaining==3)
+    assert(NHTransfers.deposit(profile,player,"safe",source))
+    assert(#profile.safe==1 and profile.safe[1].item.count==4)
+    EntityKill(id)
+    local invalid=product(kind,9)
+    pick(invalid)
+    assert(not NHTransfers.deposit(profile,player,"warehouse",invalid) and EntityGetIsAlive(invalid))
+    EntityKill(invalid)
+end
+print("All four storm products preserve quantities, top up to eight, and keep qualities separate.")
+
+do
+    local kind="storm_mana"
+    local profile=state()
+    local held=product(kind,7)
+    pick(held)
+    local ground=product(kind,3)
+    entities[ground].x,entities[ground].y=20,30
+    local c=entities[ground].item
+    c.is_pickable,c.next_frame_pickable,c.item_pickup_radius=true,0,16
+    NHNative={kind=function() end}
+    function EntityGetInRadius() return {ground} end
+    EntityGetFirstComponent=EntityGetFirstComponentIncludingDisabled
+    assert(not pickup.interact(profile,player,false,function() return {{lane="tool"}} end))
+    assert(entities[held].item.uses_remaining==8 and EntityGetIsAlive(ground) and c.uses_remaining==2)
+    pick(ground)
+    profile.nextItemId=2
+    profile.safe={{id=1,slot=1,item={kind=kind,count=6}}}
+    local deliver=assert(pickup.stackDelivery(profile,player,profile.safe[1].item,false))
+    fail=true
+    assert(not NHTransfers.withdraw(profile,player,1,"safe",deliver))
+    assert(profile.safe[1].item.count==6 and c.uses_remaining==2)
+    fail=false
+    assert(NHTransfers.withdraw(profile,player,1,"safe",deliver))
+    assert(#profile.safe==0 and c.uses_remaining==8)
+end

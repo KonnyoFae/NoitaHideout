@@ -1,0 +1,6 @@
+<Entity tags="nh_home_terminal,teleportable_NOT">
+    <SpriteComponent image_file="mods/noita_hideout/files/terminals/comms_big.png"
+        offset_x="32" offset_y="50" has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" />
+    <LightComponent r="164" g="203" b="188" radius="34" />
+    <LuaComponent _tags="nh_terminal_field" script_source_file="mods/noita_hideout/files/terminals/tick.lua" execute_every_n_frame="1" />
+</Entity>

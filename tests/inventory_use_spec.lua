@@ -25,13 +25,13 @@ local function spend(ref)
     save()
 end
 
-local kit=row("safe",1,{kind="medkit"})
+local kit=row("safe",1,{kind="medkit",remaining=3})
 local bundle=row("warehouse",1,{kind="frost_grenade",count=8})
 local old=row("warehouse",2,{kind="grenade"})
 local food=row("warehouse",3,{kind="bread"})
-local bandage=row("warehouse",4,{kind="bandage",count=8})
+local bandage=row("warehouse",4,{kind="bandage",count=4})
 local surgery=row("warehouse",5,{kind="field_surgery_kit",remaining=1})
-local dose=row("warehouse",6,{kind="dose",remaining=3,count=2})
+local dose=row("warehouse",6,{kind="dose",remaining=5,count=2})
 save()
 for _,ref in ipairs({bundle,old,food,bandage,kit,surgery,dose}) do
     assert(use.peek(state,player,ref) and use.supports(ref.kind))
@@ -40,7 +40,7 @@ assert(not use.supports("wand") and not use.supports("spell") and not use.suppor
 spend(bundle); assert(not use.peek(state,player,bundle))
 bundle.count=7; assert(use.peek(state,player,bundle).count==7)
 spend(old); spend(food); spend(bandage)
-bandage.count=7; assert(use.peek(state,player,bandage).count==7)
+bandage.remaining=7; assert(use.peek(state,player,bandage).count==4)
 spend(kit); assert(not use.peek(state,player,kit))
 kit.remaining=2; spend(kit); kit.remaining=1; spend(kit); assert(not use.peek(state,player,kit))
 -- Surgery starts by retaining this ref and pays only on completion. Moving the
@@ -51,9 +51,9 @@ save()
 assert(not use.spend(state,player,surgery))
 spend(dose)
 dose.count=1
-assert(use.peek(state,player,dose).remaining==3)
+assert(use.peek(state,player,dose).remaining==5)
 local partial=state.warehouse[NHStore.slotIndex(state,"warehouse",2,"dose")]
-assert(partial.item.remaining==2 and partial.id~=dose.storedId)
+assert(partial.item.remaining==4 and partial.id~=dose.storedId)
 
 local pouchId=state.starterPouchId
 local ref={container="pouch",pouchId=pouchId,kind="dose",cell=1,count=2}
@@ -65,14 +65,14 @@ assert(not use.spend(state,player,{container="pouch",pouchId=pouchId,kind="dose"
 spend({container="pouch",pouchId=pouchId,kind="dose",cell=2,subtype="lightning",remaining=1})
 spend(ref)
 pouch=state.pouches[pouchId]
-assert(pouch.cells[1].count==1 and pouch.cells[1].remaining==3 and pouch.cells[2].remaining==2 and pouch.doses==4)
+assert(pouch.cells[1].count==1 and pouch.cells[1].remaining==5 and pouch.cells[2].remaining==4 and pouch.doses==4)
 -- A full pouch can reuse the clicked cell when its untouched syringes fit
 -- into another compatible stack. No unrelated cell is displaced.
-assert(NHStore.putPouchDose(pouch,3,1))
-pouch.cells[4]={remaining=3,count=1}
+assert(NHStore.putPouchDose(pouch,5,1))
+pouch.cells[4]={remaining=5,count=1}
 spend(ref)
 pouch=state.pouches[pouchId]
-assert(pouch.cells[1].remaining==2 and pouch.cells[1].count==1 and pouch.cells[4].count==2 and pouch.doses==5)
+assert(pouch.cells[1].remaining==4 and pouch.cells[1].count==1 and pouch.cells[4].count==2 and pouch.doses==5)
 
 local function card(species,remaining,count) return {kind="summon_card",species=species,remaining=remaining,count=count} end
 local stored=row("warehouse",1,{kind="card_wallet",cells={[1]=card("griffin",80,2)}})
@@ -108,8 +108,8 @@ assert(not use.spend(state,player,cardRef))
 -- into the final cell of a tier III container while the stack stays put.
 local boxId=NHPouches.create(state,"warehouse",1,2,3)
 for i=2,11 do assert(NHStore.putPouchDose(state.pouches[boxId],1,i,"fire")) end
-spend({container="pouch",pouchId=boxId,kind="dose",cell=1,count=2,remaining=3})
-assert(state.pouches[boxId].cells[12].remaining==2 and state.pouches[boxId].cells[1].count==1)
+spend({container="pouch",pouchId=boxId,kind="dose",cell=1,count=2,remaining=5})
+assert(state.pouches[boxId].cells[12].remaining==4 and state.pouches[boxId].cells[1].count==1)
 local large=NHCardWallets.empty(3)
 large.cells[1]=card("dryad",80,2)
 for i=2,11 do large.cells[i]=card("dryad",79,1) end

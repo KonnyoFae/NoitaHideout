@@ -40,7 +40,7 @@ local function warehouseItem(state,slot,kind)
     return state.warehouse[assert(NHStore.slotIndex(state,"warehouse",slot,kind))].item
 end
 local dose=warehouseItem(s,1,"dose")
-assert(dose.subtype=="fire" and dose.remaining==3 and dose.count==1)
+assert(dose.subtype=="fire" and dose.remaining==5 and dose.count==1)
 assert(warehouseItem(s,1,"summon_card").species=="slime" and NHStore.commit(s))
 assert(NHFarm.sync(stale,start+period) and not NHStore.commit(stale))
 s=load()
@@ -58,7 +58,7 @@ for seed=1,1000 do
     hits=hits+give
     if give==1 then
         local medicine=warehouseItem(trial,1,"dose")
-        assert(NHInjectors.types[medicine.subtype] and medicine.remaining==3 and medicine.count==1)
+        assert(NHInjectors.types[medicine.subtype] and medicine.remaining==5 and medicine.count==1)
         types[medicine.subtype]=true
     end
 end
@@ -104,7 +104,7 @@ assert(not NHStore.slotIndex(s,"warehouse",2,"dose") and s.resources.spice==NHSt
 failHead=false
 assert(NHStore.commit(s))
 s=load()
-assert(warehouseItem(s,2,"dose").remaining==3 and warehouseItem(s,2,"dose").subtype=="fire")
+assert(warehouseItem(s,2,"dose").remaining==5 and warehouseItem(s,2,"dose").subtype=="fire")
 assert(warehouseItem(s,1,"dose").remaining==2 and not next(s.gelBonus.pending) and not s.gelBonus.spice)
 assert(s.resources.spice==NHStore.maxResourceAmount and s.gelBonus.seed==consumedSeed)
 local dest=NHFarm.view(s,"zh",s.farm.time)

@@ -1,0 +1,6 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/projectiles/ammo_pulse.xml" />
+    <MagicConvertMaterialComponent from_material_array="water,water_salt,water_swamp,water_static,water_fading"
+        to_material_array="ice_static,ice_static,ice_static,ice_static,ice_static"
+        kill_when_finished="0" steps_per_frame="4" is_circle="1" radius="6" />
+</Entity>

@@ -1,0 +1,9 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/projectiles/support_plasma.xml">
+        <VelocityComponent terminal_velocity="500" />
+        <ProjectileComponent damage="12" on_lifetime_out_explode="1">
+            <config_explosion damage="9" explosion_sprite="data/particles/explosion_032_plasma.xml"
+                load_this_entity="mods/noita_hideout/files/projectiles/plasma_cloud.xml" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

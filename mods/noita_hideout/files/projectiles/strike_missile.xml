@@ -1,0 +1,9 @@
+<Entity tags="projectile_player,rocket,nh_strike_missile">
+    <Base file="data/entities/projectiles/deck/rocket.xml">
+        <ProjectileComponent damage="20" muzzle_flash_file="" velocity_sets_rotation="1" velocity_sets_scale="0">
+            <config_explosion damage="18" explosion_sprite="data/particles/explosion_064.xml" />
+        </ProjectileComponent>
+    </Base>
+    <LuaComponent execute_every_n_frame="-1" execute_on_removed="1"
+        script_source_file="mods/noita_hideout/files/projectiles/missile_impact.lua" />
+</Entity>

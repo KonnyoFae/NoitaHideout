@@ -2,9 +2,10 @@
     <Base file="mods/noita_hideout/files/items/base.xml">
         <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/advanced_surgery_kit.png" />
         <SpriteComponent image_file="mods/noita_hideout/files/items/advanced_surgery_kit.png" offset_x="8" offset_y="8" />
-        <ItemComponent item_name="$nh_hideout_advanced_surgery_kit" uses_remaining="1" ui_description="$nh_hideout_advanced_surgery_kit_desc"
+        <ItemComponent item_name="$nh_hideout_advanced_surgery_kit" uses_remaining="6" ui_description="$nh_hideout_advanced_surgery_kit_desc"
             ui_sprite="mods/noita_hideout/files/items/advanced_surgery_kit.png" />
         <UIInfoComponent name="$nh_hideout_advanced_surgery_kit" />
         <AbilityComponent ui_name="$nh_hideout_advanced_surgery_kit" />
     </Base>
+    <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
 </Entity>

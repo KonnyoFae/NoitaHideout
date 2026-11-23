@@ -1,0 +1,5 @@
+<Entity name="$nh_hideout_rocket_turret_pack" tags="nh_deployed_turret,nh_decoy,nh_mobile_decoy,prey,mortal,hittable,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/turrets/decoy_base.xml" />
+    <VariableStorageComponent _tags="nh_decoy_flight" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/turrets/decoy_flight.lua" execute_every_n_frame="2" />
+</Entity>

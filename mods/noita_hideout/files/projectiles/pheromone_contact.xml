@@ -1,0 +1,6 @@
+<Entity>
+    <Base file="data/entities/misc/effect_charm_short.xml">
+        <GameEffectComponent frames="180" />
+    </Base>
+    <LuaComponent execute_every_n_frame="4" script_source_file="mods/noita_hideout/files/projectiles/pheromone_wear_off.lua" />
+</Entity>

@@ -1,0 +1,11 @@
+<Entity tags="projectile_player,nh_companion_shot">
+    <Base file="data/entities/base_projectile.xml">
+        <VelocityComponent gravity_y="0" air_friction="0" />
+    </Base>
+    <ProjectileComponent speed_min="240" speed_max="240" lifetime="22" damage="0"
+        collide_with_world="0" collide_with_entities="0" on_collision_die="0"
+        on_death_explode="0" on_lifetime_out_explode="0" />
+    <Entity><Base file="data/entities/misc/matter_eater.xml" /></Entity>
+    <SpriteComponent image_file="data/particles/area_indicator_032_purple.png"
+        offset_x="16" offset_y="16" has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" alpha="0.7" />
+</Entity>

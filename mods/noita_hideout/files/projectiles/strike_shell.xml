@@ -1,0 +1,9 @@
+<Entity>
+    <Base file="data/entities/projectiles/deck/rocket.xml">
+        <SpriteComponent image_file="data/projectiles_gfx/pipe_bomb.xml" rect_animation="" emissive="1" />
+        <ProjectileComponent damage="16" muzzle_flash_file="" velocity_sets_rotation="1" velocity_sets_scale="0">
+            <config_explosion damage="18" explosion_sprite="data/particles/explosion_064.xml"
+                camera_shake="12" sparks_count_min="18" sparks_count_max="30" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

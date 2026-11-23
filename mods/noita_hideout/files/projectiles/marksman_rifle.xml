@@ -1,0 +1,9 @@
+<Entity name="$nh_hideout_marksman_rifle">
+    <Base file="mods/noita_hideout/files/projectiles/bullet_base.xml">
+        <ProjectileComponent speed_min="900" speed_max="900" lifetime="64" damage="1.5"
+            muzzle_flash_file="data/entities/particles/muzzle_flashes/muzzle_flash_small.xml">
+            <config_explosion explosion_radius="3" />
+        </ProjectileComponent>
+    </Base>
+    <AudioComponent file="data/audio/Desktop/projectiles.bank" event_root="projectiles/bullet_smg_enemy" />
+</Entity>

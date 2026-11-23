@@ -1,0 +1,7 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/projectiles/support_rail.xml">
+        <ProjectileComponent damage="150" ground_penetration_coeff="20" ground_penetration_max_durability_to_destroy="14">
+            <config_explosion damage="30" camera_shake="18" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

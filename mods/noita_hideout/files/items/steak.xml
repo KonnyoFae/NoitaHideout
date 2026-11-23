@@ -1,0 +1,10 @@
+<Entity name="$nh_hideout_steak" tags="noita_hideout_steak,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/steak.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/steak.png" offset_x="7" offset_y="4" />
+        <ItemComponent uses_remaining="2" item_name="$nh_hideout_steak" ui_description="$nh_hideout_steak_desc"
+            ui_sprite="mods/noita_hideout/files/items/steak.png" />
+        <UIInfoComponent name="$nh_hideout_steak" />
+        <AbilityComponent ui_name="$nh_hideout_steak" />
+    </Base>
+</Entity>

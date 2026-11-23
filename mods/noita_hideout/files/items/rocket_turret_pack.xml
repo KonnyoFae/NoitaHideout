@@ -1,0 +1,11 @@
+<Entity name="$nh_hideout_rocket_turret_pack" tags="noita_hideout_rocket_turret_pack,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/rocket_turret_pack.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/rocket_turret_pack.png" offset_x="8" offset_y="8" />
+        <ItemComponent item_name="$nh_hideout_rocket_turret_pack" uses_remaining="1"
+            ui_description="$nh_hideout_rocket_turret_pack_desc" ui_sprite="mods/noita_hideout/files/items/rocket_turret_pack.png" />
+        <UIInfoComponent name="$nh_hideout_rocket_turret_pack" />
+        <AbilityComponent ui_name="$nh_hideout_rocket_turret_pack" />
+    </Base>
+    <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
+</Entity>

@@ -1,0 +1,8 @@
+<Entity tags="nh_tube_cutter">
+    <LifetimeComponent lifetime="56" />
+    <LaserEmitterComponent is_emitting="1">
+        <laser damage_to_entities="0.09" damage_to_cells="100000" max_cell_durability_to_destroy="14"
+            root_entity_is_responsible_for_damage="1" max_length="50" beam_radius="4"
+            hit_particle_chance="40" beam_particle_chance="90" beam_particle_type="spark_green" />
+    </LaserEmitterComponent>
+</Entity>

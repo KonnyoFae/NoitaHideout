@@ -1,0 +1,4 @@
+<Entity tags="nh_companion_wisp">
+    <SpriteComponent image_file="mods/noita_hideout/files/companions/wisp_sprite.xml"
+        emissive="1" z_index="0.41" />
+</Entity>

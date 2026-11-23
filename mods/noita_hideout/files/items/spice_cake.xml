@@ -2,7 +2,7 @@
     <Base file="mods/noita_hideout/files/items/base.xml">
         <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/spice_cake.png" />
         <SpriteComponent image_file="mods/noita_hideout/files/items/spice_cake.png" offset_x="7" offset_y="5" />
-        <ItemComponent item_name="$nh_hideout_spice_cake" ui_description="$nh_hideout_spice_cake_desc"
+        <ItemComponent uses_remaining="5" item_name="$nh_hideout_spice_cake" ui_description="$nh_hideout_spice_cake_desc"
             ui_sprite="mods/noita_hideout/files/items/spice_cake.png" />
         <UIInfoComponent name="$nh_hideout_spice_cake" />
         <AbilityComponent ui_name="$nh_hideout_spice_cake" />

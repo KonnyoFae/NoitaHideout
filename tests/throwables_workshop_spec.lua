@@ -13,8 +13,6 @@ local expected={
     {id="fire_grenade",seconds=10,cost=6,essence="essence_fire",spell="FIREBALL"},
     {id="frost_grenade",seconds=10,cost=6,essence="essence_frost",spell="ICEBALL"},
     {id="shock_grenade",seconds=10,cost=6,essence="essence_lightning",spell="LIGHTNING"},
-    {id="sand_knife",seconds=5,materials={sand=40}},
-    {id="metal_knife",seconds=8,materials={metal_sand=1,steel_sand=9,copper=20,brass=20,silver=14}},
 }
 local function load() return assert(NHStore.load()) end
 local s=load()
@@ -32,9 +30,11 @@ end
 for _,test in ipairs(expected) do
     local recipe=assert(byId[test.id])
     local kind=recipe.item.kind
-    assert(kind==(test.id=="grenade_essence" and "grenade" or test.id))
+    local expectedKind=({grenade="magic_tube",grenade_essence="magic_tube",fire_grenade="fire_tube",frost_grenade="frost_tube",shock_grenade="shock_tube"})[test.id]
+    assert(kind==expectedKind)
     assert(recipe.category=="weapons" and recipe.facility=="grenade")
-    assert(recipe.count==8 and recipe.item.count==8 and NHStore.category(kind)=="supplies")
+    local quantity=test.essence and 4 or 1
+    assert(recipe.count==quantity and recipe.item.remaining==6 and recipe.item.count==quantity and NHStore.category(kind)=="supplies")
     assert(NHStore.productionFrames(recipe)==test.seconds*60)
     s.levels.grenade=0
     assert(not NHStore.startOrder(s,test.id))
@@ -57,12 +57,23 @@ for _,test in ipairs(expected) do
     assert(not next(s.resources) and not next(s.materials))
     persist()
     local reserved=s.order.output.slot
-    assert(s.order.output.item.count==8 and not NHStore.freeSlot(s,"warehouse",reserved,kind))
+    assert(s.order.output.item.count==quantity and s.order.output.item.remaining==6 and not NHStore.freeSlot(s,"warehouse",reserved,kind))
     finish()
     persist()
     local row=s.warehouse[assert(NHStore.slotIndex(s,"warehouse",reserved,kind))]
-    assert(row.item.kind==kind and row.item.count==8)
+    assert(row.item.kind==kind and row.item.count==(test.id=="grenade_essence" and 5 or quantity) and row.item.remaining==6)
 end
+
+-- A partly fired tube and a new four-pack can share the same cell in either direction.
+local partial={kind="fire_tube",remaining=3,count=1}
+local slot,index=NHStore.stackSlot(s,"warehouse",partial)
+assert(slot and index)
+local tubes=s.warehouse[index].item
+NHStore.mergeStack(tubes,partial)
+assert(tubes.count==5 and tubes.remaining==3 and NHGuns.rounds(tubes)==27)
+assert(not NHStore.stackSlot(s,"warehouse",partial))
+assert(NHStore.stackSlot(s,"warehouse",byId.fire_grenade.item)==slot)
+persist()
 
 -- A previous paid recipe already owned a specific single grenade and duration.
 s.order={id=s.finished+1,recipe="grenade_essence",progress=479,required=7200,
@@ -86,10 +97,31 @@ for _,bad in ipairs({{kind="frost_grenade"}, {kind="metal_knife",count=9}, {kind
     s=load()
 end
 -- Adding batch recipes must not change the merchant's single-item supplies.
-assert(NHStore.creditGold(s,280))
+assert(NHStore.creditGold(s,130))
 for _,id in ipairs({"medkit","injector"}) do
     assert(NHStore.buyGood(s,{id=id}))
     assert((s.warehouse[#s.warehouse].item.count or 1)==1)
 end
 assert(s.bankGold==0)
 print("Throwable workshop: seven batch recipes, atomic costs, mixed metal powders, legacy deliveries and partial bundles passed.")
+for _,kind in ipairs({"derringer","flare_gun"}) do
+    local gun=NHGuns.types[kind]
+    local fresh=load()
+    fresh.warehouse={}
+    fresh.levels.grenade=1
+    fresh.materials={gunpowder=gun.powder*2}
+    fresh.resources={fiber=4}
+    fresh.bankGold=gun.gold-1
+    assert(not NHStore.startOrder(fresh,kind) and fresh.materials.gunpowder==gun.powder*2)
+    fresh.bankGold=gun.gold*2
+    for i=1,2 do
+        assert(NHStore.startOrder(fresh,kind))
+        assert(NHStore.advanceProduction(fresh,{run=fresh.runSerial,orderId=fresh.order.id,progress=fresh.order.required}))
+    end
+    local item=fresh.warehouse[1].item
+    assert(#fresh.warehouse==1 and item.kind==kind and item.remaining==gun.capacity and item.count==2)
+    assert(fresh.bankGold==0 and not fresh.materials.gunpowder and (fresh.resources.fiber or 0)==(kind=="derringer" and 4 or 0))
+    if kind=="derringer" then
+        assert(not NHStore.stackSlot(fresh,"warehouse",{kind=kind,remaining=3}))
+    end
+end

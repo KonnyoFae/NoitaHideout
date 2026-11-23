@@ -1,0 +1,5 @@
+<Entity name="moon" tags="nh_chain_effect">
+    <InheritTransformComponent />
+    <LuaComponent script_source_file="data/scripts/items/moon.lua" execute_every_n_frame="1" />
+    <LightComponent radius="96" r="255" g="255" b="255" fade_out_time="0.2" />
+</Entity>

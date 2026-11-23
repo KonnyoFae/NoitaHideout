@@ -1,0 +1,6 @@
+<Entity tags="nh_tarot_life">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="RESPAWN" frames="-1" />
+    <UIIconComponent name="$perk_respawn" description="$perkdesc_respawn"
+        icon_sprite_file="data/ui_gfx/perk_icons/respawn.png" is_perk="1" display_in_hud="1" />
+</Entity>

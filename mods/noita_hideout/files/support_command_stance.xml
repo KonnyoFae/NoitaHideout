@@ -1,0 +1,4 @@
+<Entity tags="nh_support_command_stance">
+    <!-- Kept for saves that still reference the old stance entity. -->
+    <GameEffectComponent effect="CUSTOM" custom_effect_id="nh_support_command_stance" frames="1" />
+</Entity>

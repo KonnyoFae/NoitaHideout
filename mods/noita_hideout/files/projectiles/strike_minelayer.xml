@@ -1,0 +1,10 @@
+<Entity>
+  <Base file="data/entities/projectiles/mine.xml">
+    <SpriteComponent image_file="data/projectiles_gfx/pipe_bomb.xml" offset_x="0" offset_y="0" rect_animation="" />
+    <SpriteComponent _enabled="0" />
+    <ProjectileComponent spawn_entity="mods/noita_hideout/files/projectiles/mine_dispenser_open.xml"
+        on_death_explode="0" on_lifetime_out_explode="0" velocity_sets_rotation="1" />
+  </Base>
+  <LuaComponent script_source_file="mods/noita_hideout/files/projectiles/mine_dispenser_open.lua"
+      execute_every_n_frame="1" execute_on_removed="0" />
+</Entity>

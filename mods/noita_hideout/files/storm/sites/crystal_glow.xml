@@ -1,0 +1,9 @@
+<Entity>
+    <ParticleEmitterComponent _tags="nh_ripe_glow" emitted_material_name="spark_blue"
+        create_real_particles="0" emit_real_particles="0" emit_cosmetic_particles="1"
+        render_back="0" is_emitting="1" fade_based_on_lifetime="1"
+        x_pos_offset_min="-5" x_pos_offset_max="5" y_pos_offset_min="-5" y_pos_offset_max="0"
+        x_vel_min="-7" x_vel_max="7" y_vel_min="-22" y_vel_max="-12"
+        lifetime_min="0.3" lifetime_max="0.6" count_min="1" count_max="2"
+        emission_interval_min_frames="10" emission_interval_max_frames="16" />
+</Entity>

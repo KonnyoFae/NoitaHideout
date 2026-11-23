@@ -1,0 +1,7 @@
+<Entity>
+    <!-- Spawn at the horizontal center of the floor's upper surface. -->
+    <PixelSceneComponent pixel_scene="mods/noita_hideout/files/terminals/shelter_materials.png"
+        pixel_scene_background="mods/noita_hideout/files/terminals/shelter_background.png"
+        offset_x="-36" offset_y="-36" skip_biome_checks="1" />
+    <LifetimeComponent lifetime="2" />
+</Entity>

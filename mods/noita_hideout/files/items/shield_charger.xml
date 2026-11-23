@@ -1,0 +1,10 @@
+<Entity name="$nh_hideout_shield_charger" tags="noita_hideout_shield_charger,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/shield_charger.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/shield_charger.png" offset_x="8" offset_y="8" />
+        <ItemComponent item_name="$nh_hideout_shield_charger" ui_description="$nh_hideout_shield_charger_desc" ui_sprite="mods/noita_hideout/files/items/shield_charger.png" uses_remaining="8" />
+        <UIInfoComponent name="$nh_hideout_shield_charger" />
+        <AbilityComponent ui_name="$nh_hideout_shield_charger" />
+    </Base>
+    <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
+</Entity>

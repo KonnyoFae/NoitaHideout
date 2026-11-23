@@ -9,11 +9,25 @@ local base=source(root.."projectiles/throwable.xml")
 assert(base:find('on_collision_die="1"') and base:find('on_collision_remove_projectile="0"'))
 assert(base:find('bounces_left="0"') and base:find('on_death_explode="0"'))
 assert(base:find('execute_on_removed="1"') and base:find('execute_every_n_frame="-1"',1,true))
+local bulletPath=root.."projectiles/bullet_base.xml"
+local bullet=source(bulletPath)
+assert(bullet:find('on_collision_die="1"') and bullet:find('on_death_gfx_leave_sprite="0"'))
+assert(bullet:find('on_death_explode="1"') and bullet:find('on_lifetime_out_explode="0"'))
+assert(bullet:find('explosion_radius="2"') and bullet:find('max_durability_to_destroy="9"') and bullet:find('hole_enabled="1"'))
+assert(bullet:find('damage_mortals="0"') and bullet:find('hole_destroy_liquid="0"') and bullet:find('create_cell_probability="0"'))
+assert(bullet:match('image_file="([^"]+)"')=="data/projectiles_gfx/bullet.xml")
+for id,damage in pairs({derringer="1.2",scatter_revolver="0.25",marksman_rifle="1.5",flare_gun="0.04"}) do
+    local xml=source(root.."projectiles/"..id..".xml")
+    assert(xml:find('<Base file="'..bulletPath..'">',1,true) and xml:find('damage="'..damage..'"',1,true))
+    assert(not xml:find("on_death_gfx_leave_sprite") and not xml:find("on_death_explode"))
+    if id=="marksman_rifle" then assert(xml:find('explosion_radius="3"')) end
+end
 local callback=assert(base:match('script_source_file="([^"]+)"'))
 local field={
     fire_grenade={30,"DAMAGE_FIRE","effect_on_fire.xml","PROTECTION_FIRE"},
     frost_grenade={28,"DAMAGE_ICE","effect_frozen_short.xml","STUN_PROTECTION_FREEZE"},
     shock_grenade={32,"DAMAGE_ELECTRICITY","effect_electricity.xml","PROTECTION_ELECTRICITY"},
+    flare_gun={22,"DAMAGE_FIRE","sand_blindness.xml","PROTECTION_ALL"},
     sand_knife={18,"DAMAGE_PROJECTILE","sand_blindness.xml","PROTECTION_ALL"},
     metal_knife={22,"DAMAGE_SLICE",nil,"PROTECTION_ALL"},
 }
@@ -52,16 +66,24 @@ function EntityInflictDamage(id,amount,damage_type,_,_,_,_,who,x,y)
     actors[id].hp=actors[id].hp-amount
 end
 function LoadGameEffectEntityTo(id,path)
+    if kind=="flare_gun" and path:match("effect_on_fire.xml$") then
+        assert(status[id]==true)
+        status[id]="blind_and_burning"
+        return
+    end
     assert(hit[id] and not status[id] and path:match("[^/]+$")==field[kind][3])
     status[id]=true
 end
 
 for id,expected in pairs(field) do
     kind=id
-    local xml=source(items.types[id].projectile)
-    assert(xml:find('file="'..root..'projectiles/throwable.xml"',1,true))
+    local xml=source(id=="flare_gun" and root.."projectiles/flare_gun.xml" or items.types[id].projectile)
+    if id=="flare_gun" then
+        assert(xml:find('script_source_file="'..callback..'"',1,true) and xml:find('execute_on_removed="1"'))
+        assert(xml:find('emitted_material_name="spark_red"') and xml:find('create_real_particles="0"'))
+    else assert(xml:find('file="'..root..'projectiles/throwable.xml"',1,true)) end
     assert(xml:find('value_string="'..id..'"',1,true) and xml:find('value_bool="0"'))
-    assert(source(xml:match('image_file="([^"]+)"')):sub(2,4)=="PNG")
+    if id~="flare_gun" then assert(source(xml:match('image_file="([^"]+)"')):sub(2,4)=="PNG") end
     marker={value_string=id,value_bool=false}
     hit,status,particles,sounds={},{},0,0
     actors={
@@ -82,7 +104,8 @@ for id,expected in pairs(field) do
     assert(not status[8] and not status[10])
     if expected[3] then
         assert(status[2] and status[3])
-        assert((status[11]==true)==(id=="sand_knife"))
+        assert((status[11]==true)==(id=="sand_knife" or id=="flare_gun"))
+        if id=="flare_gun" then assert(status[2]=="blind_and_burning") end
     else assert(not next(status)) end
     assert(marker.value_bool and particles>0 and sounds==1)
     local drawn=particles

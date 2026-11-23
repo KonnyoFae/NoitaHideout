@@ -1,0 +1,4 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/projectiles/ammo_pulse.xml" />
+    <ElectricityComponent energy="50" speed="16" probability_to_heat="0.1" />
+</Entity>

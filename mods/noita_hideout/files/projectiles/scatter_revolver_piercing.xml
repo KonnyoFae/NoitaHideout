@@ -1,0 +1,5 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/projectiles/scatter_revolver.xml">
+        <ProjectileComponent penetrate_entities="1" />
+    </Base>
+</Entity>

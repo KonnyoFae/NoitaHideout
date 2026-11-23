@@ -1,0 +1,44 @@
+<Entity>
+    <LifetimeComponent lifetime="14" />
+    <LightComponent radius="26" r="120" g="200" b="255" />
+    <LaserEmitterComponent is_emitting="1" laser_angle_add_rad="0.000000">
+        <laser max_length="18" beam_radius="1.5" damage_to_entities="0.07" damage_to_cells="100000"
+            max_cell_durability_to_destroy="14" hit_particle_chance="25" beam_particle_chance="90"
+            beam_particle_type="plasma_fading" audio_enabled="0" />
+    </LaserEmitterComponent>
+    <LaserEmitterComponent is_emitting="1" laser_angle_add_rad="0.785398">
+        <laser max_length="18" beam_radius="1.5" damage_to_entities="0.07" damage_to_cells="100000"
+            max_cell_durability_to_destroy="14" hit_particle_chance="25" beam_particle_chance="90"
+            beam_particle_type="plasma_fading" audio_enabled="0" />
+    </LaserEmitterComponent>
+    <LaserEmitterComponent is_emitting="1" laser_angle_add_rad="1.570796">
+        <laser max_length="18" beam_radius="1.5" damage_to_entities="0.07" damage_to_cells="100000"
+            max_cell_durability_to_destroy="14" hit_particle_chance="25" beam_particle_chance="90"
+            beam_particle_type="plasma_fading" audio_enabled="0" />
+    </LaserEmitterComponent>
+    <LaserEmitterComponent is_emitting="1" laser_angle_add_rad="2.356194">
+        <laser max_length="18" beam_radius="1.5" damage_to_entities="0.07" damage_to_cells="100000"
+            max_cell_durability_to_destroy="14" hit_particle_chance="25" beam_particle_chance="90"
+            beam_particle_type="plasma_fading" audio_enabled="0" />
+    </LaserEmitterComponent>
+    <LaserEmitterComponent is_emitting="1" laser_angle_add_rad="3.141593">
+        <laser max_length="18" beam_radius="1.5" damage_to_entities="0.07" damage_to_cells="100000"
+            max_cell_durability_to_destroy="14" hit_particle_chance="25" beam_particle_chance="90"
+            beam_particle_type="plasma_fading" audio_enabled="0" />
+    </LaserEmitterComponent>
+    <LaserEmitterComponent is_emitting="1" laser_angle_add_rad="3.926991">
+        <laser max_length="18" beam_radius="1.5" damage_to_entities="0.07" damage_to_cells="100000"
+            max_cell_durability_to_destroy="14" hit_particle_chance="25" beam_particle_chance="90"
+            beam_particle_type="plasma_fading" audio_enabled="0" />
+    </LaserEmitterComponent>
+    <LaserEmitterComponent is_emitting="1" laser_angle_add_rad="4.712389">
+        <laser max_length="18" beam_radius="1.5" damage_to_entities="0.07" damage_to_cells="100000"
+            max_cell_durability_to_destroy="14" hit_particle_chance="25" beam_particle_chance="90"
+            beam_particle_type="plasma_fading" audio_enabled="0" />
+    </LaserEmitterComponent>
+    <LaserEmitterComponent is_emitting="1" laser_angle_add_rad="5.497787">
+        <laser max_length="18" beam_radius="1.5" damage_to_entities="0.07" damage_to_cells="100000"
+            max_cell_durability_to_destroy="14" hit_particle_chance="25" beam_particle_chance="90"
+            beam_particle_type="plasma_fading" audio_enabled="0" />
+    </LaserEmitterComponent>
+</Entity>

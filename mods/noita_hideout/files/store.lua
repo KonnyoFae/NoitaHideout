@@ -1,10 +1,22 @@
 -- Two revisioned snapshots in Noita's normal mod settings. A complete
 -- readback checks the settings API; it does not force the engine to flush.
 NHStore = {}
+NHStormProducts=dofile("mods/noita_hideout/files/storm_products.lua")
+NHStore.supplyTrade=dofile("mods/noita_hideout/files/supply_trade.lua")
+NHStore.alchemyResources=dofile("mods/noita_hideout/files/alchemy_resources.lua")
+NHFirearms=dofile("mods/noita_hideout/files/firearms.lua")
+NHShields=dofile("mods/noita_hideout/files/shields.lua")
+NHTurrets=dofile("mods/noita_hideout/files/turrets.lua")
+NHGuns=dofile("mods/noita_hideout/files/guns.lua")
+NHLootBags=dofile("mods/noita_hideout/files/loot_bags.lua")
+NHFoods=dofile("mods/noita_hideout/files/cooking.lua")
 NHEquipment=dofile("mods/noita_hideout/files/equipment.lua")
 dofile("mods/noita_hideout/files/companions.lua")
 dofile("mods/noita_hideout/files/affinity.lua")
 dofile("mods/noita_hideout/files/card_wallets.lua")
+dofile("mods/noita_hideout/files/relics.lua")
+NHTablets=dofile("mods/noita_hideout/files/tablets.lua")
+NHNativeValuables=dofile("mods/noita_hideout/files/native_valuables.lua")
 NHInjectors=dofile("mods/noita_hideout/files/injectors.lua")
 NHMedkits=dofile("mods/noita_hideout/files/medkits.lua")
 NHSurgeryKits=dofile("mods/noita_hideout/files/surgery_kits.lua")
@@ -22,7 +34,7 @@ local profile_counter = "noita_hideout.profile_count"
 local profile_flag = "noita_hideout_profile_"
 local cached_profile
 
-NHStore.doseDurability = 3
+NHStore.doseDurability = NHInjectors.uses
 NHStore.checkpointFrames = 60 * 60
 NHStore.maxGold = max_safe_integer
 NHStore.maxMaterialAmount = max_safe_integer
@@ -36,7 +48,7 @@ end
 
 local function fresh(profile)
     local s={
-        version = 1, profile = profile, revision = 0,
+        pheromoneMagazines=true,supportAmmoExpanded=true,railgunAmmoExpanded=true,ammoPoints=true,multimodeMagazines=true,durableChargers=true, fiveDoseUses=true, medicalStacks=true, foodPortions=true, version = 1, profile = profile, revision = 0,
         runSerial = 0, closedThrough = 0, checkpoints = {},
         nextItemId = 1, materials = {}, docks = {}, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true, collectionSlots=true,
         pouches = {},
@@ -99,14 +111,61 @@ end
 
 -- Each item kind resolves to one warehouse grid for both live items and saved rows.
 NHStore.itemCategories={wand="wand",spell="spell",potion="containers",pouch="equipment",summon_card="collection"}
+NHStore.itemCategories.relic_chain="equipment"
+NHStore.itemCategories.relic="equipment"
+NHStore.itemCategories.tablet="equipment"
+NHStore.itemCategories.native_valuable="equipment"
 NHStore.itemCategories.card_wallet="equipment"
-NHStore.itemCategories.remote_terminal="equipment"
+for kind in pairs(NHEquipment.links) do NHStore.itemCategories[kind]="equipment" end
+for _,kind in ipairs(NHShields.order) do NHStore.itemCategories[kind]="equipment" end
+for _,kind in ipairs(NHShields.chargerOrder) do NHStore.itemCategories[kind]="equipment" end
+for _,kind in ipairs(NHFirearms.order) do
+    NHStore.itemCategories[kind]=NHFirearms.items[kind].magazine and "wand" or "equipment"
+end
 function NHStore.category(kind)
     return NHStore.itemCategories[kind] or "supplies"
 end
 
 local function warehouse_grids()
     return {wand={},spell={},containers={},supplies={},equipment={},collection={}}
+end
+
+function NHStore.organizeWarehouse(s,request)
+    local category=request.category
+    if not warehouse_grids()[category] then return false,"Invalid warehouse category." end
+    local output=s.order and s.order.output
+    local reserved=output and output.item and NHStore.category(output.item.kind)==category and output.slot
+    local entries={}
+    local function collect(row,kind,variant,tier,slot)
+        if slot~=reserved then
+            entries[#entries+1]={row=row,kind=kind,variant=variant or "",tier=tier or 1,slot=slot}
+        end
+    end
+    for i,row in ipairs(s.warehouse) do
+        local item=row.item
+        if NHStore.category(item.kind)==category then
+            local variant=item.card and item.card.id or item.variant or item.subtype or item.species or item.relic or item.name
+            collect(row,item.kind,variant,item.tier,row.slot or i)
+        end
+    end
+    if category=="equipment" then
+        for _,pouch in pairs(s.pouches) do
+            if pouch.location=="warehouse" then collect(pouch,"pouch",nil,pouch.tier,pouch.slot) end
+        end
+    end
+    table.sort(entries,function(a,b)
+        if a.kind~=b.kind then return a.kind<b.kind end
+        if a.variant~=b.variant then return a.variant<b.variant end
+        if a.tier~=b.tier then return a.tier<b.tier end
+        return a.slot<b.slot
+    end)
+    local slot=1
+    for _,entry in ipairs(entries) do
+        if slot==reserved then slot=slot+1 end
+        entry.row.slot=slot
+        slot=slot+1
+    end
+    return true
 end
 
 function NHStore.slotIndex(s,container,slot,kind)
@@ -184,12 +243,17 @@ local function validate(s)
     end
     assert(s.profile >= 1 and s.closedThrough <= s.runSerial
         and s.nextItemId >= 1, "Invalid profile counters")
+    assert(whole(s.pendingChargerUses or 0),"Invalid legacy charger balance")
     assert(whole(s.bankGold),"Invalid piggy bank balance")
     assert(type(s.bankWalletNet)=="number" and whole(math.abs(s.bankWalletNet)),"Invalid wallet transfer total")
     assert(type(s.checkpoints)=="table","Invalid Holy Mountain checkpoints")
     NHCompanions.validate(s,whole)
     NHDragonLoot.validate(s,whole)
     NHGelPool.validate(s,whole)
+    assert(s.insuranceActive==nil or type(s.insuranceActive)=="boolean","Invalid insurance state")
+    assert(s.insuranceSerial==nil or (whole(s.insuranceSerial) and s.insuranceSerial>0 and s.insuranceSerial<=2147483647),"Invalid insurance policy")
+    assert(not s.insuranceActive or s.insuranceSerial,"Missing insurance policy")
+    assert(s.companionIncomeSeed==nil or (whole(s.companionIncomeSeed) and s.companionIncomeSeed>0 and s.companionIncomeSeed<2147483647),"Invalid companion income sequence")
     NHAffinity.validate(s,whole)
     for key,visited in pairs(s.checkpoints) do
         assert(type(key)=="string" and key~="" and visited==true,"Invalid Holy Mountain checkpoint")
@@ -199,16 +263,39 @@ local function validate(s)
     progression.validate(s,whole)
     NHFarm.validate(s,whole)
     local function validateConsumable(item)
-        if NHMedkits.types[item.kind] then
-            assert(NHMedkits.validUses(item.kind,NHMedkits.remaining(item)) and (item.count==nil or item.count==1),"Invalid medkit.")
-        elseif NHSurgeryKits.types[item.kind] then
-            assert(item.remaining==NHSurgeryKits.types[item.kind].uses and (item.count==nil or item.count==1),"Invalid surgery kit.")
-        elseif item.kind=="bandage" and item.count~=nil then
-            assert(NHStore.validBandageCount(item.count),"Invalid bandage count.")
+        if NHFirearms.items[item.kind] then
+            assert(NHFirearms.valid(item),"Invalid firearm equipment")
+        elseif NHShields.types[item.kind] or NHShields.chargers[item.kind] then
+            assert(NHShields.valid(item),"Invalid shield equipment")
+        elseif NHFoods.byId[item.kind] then
+            assert(NHFoods.bites(item),"Invalid food stack.")
+        elseif NHMedkits.capacity(item.kind) then
+            assert(NHMedkits.charges(item),"Invalid medkit.")
+        elseif NHGuns.types[item.kind] then
+            assert(NHGuns.rounds(item),"Invalid ammunition count.")
+        elseif NHTurrets.types[item.kind] then
+            assert(NHTurrets.validCount(item.count or 1),"Invalid deployment stack.")
+        elseif NHStormProducts.types[item.kind] then
+            assert(NHStormProducts.count(item.count),"Invalid storm product stack.")
+        elseif NHLootBags.types[item.kind] then
+            assert(NHStore.validBandageCount(item.count or 1),"Invalid loot stack.")
         elseif NHThrowables.types[item.kind] then
             assert(NHThrowables.validCount(NHThrowables.count(item)),"Invalid throwable count.")
-        elseif item.kind=="remote_terminal" then
-            assert(NHEquipment.validRemoteUses(item.remaining) and (item.count==nil or item.count==1),"Invalid remote terminal.")
+        elseif item.kind=="relic" or item.kind=="relic_chain" then
+            assert(NHRelics.valid(item),"Invalid relic or chain.")
+        elseif item.kind=="tablet" then
+            assert(NHTablets.valid(item),"Invalid tablet.")
+        elseif item.kind=="native_valuable" then
+            assert(NHNativeValuables.valid(item),"Invalid native valuable.")
+        elseif NHEquipment.links[item.kind] then
+            assert(NHShields.valid(item),"Invalid data link.")
+        end
+    end
+    for _,field in ipairs(NHShields.fields) do
+        local row=s[field]
+        if row then
+            assert(whole(row.id) and row.id>0 and row.id<s.nextItemId and NHShields.field(row.item.kind)==field and NHShields.valid(row.item)
+                and (not NHShields.supply(row.item.kind) or row.item.count==1),"Invalid equipped item")
         end
     end
     for _,rows in ipairs({s.safe,s.warehouse}) do
@@ -279,13 +366,17 @@ local function validate(s)
                 assert(validDose(output.item.remaining or NHStore.doseDurability,output.item.count or 1,output.item.subtype),"Invalid injector output")
             end
             local category=NHStore.category(output.item.kind)
-            assert(type(output.item.kind)=="string" and not output.materials and whole(output.slot) and output.slot>=1
-                and output.slot<=NHStore.warehouseCapacity(s,category) and not warehouseSlots[category][output.slot],
+            assert(type(output.item.kind)=="string" and not output.materials and not output.resources and whole(output.slot) and output.slot>=1
+                and output.slot<=NHStore.warehouseCapacity(s,category) and (not warehouseSlots[category][output.slot] or NHStore.stackSlot(s,"warehouse",output.item,output.slot)),
                 "Invalid reserved production slot")
         else
-            assert(type(output.materials)=="table" and next(output.materials),"Missing order yield")
-            for name,amount in pairs(output.materials) do
+            assert((output.materials and next(output.materials)) or (output.resources and next(output.resources)),"Missing order yield")
+            for name,amount in pairs(output.materials or {}) do
                 assert(type(name)=="string" and whole(amount) and amount>0,"Invalid order yield")
+            end
+            for name,amount in pairs(output.resources or {}) do
+                assert(NHStore.alchemyResources[name] and whole(amount) and amount>0
+                    and amount<=max_safe_integer-(s.resources[name] or 0),"Invalid resource yield")
             end
         end
         if s.order.catalysts then
@@ -384,6 +475,36 @@ local function checksum(data)
     return tostring(b * 65536 + a)
 end
 
+local function migrateChargers(s)
+    -- Legacy chargers stored one use per unit. Preserve that total even if
+    -- the new one-stick slot or four-stick stack cannot hold it all.
+    local function repackCharger(item,limit)
+        if not item or item.kind~=NHShields.charger or item.remaining~=nil then return 0 end
+        local uses=item.count or 1
+        assert(NHStore.validBandageCount(uses),"Invalid legacy charger count")
+        assert(NHMedkits.unpack(item,math.min(uses,limit)))
+        return math.max(0,uses-limit)
+    end
+    local pending=s.pendingChargerUses or 0
+    if s.gearCharger then pending=pending+repackCharger(s.gearCharger.item,8) end
+    for _,rows in ipairs({s.safe,s.warehouse}) do
+        for _,row in ipairs(rows) do pending=pending+repackCharger(row.item,32) end
+    end
+    for _,release in pairs(s.transit and s.transit.issued or {}) do
+        local excess=repackCharger(release.row.item,release.container=="gear" and 8 or 32)
+        if excess>0 then release.chargerOverflow=excess end
+    end
+    local output=s.order and s.order.output
+    if output and output.item and output.item.kind==NHShields.charger and output.item.remaining==nil then
+        pending=pending+repackCharger(output.item,32)
+        local index=NHStore.slotIndex(s,"warehouse",output.slot,NHShields.charger)
+        if index and not NHStore.stackSlot(s,"warehouse",output.item,output.slot) then
+            pending=pending+NHMedkits.charges(table.remove(s.warehouse,index).item)
+        end
+    end
+    if pending>0 then s.pendingChargerUses=pending end
+end
+
 local function unpack_slot(raw)
     assert(type(raw) == "string" and #raw <= max_bytes + 32, "Invalid snapshot")
     local first, last, expected = raw:find("^NH1:(%d+):")
@@ -427,6 +548,20 @@ local function unpack_slot(raw)
         end
     end
     progression.adopt(s)
+    -- Migrate both balances and already-paid Rubedo orders on first read.
+    for _,key in ipairs({"nh_philosopher_stone","nh_elixir_of_immortality"}) do
+        if s.materials[key] then
+            s.resources[key]=(s.resources[key] or 0)+s.materials[key]
+            s.materials[key]=nil
+        end
+        local output=s.order and s.order.output
+        if output and output.materials and output.materials[key] then
+            output.resources=output.resources or {}
+            output.resources[key]=(output.resources[key] or 0)+output.materials[key]
+            output.materials[key]=nil
+            if not next(output.materials) then output.materials=nil end
+        end
+    end
     if not s.collectionSlots then
         -- Previous cards occupied equipment slots. Preserve every card's ID and
         -- actual charges, including profiles with an expanded equipment grid.
@@ -438,6 +573,93 @@ local function unpack_slot(raw)
         s.collectionSlots=true
     end
     if s.farm==nil then s.farm={time=0,plots={}} end
+    if not s.foodPortions then
+        -- Old world items already encode total bites. Repack stored items
+        -- from the same two-bite format without changing their usable total.
+        local function repack(item)
+            if NHFoods.byId[item.kind] then
+                local total=((item.count or 1)-1)*2+(item.remaining or 2)
+                assert(NHStore.validBandageCount(total),"Invalid legacy food stack.")
+                NHFoods.setBites(item,total)
+            end
+        end
+        for _,rows in ipairs({s.warehouse,s.safe}) do
+            for _,row in ipairs(rows) do repack(row.item) end
+        end
+        for _,release in pairs(s.transit and s.transit.issued or {}) do repack(release.row.item) end
+        s.foodPortions=true
+    end
+    if not s.fiveDoseUses then
+        local function update(record)
+            if record.remaining==3 or record.remaining==nil then record.remaining=NHStore.doseDurability end
+        end
+        for _,rows in ipairs({s.safe,s.warehouse}) do
+            for _,row in ipairs(rows) do if row.item.kind=="dose" then update(row.item) end end
+        end
+        for _,pouch in pairs(s.pouches) do for _,cell in pairs(pouch.cells or {}) do update(cell) end end
+        for _,dose in pairs(s.issuedDoses or {}) do update(dose) end
+        if s.order and s.order.output.item and s.order.output.item.kind=="dose" then update(s.order.output.item) end
+        s.fiveDoseUses=true
+    end
+    if not s.medicalStacks then
+        local function repack(item)
+            if item and not NHShields.chargers[item.kind] and NHMedkits.capacity(item.kind) then
+                local old=item.kind=="bandage" and (item.count or 1) or (item.remaining or 3)
+                assert(NHMedkits.unpack(item,old),"Invalid legacy medical stack.")
+            end
+        end
+        for _,rows in ipairs({s.safe,s.warehouse}) do for _,row in ipairs(rows) do repack(row.item) end end
+        for _,release in pairs(s.transit and s.transit.issued or {}) do repack(release.row.item) end
+        if s.order then repack(s.order.output.item) end
+        s.medicalStacks=true
+    end
+    if not s.multimodeMagazines then
+        NHFirearms.migrateMagazines(s)
+        s.multimodeMagazines=true
+    end
+    if not s.ammoPoints then
+        NHFirearms.migratePoints(s)
+        s.ammoPoints=true
+    end
+    if not s.supportAmmoExpanded or not s.railgunAmmoExpanded then
+        -- Physical items already store total rounds. Preserve that same total in saved stacks.
+        local formerCapacity={}
+        if not s.supportAmmoExpanded then formerCapacity={heavy_mg=80,auto_grenade=12,missile_launcher=4} end
+        if not s.railgunAmmoExpanded then formerCapacity.railgun=5 end
+        local function repack(item)
+            local old=item and formerCapacity[item.kind]
+            if old then
+                local total=((item.count or 1)-1)*old+item.remaining
+                assert(NHStore.validBandageCount(total),"Invalid legacy ammunition count.")
+                NHGuns.unpack(item,total)
+            end
+        end
+        for _,rows in ipairs({s.safe,s.warehouse}) do
+            for _,row in ipairs(rows) do repack(row.item) end
+        end
+        for _,release in pairs(s.transit and s.transit.issued or {}) do repack(release.row.item) end
+        if s.order then repack(s.order.output.item) end
+        s.supportAmmoExpanded=true
+        s.railgunAmmoExpanded=true
+    end
+    if not s.durableChargers then
+        migrateChargers(s)
+        s.durableChargers=true
+    end
+    if not s.pheromoneMagazines then
+        local function refill(item)
+            if item and item.kind=="flare_gun" then
+                assert(item.remaining==1,"Invalid legacy flare gun.")
+                NHGuns.unpack(item,assert(NHGuns.convertFlares(item.count or 1)))
+            end
+        end
+        for _,rows in ipairs({s.safe,s.warehouse}) do
+            for _,row in ipairs(rows) do refill(row.item) end
+        end
+        for _,release in pairs(s.transit and s.transit.issued or {}) do refill(release.row.item) end
+        if s.order then refill(s.order.output.item) end
+        s.pheromoneMagazines=true
+    end
     NHFarm.adopt(s.farm)
     if not s.sharedSlots then
         s.safeCapacity = NHStore.safeCapacity(s)+1
@@ -498,6 +720,22 @@ function NHStore.commit(state)
         local next_state = {}
         for k, v in pairs(state) do next_state[k] = v end
         next_state.revision = saved.revision + 1
+        if (next_state.pendingChargerUses or 0)>0 then
+            local rows={}
+            for i,row in ipairs(next_state.warehouse) do rows[i]=row end
+            next_state.warehouse=rows
+            local kind=NHShields.charger
+            while next_state.pendingChargerUses>0 and next_state.nextItemId<max_safe_integer do
+                local slot=NHStore.freeSlot(next_state,"warehouse",nil,kind)
+                if not slot then break end
+                local n=math.min(32,next_state.pendingChargerUses)
+                local item={kind=kind,name="$nh_hideout_"..kind,icon=NHShields.chargers[kind].icon}
+                NHMedkits.unpack(item,n)
+                rows[#rows+1]={id=next_state.nextItemId,slot=slot,item=item}
+                next_state.nextItemId=next_state.nextItemId+1
+                next_state.pendingChargerUses=next_state.pendingChargerUses-n
+            end
+        end
         NHCompanions.stageDelivery(next_state)
         NHDragonLoot.stageDelivery(next_state)
         NHGelPool.stageDelivery(next_state)
@@ -514,6 +752,7 @@ function NHStore.commit(state)
         return next_state
     end)
     if not ok then return nil, tostring(result) end
+    state.pendingChargerUses=result.pendingChargerUses
     state.revision,state.nextItemId=result.revision,result.nextItemId
     state.warehouse,state.summons,state.dragonLoot=result.warehouse,result.summons,result.dragonLoot
     state.gelBonus,state.resources=result.gelBonus,result.resources
@@ -596,10 +835,9 @@ end
 local function farmItem(kind)
     return {kind=kind,name="$nh_hideout_"..kind,icon="mods/noita_hideout/files/items/"..kind..".png"}
 end
-local medkit=NHMedkits.item("medkit")
+local medkit=NHMedkits.item("medkit",4)
 local medkit_frames=5 * 60
-local bandage_bundle=farmItem("bandage")
-bandage_bundle.count=8
+local bandage_bundle=NHMedkits.item("bandage",4)
 
 -- Inputs and the paid order are committed together. Only loose stock is spendable.
 NHStore.recipes={
@@ -651,52 +889,95 @@ NHStore.recipes={
         materials={void_liquid=100},count=100,durationFrames=120*60,
         noteZh="每三份原料回收两份液体。",noteEn="Three parts of ingredients yield two parts of liquid."},
     {id="medical",category="medical",facility="medical",zh=NHMedkits.types.medkit.zh,en=NHMedkits.types.medkit.en,durationFrames=medkit_frames,
-        inputs={{name="water",amount=100},{name="blood",amount=50}},item=medkit,
-        noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
+        inputs={{name="water",amount=100},{name="blood",amount=50}},item=medkit,count=4,
+        noteZh=NHMedkits.types.medkit.noteZh,noteEn=NHMedkits.types.medkit.noteEn},
     {id="bandage",category="medical",facility="medical",zh="绷带",en="Bandage",durationFrames=3 * 60,
         inputs={},resources={fiber=4,sugar=2},item=bandage_bundle,count=bandage_bundle.count,
-        noteZh="每用一卷最多恢复 5 生命。",noteEn="Each roll restores up to 5 HP."},
+        noteZh=NHMedkits.types.bandage.noteZh,noteEn=NHMedkits.types.bandage.noteEn},
     {id="field_medkit",category="medical",facility="medical",zh="小医疗包（绷带与草药）",en="Medkit (bandage and herbs)",durationFrames=medkit_frames,
-        inputs={},resources={herb=2},storedIngredient="bandage",item=medkit,
-        noteZh="每包可使用 3 次，每次最多恢复 10 生命。",noteEn="Three uses per kit. Each restores up to 10 HP."},
+        inputs={},resources={herb=2},storedIngredient="bandage",item=medkit,count=4,
+        noteZh=NHMedkits.types.medkit.noteZh,noteEn=NHMedkits.types.medkit.noteEn},
     NHMedkits.upgradeRecipe("tactical_medkit","medkit",4,2,60),
     NHMedkits.upgradeRecipe("advanced_medkit","tactical_medkit",8,3,180),
     NHSurgeryKits.recipe("field_surgery_kit"),
     NHSurgeryKits.recipe("tactical_surgery_kit"),
     NHSurgeryKits.recipe("advanced_surgery_kit"),
-    NHThrowables.recipe("grenade",{{name="sand",amount=64},{name="slime",amount=32}}),
-    NHThrowables.recipe("grenade",nil,{essence_high_energy=4},"grenade_essence","魔法手雷（高能精华）","Magic grenade (high-energy essence)"),
-    NHThrowables.recipe("fire_grenade",nil,{essence_fire=6}),
-    NHThrowables.recipe("frost_grenade",nil,{essence_frost=6}),
-    NHThrowables.recipe("shock_grenade",nil,{essence_lightning=6}),
-    NHThrowables.recipe("sand_knife",{{name="sand",amount=40}}),
-    NHThrowables.recipe("metal_knife",{{name="metal_sand",amount=64,
-        alternatives={"metal_sand","steel_sand","copper","brass","silver"},labelZh="金属粉",labelEn="Metal powders"}}),
+    NHGuns.recipe("magic_tube","grenade",{{name="sand",amount=64},{name="slime",amount=32}}),
+    NHGuns.recipe("magic_tube","grenade_essence",{},{essence_high_energy=4},4,"封堵发射器（高能精华）","Cement launcher (high-energy essence)"),
+    NHGuns.recipe("fire_tube","fire_grenade",{},{essence_fire=6},4),
+    NHGuns.recipe("frost_tube","frost_grenade",{},{essence_frost=6},4),
+    NHGuns.recipe("shock_tube","shock_grenade",{},{essence_lightning=6},4),
+    NHGuns.recipe("flare_gun"),
+    NHGuns.recipe("derringer"),
 }
+for _,kind in ipairs(NHTurrets.order) do NHStore.recipes[#NHStore.recipes+1]=NHTurrets.recipe(kind) end
 for _,id in ipairs(NHInjectors.order) do
     NHStore.recipes[#NHStore.recipes+1]=NHInjectors.recipe(id)
 end
 for _,kind in ipairs({"pouch","card_wallet"}) do
     for _,d in ipairs(NHEquipment[kind]) do
         local isPouch=kind=="pouch"
-        NHStore.recipes[#NHStore.recipes+1]={id=d.filename,category="equipment",facility=isPouch and "injector" or "farmland",
+        NHStore.recipes[#NHStore.recipes+1]={id=d.filename,category="containers",facility=isPouch and "injector" or "farmland",
             zh="空"..d.zh,en="Empty "..d.en:gsub("^%u",string.lower),durationFrames=d.workSeconds*60,
             inputs=isPouch and {{name=d.ingredient,amount=d.amount}} or {},
-            resources=not isPouch and {[d.ingredient]=d.amount} or nil,emptyContainers=d.emptyContainers,
+            resources=isPouch and {container_scrap=d.containerScrap} or {[d.ingredient]=d.amount,container_scrap=d.containerScrap},
             item=isPouch and {kind=kind,tier=d.tier,icon=d.icon,name=d.name} or NHCardWallets.empty(d.tier),
             noteZh=d.capacity.." 格，制作完成后空容器存入装备库。",
             noteEn=d.capacity.." slots. Delivered empty to equipment storage."}
     end
 end
-local terminal=NHEquipment.remoteTerminal
-NHStore.recipes[#NHStore.recipes+1]={id="remote_terminal",category="equipment",zh=terminal.zh,en=terminal.en,
-    inputs={},resources={essence_displacement=10},goldCost=100,durationFrames=30*60,
-    item=NHEquipment.remoteItem(),noteZh=terminal.noteZh,noteEn=terminal.noteEn}
-for _,food in ipairs(dofile("mods/noita_hideout/files/cooking.lua")) do
+NHStore.recipes[#NHStore.recipes+1]={id="relic_chain",category="equipment",zh="遗物链",en="Relic chain",
+    inputs={},resources={fiber=2},goldCost=25,durationFrames=10*60,item=NHRelics.empty(),
+    noteZh="放入安全箱后打开，装入遗物即可持续获得手持效果。",noteEn="Open inside the secure case. Socket relics to activate their held effects."}
+for _,d in ipairs(NHFirearms.mods.order) do
+    local zh,en=NHFirearms.mods.description(d)
+    table.insert(NHStore.recipes,{id="ammo_mod_"..d.id,category="weapons",zh=d.zh,en=d.en,inputs={},
+        resources={arcane_scrap=2},goldCost=10,durationFrames=240,item=NHFirearms.mods.card(d),noteZh=zh,noteEn=en})
+end
+for _,kind in ipairs(NHFirearms.order) do NHStore.recipes[#NHStore.recipes+1]=NHFirearms.recipe(kind) end
+for _,kind in ipairs(NHShields.order) do NHStore.recipes[#NHStore.recipes+1]=NHShields.recipe(NHShields.types[kind]) end
+for _,kind in ipairs(NHShields.chargerOrder) do NHStore.recipes[#NHStore.recipes+1]=NHShields.recipe(NHShields.chargers[kind]) end
+local linkRecipes={
+    {resources={arcane_scrap=1},goldCost=100},
+    {resources={arcane_scrap=5,container_scrap=3},goldCost=500},
+    {resources={arcane_scrap=5,container_scrap=2,nh_philosopher_stone=1}},
+}
+for tier,kind in ipairs(NHEquipment.linkOrder) do
+    local link=NHEquipment.links[kind]
+    local cost=linkRecipes[tier]
+    NHStore.recipes[#NHStore.recipes+1]={id=kind,category="equipment",zh=link.zh,en=link.en,
+        inputs=cost.inputs or {},resources=cost.resources,goldCost=cost.goldCost,durationFrames=30*60,
+        item=NHEquipment.remoteItem(kind),noteZh=link.noteZh,noteEn=link.noteEn}
+end
+for _,food in ipairs(NHFoods) do
     NHStore.recipes[#NHStore.recipes+1]={id=food.id,category="food",facility=food.facility,zh=food.zh,en=food.en,
         durationFrames=food.workSeconds*60,inputs={},resources=food.resources,item=farmItem(food.id),noteZh=food.noteZh,noteEn=food.noteEn}
 end
+for _,recipe in ipairs({
+    {id="philosopher_stone",category="alchemy",alchemyMode="rubedo",zh="贤者之石",en="Philosopher's stone",
+        inputs={{name="midas",amount=1}},resources={arcane_scrap=1,container_scrap=1},goldCost=5000,
+        resourceYield={nh_philosopher_stone=10},count=10,durationFrames=60},
+    {id="rubedo_midas",category="alchemy",alchemyMode="rubedo",zh="红化：点金水",en="Rubedo: Draught of Midas",
+        inputs={{name="water",amount=100}},resources={nh_philosopher_stone=1},
+        materials={midas=100},count=100,durationFrames=60},
+    {id="rubedo_immortality",category="alchemy",alchemyMode="rubedo",zh="红化：不死药",en="Rubedo: Elixir of immortality",
+        inputs={{name="water",amount=100}},resources={nh_philosopher_stone=1},
+        resourceYield={nh_elixir_of_immortality=100},count=100,durationFrames=60},
+    {id="supply_logistics",category="alchemy",alchemyMode="logistics",zh="补给资源包",en="Supply logistics pack",
+        inputs={{name="midas",amount=10}},resources={nh_elixir_of_immortality=10,grain=100,sugar=100,herb=100},
+        resourceYield={supply_logistics=50},count=50,durationFrames=60},
+    {id="strike_logistics",category="alchemy",alchemyMode="logistics",zh="轰炸资源包",en="Strike logistics pack",
+        inputs={{name="midas",amount=20},{name="sand",amount=100},{name="slime",amount=100}},resources={fiber=200},
+        resourceYield={strike_logistics=50},count=50,durationFrames=60},
+    {id="reinforcement_logistics",category="alchemy",alchemyMode="logistics",zh="增援资源包",en="Reinforcement logistics pack",
+        inputs={},resources={nh_elixir_of_immortality=20,fiber=100,spice=100},goldCost=100,
+        resourceYield={reinforcement_logistics=50},count=50,durationFrames=60},
+    {id="intel_logistics",category="alchemy",alchemyMode="logistics",zh="情报资源包",en="Intel logistics pack",
+        inputs={{name="midas",amount=10}},resources={arcane_scrap=1,spice=100},goldCost=200,
+        resourceYield={intel_logistics=50},count=50,durationFrames=60},
+}) do NHStore.recipes[#NHStore.recipes+1]=recipe end
 NHStore.recipe=NHStore.recipes[1]
+for _,recipe in ipairs(NHStormProducts.recipes) do table.insert(NHStore.recipes,recipe) end
 
 -- A reversible material recipe spends the entire original yield and returns
 -- exactly one batch of its original ingredients. Items are never disassembled here.
@@ -730,8 +1011,15 @@ table.insert(NHStore.recipes,{
     materials={magic_liquid_hp_regeneration=100,purifying_powder=100},count=200,durationFrames=90*60,
 })
 
+local spellRecipes={}
 for _,recipe in ipairs(dofile("mods/noita_hideout/files/spell_recipes.lua")) do
     NHStore.recipes[#NHStore.recipes+1]=recipe
+    spellRecipes[recipe.item.card.id]=recipe
+end
+
+function NHStore.canRecraftSpell(item)
+    local recipe=item.kind=="spell" and item.card and spellRecipes[item.card.id]
+    return recipe and (not recipe.unlockFlag or HasFlagPersistent(recipe.unlockFlag))
 end
 
 local function findRecipe(id)
@@ -742,24 +1030,36 @@ local function materialGood(material,zh,en,price)
     return {id=material,material=material,zh=zh,en=en,category="materials",price=price,quantity=250}
 end
 
-local function supplyGood(id,recipeId,price)
+local function supplyGood(id,recipeId)
     local recipe=findRecipe(recipeId)
-    return {id=id,item=recipe.item,zh=recipe.zh,en=recipe.en,category="supplies",price=price,quantity=1}
+    local item={}
+    for key,value in pairs(recipe.item) do item[key]=value end
+    item.count=1
+    return {id=id,item=item,zh=recipe.zh,en=recipe.en,category="supplies",price=assert(NHStore.supplyTrade.price(item)),quantity=1}
 end
 
 NHStore.shopGoods={
-    materialGood("water","水","Water",20),
-    materialGood("sand","沙","Sand",25),
-    materialGood("oil","油","Oil",40),
-    materialGood("slime","黏液","Slime",50),
-    supplyGood("medkit","medical",120),
-    supplyGood("injector","injector",160),
+    {id="rescue_policy",insurance=true,zh="单次救援保险",en="Rescue insurance",category="services",scrap=1,quantity=1},
+    materialGood("water","水","Water",5),
+    materialGood("sand","沙","Sand",10),
+    materialGood("oil","油","Oil",10),
+    materialGood("slime","黏液","Slime",15),
+    supplyGood("medkit","medical"),
+    supplyGood("injector","injector"),
+    supplyGood("bandage","bandage"),
+    supplyGood("hard_bread","hard_bread"),
+    supplyGood("cheese","cheese"),
+    supplyGood("injector_quick_heal","injector_quick_heal"),
+    {id="cat",animal="cat",zh="幼猫",en="Kitten",category="livestock",price=240,quantity=1},
+    {id="dog",animal="dog",zh="幼犬",en="Puppy",category="livestock",price=100,quantity=1},
     {id="chick",animal="chick",zh="小鸡",en="Chick",category="livestock",price=120,quantity=1},
     {id="calf",animal="calf",zh="牛犊",en="Calf",category="livestock",price=240,quantity=1},
     {id="queen_bee",animal="queen_bee",zh="女王蜂",en="Queen bee",category="livestock",price=480,quantity=1},
     {id="dragon_egg",animal="dragon_egg",zh="龙蛋",en="Dragon egg",category="livestock",price=3000,quantity=1},
     {id="gel_pool",animal="gel_pool",zh="凝胶幼体",en="Gel hatchling",category="livestock",price=320,quantity=1},
 }
+
+for _,offer in ipairs(NHStormProducts.offers) do NHStore.shopGoods[#NHStore.shopGoods+1]=offer end
 
 function NHStore.stockDoseSlot(state,subtype)
     for index,row in ipairs(state.warehouse) do
@@ -771,6 +1071,16 @@ function NHStore.stockDoseSlot(state,subtype)
 end
 
 function NHStore.canBuyGood(state,good)
+    if good.resource then
+        if (state.resources[good.resource] or 0)<good.quantity then return false,"Not enough hideout resources." end
+        if good.yield.gold>NHStore.maxGold-state.bankGold then return false,"Piggy bank is full." end
+        return true
+    end
+    if good.insurance then
+        if state.insuranceActive then return false,"Already insured." end
+        if (state.resources.arcane_scrap or 0)<good.scrap then return false,"Not enough arcane scrap." end
+        return true
+    end
     if good.animal then
         local slot,reason=NHLivestock.freePen(state,good.animal)
         if not slot then return false,reason end
@@ -789,9 +1099,42 @@ function NHStore.canBuyGood(state,good)
         if slot then return true,slot,index and state.warehouse[index] end
         return false,"Supplies storage is full."
     end
+    local stackSlot,index=NHStore.stackSlot(state,"warehouse",good.item)
+    if index then return true,stackSlot,state.warehouse[index] end
     local slot=NHStore.freeSlot(state,"warehouse",nil,kind)
     if not slot or state.nextItemId>=max_safe_integer then return false,"Supplies storage is full." end
     return true,slot
+end
+
+function NHStore.stackUnits(item)
+    if NHStormProducts.types[item.kind] then return NHStormProducts.count(item.count) end
+    if NHMedkits.capacity(item.kind) then return NHMedkits.charges(item) end
+    if NHGuns.types[item.kind] then return NHGuns.rounds(item) end
+    if NHLootBags.types[item.kind] or NHTurrets.types[item.kind] then return item.count or 1 end
+    return NHFoods.bites(item)
+end
+
+function NHStore.mergeStack(target,source)
+    local total=NHStore.stackUnits(target)+NHStore.stackUnits(source)
+    if NHMedkits.capacity(target.kind) then NHMedkits.unpack(target,total)
+    elseif NHGuns.types[target.kind] then NHGuns.unpack(target,total)
+    elseif NHLootBags.types[target.kind] or NHTurrets.types[target.kind] or NHStormProducts.types[target.kind] then target.count=total
+    else NHFoods.setBites(target,total) end
+end
+
+function NHStore.stackSlot(state,container,item,preferred)
+    local gun=NHGuns.types[item.kind]
+    local medical=NHMedkits.capacity(item.kind)
+    if not NHStore.stackUnits(item) or (container~="warehouse" and container~="safe") then return end
+    local limit=NHStormProducts.types[item.kind] and NHStormProducts.stackLimit or (NHTurrets.types[item.kind] and 4 or 2147483647)
+    for i,row in ipairs(state[container]) do
+        if row.item.kind==item.kind and (not preferred or preferred==(row.slot or i))
+            and (not medical or NHMedkits.canCombine(item.kind,NHMedkits.charges(item),NHMedkits.charges(row.item)))
+            and (not gun or NHGuns.canCombine(gun,item.remaining,row.item.remaining))
+            and NHStore.stackUnits(row.item)+NHStore.stackUnits(item)<=limit then
+            return row.slot or i,i
+        end
+    end
 end
 
 local function stockItem(state,slot,item)
@@ -818,17 +1161,31 @@ function NHStore.buyGood(state,request,now)
     if not good then return false,"Unknown shop item." end
     local ready,slot,stack=NHStore.canBuyGood(state,good)
     if not ready then return false,slot end
+    if good.resource then
+        local paid,reason=NHStore.creditGold(state,good.yield.gold)
+        if not paid then return false,reason end
+        NHStore.deductStock(state.resources,{[good.resource]=good.quantity})
+        return true
+    end
     if good.animal then
         if request.pen~=nil and request.pen~=slot then return false,"Livestock collection changed." end
         if not NHLivestock.deliver(state,good.animal,slot,now) then return false,"Livestock collection changed." end
         return NHStore.spendGold(state,good.price)
     end
+    if good.insurance then
+        state.resources.arcane_scrap=state.resources.arcane_scrap-good.scrap
+        state.insuranceSerial=(state.insuranceSerial or 0)+1
+        state.insuranceActive=true
+        return true
+    end
     local paid,reason=NHStore.spendGold(state,good.price)
     if not paid then return false,reason end
     if good.material then
         state.materials[good.material]=(state.materials[good.material] or 0)+good.quantity
-    elseif stack then
+    elseif stack and good.item.kind=="dose" then
         stack.item={kind="dose",subtype=good.item.subtype,remaining=NHStore.doseDurability,count=(stack.item.count or 1)+1}
+    elseif stack then
+        NHStore.mergeStack(stack.item,good.item)
     else
         local item={}
         for key,value in pairs(good.item) do item[key]=value end
@@ -914,7 +1271,7 @@ function NHStore.warehouseIngredientCount(state,kind)
             count=count+quantity
             local slot=row.slot or i
             -- Use worn kits first. For bandages, finish the smallest bundle first.
-            local rank=remaining or quantity
+            local rank=(remaining or 1)*8+math.min(quantity,7)
             if not bestRank or rank<bestRank or (rank==bestRank and slot<firstSlot) then
                 firstIndex,firstSlot,bestRank=i,slot,rank
             end
@@ -960,9 +1317,15 @@ function NHStore.canStartBatch(state,recipe)
                 slot=row.slot or ingredientIndex
             end
         end
-        slot=slot or NHStore.freeSlot(state,"warehouse",nil,recipe.item.kind)
+        slot=slot or NHStore.stackSlot(state,"warehouse",recipe.item) or NHStore.freeSlot(state,"warehouse",nil,recipe.item.kind)
         if not slot then return false,"Product storage is full." end
         return true,slot,payment,nil,nil,ingredientIndex
+    end
+    if recipe.resourceYield then
+        for key,amount in pairs(recipe.resourceYield) do
+            if amount>NHStore.maxResourceAmount-(state.resources[key] or 0) then return false,"Resource storage is full." end
+        end
+        if not delivery then return true,nil,payment end
     end
     if NHStore.canStockMaterials(state,delivery,payment) then return true,nil,payment,delivery,held end
     if alternative then
@@ -993,10 +1356,12 @@ function NHStore.startOrder(state,id)
         if not ok then return false,reason end
     end
     -- The paid order owns its item, including a spell's nested native card fields.
-    local output={item=recipe.item and decode(encode(recipe.item)),slot=slot,materials=delivery}
+    local output={item=recipe.item and decode(encode(recipe.item)),slot=slot,materials=delivery,resources=recipe.resourceYield}
     if ingredientIndex then
         local item=state.warehouse[ingredientIndex].item
-        if (item.count or 1)>1 then item.count=item.count-1
+        if (item.count or 1)>1 then
+            item.count=item.count-1
+            if NHMedkits.capacity(item.kind) then item.remaining=NHMedkits.capacity(item.kind) end
         else table.remove(state.warehouse,ingredientIndex) end
     end
     NHStore.deductStock(state.materials,payment)
@@ -1006,6 +1371,10 @@ function NHStore.startOrder(state,id)
 end
 
 function NHStore.salvageYield(item,mode)
+    if mode=="store_contents" then
+        if NHPotion.isMaterialContainer(item) then return 1,"container_scrap" end
+        return
+    end
     if mode~=nil and mode~="scrap" and mode~="essence" then return end
     if item.kind=="spell" then
         local card=item.card
@@ -1030,7 +1399,12 @@ function NHStore.salvage(state,request)
     local index=NHStore.slotIndex(state,"warehouse",request.slot,request.kind)
     local row=index and state.warehouse[index]
     if not row or row.id~=request.id or row.item.kind~=request.kind then return false,"Inventory slot changed." end
-    local amount,resource=NHStore.salvageYield(row.item,request.mode)
+    local mode=request.mode
+    if mode=="quick_essence" then
+        if not NHStore.canRecraftSpell(row.item) then return false,"Spell recipe unavailable." end
+        mode="essence"
+    end
+    local amount,resource=NHStore.salvageYield(row.item,mode)
     if not amount then
         if request.mode=="essence" then return false,"No essence for this spell." end
         if request.mode~=nil and request.mode~="scrap" then return false,"Invalid salvage mode." end
@@ -1038,6 +1412,10 @@ function NHStore.salvage(state,request)
     end
     local stock=state.resources[resource] or 0
     if amount>NHStore.maxResourceAmount-stock then return false,"Resource storage is full." end
+    if request.mode=="store_contents" then
+        local ok,err=NHPotion.storeContents(state,row.item)
+        if not ok then return false,err end
+    end
     table.remove(state.warehouse,index)
     state.resources[resource]=stock+amount
     return true
@@ -1069,11 +1447,27 @@ function NHStore.advanceProduction(state,request)
     elseif output.item and output.item.kind=="card_wallet" then
         stockItem(state,output.slot,NHCardWallets.empty(output.item.tier))
     elseif output.item then
-        stockItem(state,output.slot,output.item)
+        local _,index=NHStore.stackSlot(state,"warehouse",output.item,output.slot)
+        if index then
+            local item=state.warehouse[index].item
+            NHStore.mergeStack(item,output.item)
+        else stockItem(state,output.slot,output.item) end
     else
-        for name,amount in pairs(output.materials) do state.materials[name]=(state.materials[name] or 0)+amount end
+        for name,amount in pairs(output.materials or {}) do state.materials[name]=(state.materials[name] or 0)+amount end
+        for name,amount in pairs(output.resources or {}) do state.resources[name]=(state.resources[name] or 0)+amount end
     end
     state.order=false
     state.finished=state.finished+1
     return true,true
+end
+
+-- Current workshop actions settle payment and delivery in one profile transaction.
+-- Retain startOrder/advanceProduction for older saves with already-paid orders.
+function NHStore.craft(state,id)
+    if state.runSerial<=state.closedThrough then return false,"The run is closed." end
+    local ok,reason=NHStore.startOrder(state,id)
+    if not ok then return false,reason end
+    local changed,done=NHStore.advanceProduction(state,{run=state.runSerial,
+        orderId=state.order.id,progress=state.order.required})
+    return changed and done
 end

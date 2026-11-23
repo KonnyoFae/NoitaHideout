@@ -1,8 +1,12 @@
 NHLivestock={
     resources={egg={zh="蛋",en="Eggs"},milk={zh="奶",en="Milk"},meat={zh="肉",en="Meat"},
         gold={zh="金币",en="Gold"},loot={zh="寻宝",en="Treasure"}},
-    order={"chick","calf","queen_bee","dragon_egg","gel_pool"},
+    order={"chick","calf","queen_bee","dragon_egg","gel_pool","dog","cat"},
     species={
+        cat={young={"幼猫","Kitten"},adult={"寻宝猫","Treasure cat"},pen={"猫窝","Cattery"},facility="cat_house",locked="Cattery is required.",offset=11,
+            growth=60*60,period=240*60,yields={{"loot_case",1}}},
+        dog={young={"幼犬","Puppy"},adult={"寻物犬","Treasure hound"},pen={"狗窝","Kennel"},facility="dog_kennel",locked="Kennel is required.",offset=10,
+            growth=60*60,period=60*60,yields={{"travel_satchel",1},{"travel_pack",1}}},
         chick={young={"小鸡","Chick"},adult={"母鸡","Hen"},pen={"鸡舍","Coop"},offset=1,
             growth=180*60,period=120*60,yields={{"egg",2},{"meat",1}}},
         calf={young={"牛犊","Calf"},adult={"母牛","Cow"},pen={"牛栏","Cowshed"},offset=2,
@@ -126,8 +130,38 @@ local function project(herd,period,from,now)
     return progress,owed,matured
 end
 
+-- A kennel pays both yields together. Test the batch against detached rows
+-- before advancing its clock, including when one stack already exists.
+local function bagDelivery(state,kind,count)
+    local draft=setmetatable({warehouse={},nextItemId=state.nextItemId},{__index=state})
+    for i,row in ipairs(state.warehouse) do draft.warehouse[i]=row end
+    for _,part in ipairs(kind.yields) do
+        local item=NHLootBags.item(part[1],part[2]*count)
+        local slot,index=NHStore.stackSlot(draft,"warehouse",item)
+        if index then
+            local row=draft.warehouse[index]
+            item.count=item.count+(row.item.count or 1)
+            draft.warehouse[index]={id=row.id,slot=slot,origin=row.origin,item=item}
+        else
+            slot=NHStore.freeSlot(draft,"warehouse",nil,item.kind)
+            if not slot or draft.nextItemId>=NHStore.maxResourceAmount then return end
+            table.insert(draft.warehouse,{slot=slot,id=draft.nextItemId,item=item})
+            draft.nextItemId=draft.nextItemId+1
+        end
+    end
+    return draft
+end
+
 local function payable(state,kind,owed)
     local count=math.min(owed,NHFarm.batchLimit)
+    if NHLootBags.types[kind.yields[1][1]] then
+        while count>0 do
+            local draft=bagDelivery(state,kind,count)
+            if draft then return count,draft end
+            count=math.floor(count/2)
+        end
+        return 0
+    end
     for _,part in ipairs(kind.yields) do
         local id,amount=part[1],part[2]
         if id=="gold" then count=math.min(count,math.floor((NHStore.maxGold-state.bankGold)/amount))
@@ -153,16 +187,24 @@ function NHLivestock.settle(state,from,now)
         if herd then
             local kind=NHLivestock.species[species]
             local progress,owed,matured=project(herd,kind.period,from,now)
-            local count=payable(state,kind,owed)
+            local count,delivery=payable(state,kind,owed)
             herd.progress,herd.owed=progress,owed-count
             herd.adults=herd.adults+matured
             for i=1,matured do table.remove(herd.young,1) end
             if count>0 then
-                for _,part in ipairs(kind.yields) do
-                    local id,amount=part[1],part[2]*count
-                    if id=="gold" then assert(NHStore.creditGold(state,amount))
-                    elseif id=="loot" then finds=NHDragonLoot.award(state,amount)
-                    else state.resources[id]=(state.resources[id] or 0)+amount end
+                if delivery then
+                    state.warehouse,state.nextItemId=delivery.warehouse,delivery.nextItemId
+                    for _,id in ipairs(NHCompanions.reward(state,kind.facility,count)) do finds[#finds+1]=id end
+                else
+                    for _,part in ipairs(kind.yields) do
+                        local id,amount=part[1],part[2]*count
+                        if id=="gold" then assert(NHStore.creditGold(state,amount))
+                        elseif id=="loot" then
+                            for _,card in ipairs(NHDragonLoot.award(state,amount)) do finds[#finds+1]=card end
+                            NHCompanions.income(state,"dragon",count,finds)
+                            NHCompanions.deliver(state)
+                        else state.resources[id]=(state.resources[id] or 0)+amount end
+                    end
                 end
                 total=total+count
                 if kind.facility=="beehive" then hives=hives+count
@@ -187,7 +229,7 @@ end
 function NHLivestock.yieldText(species,lang)
     local labels,amounts={},{}
     for _,part in ipairs(NHLivestock.species[species].yields) do
-        local resource=NHFarm.crops[part[1]] or NHLivestock.resources[part[1]]
+        local resource=NHFarm.crops[part[1]] or NHLivestock.resources[part[1]] or NHLootBags.types[part[1]]
         labels[#labels+1]=resource[lang=="zh" and "zh" or "en"]
         amounts[#amounts+1]=part[2]
     end
@@ -253,10 +295,16 @@ function NHLivestock.view(state,lang,now)
     if hive or pool then ids[#ids+1]="spice" end
     if pool then ids[#ids+1]="herb"; ids[#ids+1]="fiber" end
     if NHStore.level(state,"dragon_nest")>0 then ids[#ids+1]="gold" end
+    if NHStore.level(state,"dog_kennel")>0 then ids[#ids+1]="travel_satchel"; ids[#ids+1]="travel_pack" end
+    if NHStore.level(state,"cat_house")>0 then ids[#ids+1]="loot_case" end
     for _,id in ipairs(ids) do
-        local resource=NHFarm.crops[id] or NHLivestock.resources[id]
+        local resource=NHFarm.crops[id] or NHLivestock.resources[id] or NHLootBags.types[id]
+        local stock=id=="gold" and state.bankGold or state.resources[id] or 0
+        if NHLootBags.types[id] then
+            for _,row in ipairs(state.warehouse) do if row.item.kind==id then stock=stock+(row.item.count or 1) end end
+        end
         produce[#produce+1]={id=id,name=lang=="zh" and resource.zh or resource.en,
-            stock=id=="gold" and state.bankGold or state.resources[id] or 0,perMinute=perMinute[id] or 0}
+            stock=stock,perMinute=perMinute[id] or 0}
     end
     return pens,produce,perMinute
 end

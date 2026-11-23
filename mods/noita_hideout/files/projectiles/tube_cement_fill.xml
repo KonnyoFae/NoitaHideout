@@ -1,0 +1,7 @@
+<Entity>
+    <Base file="data/entities/projectiles/chunk_of_soil.xml">
+        <ProjectileComponent>
+            <config_explosion never_cache="1" explosion_radius="17" create_cell_material="cement" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

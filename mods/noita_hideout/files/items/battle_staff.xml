@@ -1,0 +1,13 @@
+<Entity name="$nh_hideout_battle_staff" tags="wand,nh_firearm,noita_hideout_battle_staff,teleportable_NOT">
+    <Base file="data/entities/base_item.xml">
+        <ItemComponent item_name="$nh_hideout_battle_staff" ui_description="$nh_hideout_battle_staff_desc" ui_sprite="mods/noita_hideout/files/items/staff_icon.png" preferred_inventory="QUICK" always_use_item_name_in_ui="1" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/staff_angles.xml" has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" />
+    </Base>
+    <LuaComponent _tags="enabled_in_hand,enabled_in_world,nh_equipment_mirror" script_source_file="mods/noita_hideout/files/equipment_sprite_mirror.lua" execute_every_n_frame="1" />
+    <AbilityComponent use_gun_script="1" ui_name="$nh_hideout_battle_staff" sprite_file="mods/noita_hideout/files/items/staff_angles.xml" mana="120" mana_max="120" mana_charge_speed="0" rotate_in_hand="1" throw_as_item="0">
+        <gun_config shuffle_deck_when_empty="0" deck_capacity="1" actions_per_round="1" />
+    </AbilityComponent>
+    <HotspotComponent _tags="shoot_pos" offset.x="8" offset.y="0" />
+    <VariableStorageComponent _tags="nh_magazine" name="battle_staff" value_int="120" value_float="1" />
+    <VariableStorageComponent _tags="nh_staff_clock" />
+</Entity>

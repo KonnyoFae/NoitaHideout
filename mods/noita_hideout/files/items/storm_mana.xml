@@ -1,0 +1,10 @@
+<Entity name="法力晶块" tags="storm_mana,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/storm_mana.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/storm_mana.png" offset_x="8" offset_y="8" />
+        <ItemComponent item_name="法力晶块" uses_remaining="1" ui_sprite="mods/noita_hideout/files/items/storm_mana.png" ui_description="每组最多 8 件。在仓库消耗品页，每件可转入 1 点晶化法力。在产物转化页可加工或出售已入账的资源。" />
+        <UIInfoComponent name="法力晶块" />
+        <AbilityComponent ui_name="法力晶块" />
+    </Base>
+    <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
+</Entity>

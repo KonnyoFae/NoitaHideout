@@ -2,7 +2,7 @@
     <Base file="mods/noita_hideout/files/items/base.xml">
         <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/sugar_cube.png" />
         <SpriteComponent image_file="mods/noita_hideout/files/items/sugar_cube.png" offset_x="4" offset_y="4" />
-        <ItemComponent item_name="$nh_hideout_sugar_cube" ui_description="$nh_hideout_sugar_cube_desc"
+        <ItemComponent uses_remaining="2" item_name="$nh_hideout_sugar_cube" ui_description="$nh_hideout_sugar_cube_desc"
             ui_sprite="mods/noita_hideout/files/items/sugar_cube.png" />
         <UIInfoComponent name="$nh_hideout_sugar_cube" />
         <AbilityComponent ui_name="$nh_hideout_sugar_cube" />

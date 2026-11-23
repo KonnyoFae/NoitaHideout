@@ -1,0 +1,8 @@
+<Entity tags="projectile_player">
+    <Base file="data/entities/projectiles/orb_pink_big_explosive.xml">
+        <HomingComponent target_tag="homing_target" />
+        <ProjectileComponent damage="4.8" knockback_force="12" never_hit_player="1" friendly_fire="0" collide_with_shooter_frames="-1">
+            <config_explosion damage="2.4" physics_throw_enabled="1" physics_explosion_power.min="2.5" physics_explosion_power.max="3.5" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

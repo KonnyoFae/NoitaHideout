@@ -1,0 +1,6 @@
+<Entity name="$nh_ship_safe" tags="nh_ship_safe,nh_ship_box_art">
+    <SpriteComponent image_file="mods/noita_hideout/files/storm/sites/safe_lv2_sprite.xml" rect_animation="closed"
+        has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" z_index="0.5" />
+    <InteractableComponent radius="19" ui_text="$nh_ship_safe_open" />
+    <LuaComponent script_interacting="mods/noita_hideout/files/storm/sites/ship_open.lua" execute_every_n_frame="-1" />
+</Entity>

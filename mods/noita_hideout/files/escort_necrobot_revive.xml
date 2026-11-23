@@ -1,0 +1,6 @@
+<Entity>
+  <Base file="data/entities/misc/necrobot_revive.xml">
+    <VariableStorageComponent value_string="" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/escort_necrobot_revive.lua" execute_every_n_frame="120" />
+  </Base>
+</Entity>

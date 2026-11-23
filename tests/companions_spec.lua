@@ -116,7 +116,7 @@ local function put(id,kind,values,tag)
     entities[id].components[kind..(tag or "")]=values
     return values
 end
-local hp=put(player,"DamageModelComponent",{hp=1,max_hp=4})
+local hp=put(player,"DamageModelComponent",{hp=1,max_hp=4,melee=1,slice=1,poison=1,ice=1,curse=1,air_needed=true})
 put(player,"GenomeDataComponent",{herd_id=3})
 local held,open,failed=false,false,false
 local rejectParent,missingTag=false,nil
@@ -136,6 +136,8 @@ end
 function EntityRemoveFromParent(id) entities[id].parent=0 end
 function EntityHasTag(id,tag) return entities[id] and entities[id].tags[tag] end
 function EntityAddTag(id,tag) entities[id].tags[tag]=true end
+function EntityRemoveTag(id,tag) entities[id].tags[tag]=nil end
+function EntityCreateNew() return create(0,0) end
 function EntityGetIsAlive(id) return entities[id]~=nil end
 function EntityGetAllChildren(id,tag)
     local out={}
@@ -143,6 +145,18 @@ function EntityGetAllChildren(id,tag)
     return out
 end
 function EntityGetFirstComponentIncludingDisabled(id,kind,tag) return entities[id].components[kind..(tag or "")] end
+function EntityGetComponentIncludingDisabled(id,kind)
+    local list={}
+    for name,c in pairs(entities[id].components) do
+        if name:sub(1,#kind)==kind then list[#list+1]=c end
+    end
+    return list
+end
+function EntityAddComponent2(id,kind,c) return put(id,kind,c,c._tags) end
+function EntityRemoveComponent(id,c) for k,v in pairs(entities[id].components) do if v==c then entities[id].components[k]=nil end end end
+function ComponentObjectGetValue2(c,_,key) return c[key] end
+function ComponentObjectSetValue2(c,_,key,value) c[key]=value end
+function GameGetAllInventoryItems() return {} end
 function ComponentGetValue2(c,key) return c[key] end
 function ComponentSetValue2(c,key,v,b) c[key]=v;if b then c.yVelocity=b end end
 function EntityKill(id) entities[id]=nil end
@@ -150,13 +164,15 @@ function GameKillInventoryItem(who,id) assert(who==player and held==id);EntityKi
 function GameIsInventoryOpen() return open end
 function GamePrint() end
 function GameTextGetTranslatedOrNot(k) return k end
-function GameGetFrameNum() return 200 end
+local frame=200
+function GameGetFrameNum() return frame end
 function ProceduralRandomi() return 4 end
 function EntityLoad(path,x,y)
     local name=path:match("([^/]+)%.xml$")
     if failed then return 0 end
     local id=create(x,y)
     local e=entities[id]
+    e.file=name
     if name:match("^card_") then
         local species=name:sub(6)
         e.tags.noita_hideout_summon_card=true
@@ -164,13 +180,22 @@ function EntityLoad(path,x,y)
         put(id,"ItemComponent",{uses_remaining=80})
     elseif NHCompanions.species[name] then
         e.tags.noita_hideout_companion=true
-        put(id,"VariableStorageComponent",{value_int=0,value_string=name},"nh_companion_clock")
-        for _,t in ipairs({"nh_trip","nh_position","nh_gifts"}) do
-            if t~=missingTag then put(id,"VariableStorageComponent",{value_int=0,value_float=0},t) end
-        end
+        e.tags["nh_companion_"..name]=true
+        if missingTag~="nh_companion_clock" then put(id,"VariableStorageComponent",{value_int=0,value_string=name},"nh_companion_clock") end
         spawned[#spawned+1]=id
     elseif name:match("^effect_") then put(id,"GameEffectComponent",{frames=-1})
-    elseif name=="bolt" then put(id,"ProjectileComponent",{});put(id,"VelocityComponent",{})
+    elseif name=="bee_guard" then e.tags.nh_bee_guard=true
+    elseif name=="pebble_player_physics" then
+        put(id,"AnimalAIComponent",{});put(id,"PhysicsBodyComponent",{});put(id,"CollisionTriggerComponent",{})
+    elseif name=="curse" then put(id,"VariableStorageComponent",{name="effect_curse_damage"})
+    elseif path:find("/projectiles/",1,true) or name=="matter_field" then
+        put(id,"ProjectileComponent",{mEntityThatShot=0});put(id,"VelocityComponent",{})
+        if name=="chain_bolt" then put(id,"LuaComponent",{script_source_file="data/scripts/projectiles/chain_bolt.lua"}) end
+        if name=="disc_bullet_bigger" then
+            put(id,"AreaDamageComponent",{})
+            put(id,"LuaComponent",{script_source_file="data/scripts/projectiles/disc_bullet_bigger_trajectory.lua"})
+        end
+        if name:find("^swarm_") or name=="pollen" then put(id,"HomingComponent",{target_who_shot=true}) end
     else gifts[#gifts+1]=name end
     return id
 end
@@ -180,6 +205,7 @@ local function target(x,herd,charm)
     entities[id].herd,entities[id].charm=herd,charm
     put(id,"GenomeDataComponent",{})
     targets[#targets+1]=id
+    return id
 end
 target(20,100,0);target(35,10,0);target(55,10,1);target(65,10,0)
 function EntityGetInRadiusWithTag() return targets end
@@ -190,8 +216,8 @@ function EntityGetFirstHitboxCenter(id)
 end
 function GameGetGameEffectCount(id) return entities[id].charm end
 function RaytracePlatforms(_,_,tx) return tx==35 end
-function GameShootProjectile(who,_,_,tx,_,id)
-    assert(who==player and tx==68)
+function GameShootProjectile(who,_,_,tx,_,id,notify)
+    assert(who==player and notify==false and tx)
     shots[#shots+1]=id
 end
 NHNative={held=function() return held end}
@@ -217,7 +243,7 @@ held=assert(adapter.restore({kind="summon_card",species="minotaur",remaining=80}
 failed=true
 assert(not NHCompanions.use(player,held,"en"))
 failed=false
-missingTag="nh_trip"
+missingTag="nh_companion_clock"
 assert(not NHCompanions.use(player,held,"en") and not EntityGetIsAlive(spawned[#spawned]))
 missingTag=nil
 rejectParent=true
@@ -230,24 +256,19 @@ assert(EntityGetIsAlive(pet) and adapter.capture(held).remaining==80)
 assert(entities[pet].scaleX==0.5 and entities[pet].scaleY==0.5)
 assert(#EntityGetAllChildren(player,"noita_hideout_companion")==1)
 
-function dofile_once(path) dofile(path) end
+function dofile_once(path) return dofile(path) end
 dofile("mods/noita_hideout/files/companions/behavior.lua")
 NHCompanions.update(pet)
 assert(#shots==1)
 local shot=entities[shots[1]].components.ProjectileComponent
-assert(shot.mWhoShot==player and shot.mShooterHerdId==3 and shot.damage==0.16)
+assert(shot.mWhoShot==player and shot.mShooterHerdId==3 and shot.never_hit_player)
+assert(entities[shots[1]].file=="cloud_acid" and entities[shots[1]].x==68)
 targets={}
 for _=1,119 do NHCompanions.update(pet) end
-assert(hp.hp>1 and #gifts==0 and entities[pet].components.VariableStorageComponentnh_trip.value_int==0)
--- A large teleport brings the companion along without earning travel credit.
+assert(hp.hp>1 and not EntityGetFirstComponentIncludingDisabled(player,"VariableStorageComponent","nh_companion_gift"))
 entities[player].x=1010
 NHCompanions.update(pet)
-assert(math.abs(entities[pet].x-1010)<20 and entities[pet].components.VariableStorageComponentnh_trip.value_int==0)
-for cycle=1,3 do
-    entities[pet].components.VariableStorageComponentnh_gifts.value_int=4
-    for _=1,300 do entities[player].x=entities[player].x+2;NHCompanions.update(pet) end
-end
-assert(#gifts==2 and gifts[1]=="bandage")
+assert(math.abs(entities[pet].x-1010)<20)
 while EntityGetIsAlive(pet) do NHCompanions.update(pet) end
 held=raw
 assert(NHCompanions.use(player,raw,"en") and not EntityGetIsAlive(raw))
@@ -278,12 +299,7 @@ for _,species in ipairs(NHCompanions.order) do
     assert(entities[player].scaleX==1 and entities[player].scaleY==1)
     local effect=NHCompanions.species[species].effect
     local auras=EntityGetAllChildren(player,"noita_hideout_companion_aura")
-    if effect then
-        assert(#auras==1 and EntityHasTag(auras[1],"nh_companion_"..effect))
-        assert(entities[auras[1]].components.GameEffectComponent.frames==70)
-    else
-        assert(#auras==0)
-    end
+    if effect then assert(#EntityGetAllChildren(player,"nh_companion_"..effect)==1) end
     last,oldAura=current,auras[1]
 end
 -- Recasting a card for the same species also spends one charge and starts a fresh visit.
@@ -292,7 +308,7 @@ EntityAddChild(player,legacyAura)
 local tierAura=create(0,0,{noita_hideout_companion_aura=true})
 EntityAddChild(player,tierAura)
 assert(NHCompanions.use(player,held,"en") and adapter.capture(held).remaining==1)
-assert(not EntityGetIsAlive(last) and not EntityGetIsAlive(oldAura))
+assert(not EntityGetIsAlive(last) and (not oldAura or not EntityGetIsAlive(oldAura)))
 assert(not EntityGetIsAlive(legacyAura) and not EntityGetIsAlive(tierAura))
 local replacement=spawned[#spawned]
 assert(#EntityGetAllChildren(player,"noita_hideout_companion")==1 and EntityGetParent(replacement)==player)
@@ -300,24 +316,145 @@ assert(entities[replacement].components.VariableStorageComponentnh_companion_clo
 assert(EntityGetIsAlive(vanilla) and EntityGetIsAlive(food))
 assert(NHCompanions.use(player,held,"en") and not EntityGetIsAlive(held))
 assert(not EntityGetIsAlive(replacement) and #EntityGetAllChildren(player,"noita_hideout_companion")==1)
-for _,species in ipairs({"bee","dragon","slime"}) do
-    entities[player].x=0
-    targets={}
-    target(65,10,0)
-    local previousShots,previousGifts=#shots,#gifts
-    assert(NHCompanions.summon(player,species,"zh",function() return true end))
-    local companion=spawned[#spawned]
-    NHCompanions.update(companion)
-    local shot=entities[shots[#shots]].components.ProjectileComponent
-    assert(#shots==previousShots+1 and shot.damage==NHCompanions.species[species].damage and shot.mWhoShot==player)
-    targets={}
-    entities[companion].components.VariableStorageComponentnh_gifts.value_int=4
-    for _=1,300 do
-        entities[player].x=entities[player].x+1
-        NHCompanions.update(companion)
-    end
-    assert(#gifts==previousGifts+1 and gifts[#gifts]==NHCompanions.species[species].gift)
+-- Verify native spell selection and owner-centred reactions, including allied,
+-- charmed and occluded targets inside the close-range threshold.
+entities[player].x=0
+local function summon(id)
+    assert(NHCompanions.summon(player,id,"zh",function() return true end))
+    return spawned[#spawned]
 end
+local function countSince(first,file)
+    local n=0
+    for i=first+1,#shots do if entities[shots[i]].file==file then n=n+1 end end
+    return n
+end
+local combatRoot="mods/noita_hideout/files/companions/"
+local updated
+function GetUpdatedEntityID() return updated end
+for _,kit in ipairs({
+    {"bee","swarm_wasp",5},{"dragon","flamethrower",3},{"slime","swarm_firebug",3,"freezing_gaze_beam",12},
+    {"dog","chain_bolt",1,"magic_shield_part",4},{"minotaur","lance_holy",1,"big_magic_shield_part",8},
+    {"cat","darkflame",1},{"griffin","griffin_ball_lightning",3,"light_bullet_air",3},
+    {"flower_fairy","cloud_acid",1,"pollen",5},{"dryad",nil,0,"disc_bullet_bigger",1},
+}) do
+    targets={}
+    local ally=target(15,100,0)
+    local reinforcement=target(8,0,0)
+    EntityAddTag(reinforcement,"nh_reinforcement")
+    target(11,0,1);target(35,10,0)
+    local species=kit[1]
+    local far=target(species=="griffin" and 285 or 95,10,0)
+    local companion=summon(species)
+    local first=#shots
+    NHCompanions.update(companion)
+    assert(#shots==first+kit[3] and countSince(first,kit[2])==kit[3],species)
+    if species=="dryad" then
+        local found=false
+        for _,e in pairs(entities) do
+            if e.file=="pebble_player_physics" then
+                assert(e.components.AnimalAIComponent.mGreatestThreat==far and e.components.LifetimeComponent.lifetime==288)
+                assert(not e.components.CollisionTriggerComponent)
+                found=true
+            end
+        end
+        assert(found)
+    end
+    for i=first+1,#shots do
+        local parts=entities[shots[i]].components
+        assert(parts.ProjectileComponent.mWhoShot==player and parts.ProjectileComponent.never_hit_player)
+        if parts.HomingComponent then assert(parts.HomingComponent.predefined_target==far and not parts.HomingComponent.target_who_shot) end
+    end
+    if species=="bee" then
+        assert(#EntityGetAllChildren(companion,"nh_bee_guard")==3)
+        updated=EntityGetAllChildren(companion,"nh_bee_guard")[1]
+        dofile(combatRoot.."bee_orbit.lua")
+        assert(math.abs(entities[updated].x)<=21)
+        updated=shots[first+1]
+        entities[far].charm=1
+        dofile(combatRoot.."swarm_target.lua")
+        assert(entities[updated].components.HomingComponent.predefined_target==0)
+        entities[far].charm=0
+        dofile(combatRoot.."swarm_target.lua")
+        assert(entities[updated].components.HomingComponent.predefined_target==far)
+    elseif species=="dragon" then
+        updated=player
+        local own=EntityLoad("data/entities/projectiles/deck/chain_bolt.xml",0,0)
+        put(player,"ControlsComponent",{mAimingVectorNormalized=1})
+        local read=ComponentGetValue2
+        function ComponentGetValue2(c,k) if k=="mAimingVectorNormalized" then return 1,0 end; return read(c,k) end
+        dofile(combatRoot.."dragon_shot.lua")
+        local onShot=_G.shot
+        onShot(shots[#shots])
+        onShot(own);onShot(own)
+        assert(countSince(first,"matter_field")==1)
+        frame=frame+24
+        entities[own].components.ProjectileComponent.mEntityThatShot=own
+        onShot(own)
+        assert(countSince(first,"matter_field")==1)
+        put(player,"KickComponent",{can_kick=true})
+        entities[player].components.ControlsComponent.mButtonFrameKick=frame
+        NHCompanions.update(companion)
+        assert(countSince(first,"matter_field")==2)
+        ComponentGetValue2=read
+    end
+    local close=target(19,0,0)
+    local before=#shots
+    NHCompanions.update(companion)
+    if kit[4] then assert(countSince(before,kit[4])==kit[5],species) end
+    if species=="dog" or species=="minotaur" then
+        for i=before+1,#shots do
+            assert(EntityGetParent(shots[i])==companion and entities[shots[i]].components.VariableStorageComponent.value_int==player)
+        end
+    end
+    if species=="cat" then assert(EntityHasTag(close,"effect_CURSE") and not EntityHasTag(ally,"effect_CURSE"))
+    elseif species=="griffin" then
+        -- Both attacks are ready with a distant enemy still in view. At the
+        -- guard boundary, gusts take priority even during their own cooldown.
+        entities[close].x=64
+        entities[companion].components.VariableStorageComponentnh_companion_clock.value_int=84
+        before=#shots
+        NHCompanions.update(companion)
+        assert(#shots==before+3 and countSince(before,"light_bullet_air")==3)
+        NHCompanions.update(companion)
+        assert(#shots==before+3)
+        local outside=target(400,10,0)
+        targets={outside}
+        NHCompanions.update(companion)
+        assert(#shots==before+3)
+        -- With the player's sightline blocked, a shoulder-height caster can
+        -- still see the close enemy. That must not arm a point-blank volley.
+        local ray=RaytracePlatforms
+        RaytracePlatforms=function(_,y) return y==0 end
+        targets={close}
+        NHCompanions.update(companion)
+        RaytracePlatforms=ray
+        assert(#shots==before+3)
+        targets={far}
+        NHCompanions.update(companion)
+        assert(countSince(before,"griffin_ball_lightning")==3)
+    elseif species=="dog" then
+        updated=shots[first+1]
+        assert(entities[updated].components.LuaComponent.script_source_file==combatRoot.."chain_jump.lua")
+        dofile(combatRoot.."chain_jump.lua")
+        assert(entities[updated].x==19)
+    elseif species=="dryad" then
+        local parts=entities[shots[#shots]].components
+        assert(not parts.AreaDamageComponent and parts.LuaComponent.script_source_file==combatRoot.."disc_edge.lua")
+    elseif species=="flower_fairy" then
+        local clock=entities[companion].components.VariableStorageComponentnh_companion_clock
+        clock.value_int=204
+        NHCompanions.update(companion)
+        assert(countSince(first,"pollen")==10 and countSince(first,"cloud_acid")==1)
+        targets={far}
+        NHCompanions.update(companion)
+        assert(countSince(first,"cloud_acid")==2)
+    end
+    before=#shots
+    NHCompanions.update(companion)
+    if species=="dragon" then assert(countSince(before,"flamethrower")==3 and countSince(before,"matter_field")==0)
+    else assert(#shots==before,species.." cooldown") end
+end
+targets={}
 -- Check the actual Noita entity/card links and shipped PNG dimensions. The
 -- source sheets remain archived with the project and must match the animation.
 local function bytes(path)
@@ -325,6 +462,15 @@ local function bytes(path)
     local contents=file:read("*a")
     file:close()
     return contents
+end
+do
+    local orb=bytes("mods/noita_hideout/files/projectiles/griffin_ball_lightning.xml")
+    local motion=assert(orb:match("<VelocityComponent([^>]+)>"))
+    local shot=assert(orb:match("<ProjectileComponent([^>]+)>"))
+    local trail=assert(orb:match("<LightningComponent>(.-)</LightningComponent>"))
+    assert(motion:find('air_friction="0"',1,true) and shot:find('lifetime_randomness="0"',1,true))
+    assert(tonumber(shot:match('speed_min="(%d+)"'))*tonumber(shot:match('lifetime="(%d+)"'))/60>=300)
+    assert(trail:find('damage_mortals="0"',1,true) and shot:find('explosion_dont_damage_shooter="1"',1,true))
 end
 local function png(path,width,height)
     local data=bytes(path)
@@ -355,7 +501,7 @@ for _,id in ipairs({"bee","dragon","slime"}) do
     png(base.."items/card_"..id.."_world.png",10,13)
 end
 assert(portraits.bee~=portraits.dragon and portraits.slime~=portraits.dragon and portraits.slime~=portraits.bee)
-print("Summon rewards, card durability, replacement rollback, source-scoped auras, travel gifts and expiration passed.")
+print("Summon rewards, card durability, replacement rollback, source-scoped auras, role auras and expiration passed.")
 
 local quick=create(0,0)
 entities[quick].parent=player

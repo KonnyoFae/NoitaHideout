@@ -47,12 +47,12 @@ for _,tier in ipairs(tiers) do
     local kit=assert(NHSurgeryKits.types[id])
     assert(recipe.category=="medical" and recipe.facility=="medical" and NHStore.category(id)=="supplies")
     assert(recipe.storedIngredient==tier.ingredient and NHStore.productionFrames(recipe)==tier.work*60)
-    assert(kit.uses==1 and kit.castFrames==tier.cast*60 and kit.healPercent==tier.heal)
-    assert(recipe.item.kind==id and recipe.item.remaining==1)
+    assert(kit.uses==(tier.cast==3 and 8 or 6) and kit.castFrames==tier.cast*60 and kit.healPercent==tier.heal)
+    assert(recipe.item.kind==id and recipe.item.remaining==kit.uses and recipe.item.count==4)
     for _,good in ipairs(NHStore.shopGoods) do assert(not good.item or good.item.kind~=id) end
     local desc=assert(translations:match("\nnh_hideout_"..id.."_desc,([^\n]+)"))
     assert(desc:find("受伤",1,true) and desc:find(tier.cast.." 秒",1,true) and desc:find(tier.heal.."%",1,true))
-    assert(select(2,desc:gsub(",",""))==10)
+    assert(desc:sub(-1)=="," and select(2,desc:gsub(",",""))==11)
 
     settings,flags={},{}
     local state=assert(NHStore.load())
@@ -78,17 +78,17 @@ for _,tier in ipairs(tiers) do
     state=assert(NHStore.load())
     assert(not NHStore.advanceProduction(state,step))
     local output=state.warehouse[assert(NHStore.slotIndex(state,"warehouse",2,id))].item
-    assert(output.kind==id and output.remaining==1)
+    assert(output.kind==id and output.remaining==kit.uses)
 
     local handler=assert(adapters[id])
     local pack=assert(handler.adapter.restore(output,0,0))
-    assert(handler.match(pack) and pack.item.uses_remaining==1)
+    assert(handler.match(pack) and pack.item.uses_remaining==kit.uses*4)
     local saved=assert(handler.adapter.capture(pack))
-    assert(saved.kind==id and saved.remaining==1 and saved.icon==recipe.item.icon)
+    assert(saved.kind==id and saved.remaining==kit.uses and saved.count==4 and saved.icon==recipe.item.icon)
     pack.item.uses_remaining=0
     assert(not handler.adapter.capture(pack))
-    output.remaining=2
+    output.remaining=kit.uses+1
     assert(not handler.adapter.restore(output,0,0) and not NHStore.commit(state))
-    assert(assert(NHStore.load()).warehouse[assert(NHStore.slotIndex(state,"warehouse",2,id))].item.remaining==1)
+    assert(assert(NHStore.load()).warehouse[assert(NHStore.slotIndex(state,"warehouse",2,id))].item.remaining==kit.uses)
 end
 print("Workshop surgery kits: all three recipes, fixed costs, worn inputs, delivery, physical adapters and localization passed.")

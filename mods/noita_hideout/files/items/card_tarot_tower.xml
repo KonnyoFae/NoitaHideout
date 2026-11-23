@@ -1,0 +1,9 @@
+<Entity name="$nh_card_tarot_tower" tags="noita_hideout_summon_card,nh_companion_tarot_tower,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/card_tarot_tower.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/card_tarot_tower.png" offset_x="8" offset_y="8" />
+        <ItemComponent item_name="$nh_card_tarot_tower" ui_description="$nh_card_tarot_tower_desc" uses_remaining="40" ui_sprite="mods/noita_hideout/files/items/card_tarot_tower.png" />
+        <UIInfoComponent name="$nh_card_tarot_tower" />
+        <AbilityComponent ui_name="$nh_card_tarot_tower" />
+    </Base>
+</Entity>

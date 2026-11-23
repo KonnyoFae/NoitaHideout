@@ -1,0 +1,26 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/projectiles/bullet_base.xml">
+        <VelocityComponent mass="0.8" terminal_velocity="1800" />
+        <ProjectileComponent speed_min="1800" speed_max="1800" lifetime="26" damage="24"
+            penetrate_entities="1" ground_penetration_coeff="12" ground_penetration_max_durability_to_destroy="12"
+            on_lifetime_out_explode="1" camera_shake_when_shot="8" knockback_force="4"
+            muzzle_flash_file=""
+            shoot_light_flash_radius="130" shoot_light_flash_r="150" shoot_light_flash_g="218" shoot_light_flash_b="255">
+            <config_explosion explosion_radius="30" damage="6" damage_mortals="1" ray_energy="1600000"
+                max_durability_to_destroy="12" camera_shake="14" explosion_sprite="data/particles/explosion_064_plasma.xml"
+                explosion_sprite_additive="1" light_enabled="1" light_r="115" light_g="200" light_b="255"
+                sparks_enabled="1" spark_material="spark_blue" sparks_count_min="22" sparks_count_max="35"
+                material_sparks_count_min="10" material_sparks_count_max="18"
+                audio_enabled="1" audio_event_name="explosions/magic_rocket_small" />
+        </ProjectileComponent>
+    </Base>
+    <ParticleEmitterComponent emitted_material_name="plasma_fading" is_trail="1" trail_gap="0.7"
+        count_min="2" count_max="3" lifetime_min="0.12" lifetime_max="0.21" fade_based_on_lifetime="1"
+        create_real_particles="0" emit_cosmetic_particles="1" emission_interval_min_frames="1" emission_interval_max_frames="1" />
+    <ParticleEmitterComponent emitted_material_name="spark_blue" is_trail="1" trail_gap="1.5"
+        x_vel_min="-14" x_vel_max="14" y_vel_min="-14" y_vel_max="14"
+        count_min="1" count_max="2" lifetime_min="0.18" lifetime_max="0.32" fade_based_on_lifetime="1"
+        create_real_particles="0" emit_cosmetic_particles="1" emission_interval_min_frames="1" emission_interval_max_frames="1" />
+    <LightComponent radius="55" r="110" g="195" b="255" />
+    <AudioComponent file="data/audio/Desktop/projectiles.bank" event_root="player_projectiles/megalaser" />
+</Entity>

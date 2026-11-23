@@ -1,0 +1,8 @@
+<Entity>
+    <Base file="data/entities/projectiles/deck/explosion_light.xml">
+        <ProjectileComponent explosion_dont_damage_shooter="1">
+            <config_explosion explosion_radius="16" damage="1" camera_shake="1.5" create_cell_probability="0"
+                explosion_sprite="data/particles/explosion_016.xml" sparks_count_min="5" sparks_count_max="12" load_this_entity="" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

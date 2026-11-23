@@ -1,0 +1,5 @@
+<Entity>
+  <Base file="data/entities/projectiles/rocket_tiny_roll.xml">
+    <ProjectileComponent spawn_entity="mods/noita_hideout/files/escort_crab_rocket.xml" />
+  </Base>
+</Entity>

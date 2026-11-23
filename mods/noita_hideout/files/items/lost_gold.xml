@@ -1,0 +1,8 @@
+<Entity name="$nh_lost_gold" tags="item_physics">
+    <UIInfoComponent name="$nh_lost_gold" />
+    <SpriteComponent _tags="enabled_in_world" image_file="data/items_gfx/goldnugget_01.png" offset_x="3" offset_y="3" emissive="1" />
+    <HitboxComponent _tags="enabled_in_world" aabb_min_x="-4" aabb_max_x="4" aabb_min_y="-4" aabb_max_y="4" />
+    <ItemComponent _tags="enabled_in_world" item_name="$nh_lost_gold" auto_pickup="1" is_pickable="1" stats_count_as_item_pick_up="0" />
+    <VariableStorageComponent _tags="nh_lost_gold" />
+    <LuaComponent _tags="enabled_in_world" script_item_picked_up="mods/noita_hideout/files/lost_gold_pickup.lua" />
+</Entity>

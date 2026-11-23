@@ -1,24 +1,39 @@
-NHCompanions={durability=80,order={"dryad","flower_fairy","minotaur","griffin","bee","dragon","slime"}}
+NHCompanions={durability=80,order={"dryad","flower_fairy","minotaur","griffin","bee","dragon","slime","dog","cat"}}
+NHTarot=NHTarot or dofile("mods/noita_hideout/files/tarot.lua")
+function NHCompanions.cardDefinition(id) return NHCompanions.species[id] or NHTarot.types[id] end
+function NHCompanions.cardCapacity(id) return NHTarot.types[id] and NHTarot.durability or NHCompanions.durability end
 local items="mods/noita_hideout/files/items/"
 local pets="mods/noita_hideout/files/companions/"
 NHCompanions.species={
-    dryad={zh="树精",en="Dryad",gift="bread",effect="effect_protection_radioactivity",bonus="regeneration",damage=0.22},
-    flower_fairy={zh="花妖",en="Flower fairy",gift="bandage",damage=0.16},
-    minotaur={zh="米诺陶少女",en="Minotaur maiden",gift="bandage",effect="effect_protection_melee",bonus="shield",damage=0.32},
-    griffin={zh="狮鹫少女",en="Griffin maiden",gift="sugar_cube",effect="effect_faster_levitation",bonus="flight",damage=0.24},
-    bee={zh="蜂娘",en="Bee maiden",gift="sugar_cube",effect="effect_movement_faster",bonus="flight",damage=0.20},
-    dragon={zh="龙娘",en="Dragon maiden",gift="grenade",effect="effect_protection_fire",bonus="shield",damage=0.36},
-    slime={zh="凝胶少女",en="Gel maiden",gift="bandage",effect="effect_breath_underwater",bonus="regeneration",damage=0.20},
+    cat={zh="猫娘",en="Cat maiden",role="support",
+        combatZh="黑焰之道，诅咒靠近玩家的敌人",combatEn="Casts Path of Dark Flame and curses nearby enemies"},
+    dog={zh="犬娘",en="Hound maiden",role="melee",radius=22,
+        combatZh="连锁魔弹，敌人靠近时召唤魔法护卫",combatEn="Fires Chain Bolt and summons Magic Guard at close range"},
+    dryad={zh="树精",en="Dryad",role="support",effect="effect_protection_radioactivity",
+        combatZh="召唤岩石精灵，敌人靠近时发射终结锯刃",combatEn="Summons a rock spirit and fires an Omega Sawblade at close range"},
+    flower_fairy={zh="花妖",en="Flower fairy",role="support",
+        combatZh="在远敌上方降下酸雨，近身时改用花粉阻挡",combatEn="Calls acid rain over distant foes and switches to pollen at close range"},
+    minotaur={zh="米诺陶少女",en="Minotaur maiden",role="melee",radius=34,shield=true,
+        combatZh="神圣投枪狙击，敌人靠近时召唤大型魔法护卫",combatEn="Snipes with Holy Lance and summons Big Magic Guard at close range"},
+    griffin={zh="狮鹫少女",en="Griffin maiden",role="flight",lift=30,fuel=8,
+        combatZh="发射球状闪电，以强气流击退近敌",combatEn="Fires Ball Lightning and repels nearby foes with bursts of air"},
+    bee={zh="蜂娘",en="Bee maiden",role="flight",lift=15,fuel=10,effect="effect_movement_faster",
+        combatZh="召唤五只黄蜂追敌，三只护卫蜂环绕玩家挡弹",combatEn="Sends five wasps after foes while three guard bees orbit you"},
+    dragon={zh="龙娘",en="Dragon maiden",role="flight",lift=20,fuel=6,shield=true,
+        combatZh="喷吐龙息，跟随玩家攻击释放物质吞噬力场",combatEn="Breathes dragon fire and fires a matter-eating field when you attack"},
+    slime={zh="凝胶少女",en="Gel maiden",role="support",
+        combatZh="召唤萤火虫群，敌人靠近时释放冰冷凝视",combatEn="Summons firebugs and casts Freezing Gaze at close range"},
 }
--- Shield recharge uses the native EnergyShieldComponent scale (0.22 on the perk shield).
+-- Percentages refer to max HP, max flight fuel or the player's unmodified speed.
 NHCompanions.bonuses={
-    [0]={fairySeconds=5,regenSeconds=0,shieldRecharge=0,flightPercent=0,giftSeconds=30},
-    [1]={fairySeconds=4,regenSeconds=12,shieldRecharge=0.08,flightPercent=5,giftSeconds=25},
-    [2]={fairySeconds=3,regenSeconds=9,shieldRecharge=0.15,flightPercent=10,giftSeconds=20},
-    [3]={fairySeconds=2,regenSeconds=6,shieldRecharge=0.22,flightPercent=15,giftSeconds=15},
+    [0]={giftLevel=1,heal=0.5,speed=10,mana=2,lift=0,fuel=0,fieldDamage=12,meleeResist=20,shieldRecharge=0},
+    [1]={giftLevel=1,heal=1,speed=15,mana=4,lift=5,fuel=3,fieldDamage=16,meleeResist=30,shieldRecharge=0.08},
+    [2]={giftLevel=2,heal=1.5,speed=20,mana=6,lift=10,fuel=6,fieldDamage=20,meleeResist=40,shieldRecharge=0.15},
+    [3]={giftLevel=3,heal=2,speed=30,mana=8,lift=15,fuel=9,fieldDamage=24,meleeResist=50,shieldRecharge=0.22},
 }
-local families={farm={"dryad","flower_fairy"},livestock={"minotaur","griffin"},beehive={"bee"},gel_pool={"slime"}}
-local seedOffsets={farm=126,livestock=7918,beehive=15836,gel_pool=23754}
+function NHCompanions.giftMinutes(spec) return spec.role=="support" and 2 or 3 end
+local families={cat_house={"cat"},dog_kennel={"dog"},farm={"dryad","flower_fairy"},livestock={"minotaur","griffin"},beehive={"bee"},gel_pool={"slime"}}
+local seedOffsets={cat_house=87109,dog_kennel=79190,farm=126,livestock=7918,beehive=15836,gel_pool=23754}
 local modulus=2147483647
 
 function NHCompanions.cardIcon(id)
@@ -38,31 +53,34 @@ end
 function NHCompanions.validCard(item)
     local n=item.remaining
     local count=item.count
-    return NHCompanions.species[item.species]~=nil and type(n)=="number" and n==math.floor(n) and n>=1 and n<=NHCompanions.durability
+    return NHCompanions.cardDefinition(item.species)~=nil and type(n)=="number" and n==math.floor(n) and n>=1 and n<=NHCompanions.cardCapacity(item.species)
         and (count==nil or (type(count)=="number" and count==math.floor(count) and count>=1 and count<=NHStore.maxResourceAmount
-            and (n==NHCompanions.durability or count==1)))
+            and (n==NHCompanions.cardCapacity(item.species) or count==1)))
 end
 
 function NHCompanions.canStack(target,source)
     return target and source and target.kind=="summon_card" and source.kind=="summon_card"
-        and target.species==source.species and target.remaining==NHCompanions.durability
-        and source.remaining==NHCompanions.durability and (target.count or 1)<NHStore.maxResourceAmount
+        and target.species==source.species and target.remaining==NHCompanions.cardCapacity(target.species)
+        and source.remaining==NHCompanions.cardCapacity(source.species) and (target.count or 1)<NHStore.maxResourceAmount
 end
 
 -- A specified storage slot must accept the card; automatic deposits prefer
 -- an existing full-condition stack even when every storage slot is occupied.
-function NHCompanions.cardSlot(s,container,preferred,item)
+function NHCompanions.cardSlot(s,container,preferred,item,quantity)
     if container~="warehouse" and container~="safe" then return end
+    local function fits(target)
+        return NHCompanions.canStack(target,item) and (quantity or 1)<=NHStore.maxResourceAmount-(target.count or 1)
+    end
     if preferred then
         local index=NHStore.slotIndex(s,container,preferred,"summon_card")
         if index then
-            if NHCompanions.canStack(s[container][index].item,item) then return preferred,index end
+            if fits(s[container][index].item) then return preferred,index end
             return
         end
     else
         local slot,at
         for i,row in ipairs(s[container]) do
-            if NHCompanions.canStack(row.item,item) and (not slot or (row.slot or i)<slot) then
+            if fits(row.item) and (not slot or (row.slot or i)<slot) then
                 slot,at=row.slot or i,i
             end
         end
@@ -120,6 +138,9 @@ function NHCompanions.moveCard(s,from,sourceSlot,to,targetSlot,expectedId)
 end
 
 function NHCompanions.validate(state,whole)
+    if state.giftRun~=nil or state.giftFrame~=nil then
+        assert(whole(state.giftRun) and state.giftRun<=state.runSerial and whole(state.giftFrame),"Invalid companion gift receipt")
+    end
     if not state.summons then return end
     for source in pairs(families) do
         local seed=state.summons[source]
@@ -174,6 +195,31 @@ end
 
 -- One persistent roll per successful crop or animal production cycle, in the
 -- same transaction as its produce, even when multiple batches are due.
+function NHCompanions.income(state,source,units,found)
+    local player=EntityGetWithTag and (EntityGetWithTag("player_unit") or {})[1]
+    if not player then return end
+    local id=NHCompanions.active(player)
+    if not id then return end
+    local eligible=source=="dragon"
+    for _,candidate in ipairs(families[source] or {}) do
+        if candidate==id then eligible=true end
+    end
+    if not eligible then return end
+    local chance=NHAffinity.incomeBasisPoints(NHAffinity.points(state,id))
+    if chance==0 then return end
+    local seed=state.companionIncomeSeed or (1+state.profile*15485863%(modulus-1))
+    local book=state.summons or {pending={}}
+    state.summons=book
+    for _=1,units do
+        seed=seed*48271%modulus
+        if seed%10000<chance and (book.pending[id] or 0)<NHStore.maxResourceAmount then
+            book.pending[id]=(book.pending[id] or 0)+1
+            found[#found+1]=id
+        end
+    end
+    state.companionIncomeSeed=seed
+end
+
 function NHCompanions.reward(state,source,units)
     local family=assert(families[source])
     local book=state.summons or {pending={}}
@@ -194,15 +240,20 @@ function NHCompanions.reward(state,source,units)
         end
     end
     book[source]=seed
+    NHCompanions.income(state,source,units,found)
     NHCompanions.deliver(state)
     return found
 end
 
 function NHCompanions.rewardText(ids,lang,state)
-    local names={}
-    for _,id in ipairs(ids) do names[#names+1]=NHCompanions.species[id][lang=="zh" and "zh" or "en"] end
+    local names,hasTarot={},false
     local zh=lang=="zh"
-    local message=(zh and "获得召唤卡：" or "Summon cards: ")..table.concat(names,zh and "、" or ", ")
+    for _,id in ipairs(ids) do
+        names[#names+1]=NHCompanions.cardDefinition(id)[zh and "zh" or "en"]
+        if NHTarot.types[id] then hasTarot=true end
+    end
+    local label=hasTarot and (zh and "获得卡牌：" or "Cards found: ") or (zh and "获得召唤卡：" or "Summon cards: ")
+    local message=label..table.concat(names,zh and "、" or ", ")
     if (state.summons and next(state.summons.pending)) or (NHDragonLoot and NHDragonLoot.pendingCards(state)>0) then
         return message..(zh and "。藏品库已满，腾出栏位后自动入库。" or ". Waiting for a free collection slot.")
     end
@@ -210,6 +261,9 @@ function NHCompanions.rewardText(ids,lang,state)
 end
 
 local function speciesOf(entity)
+    for _,id in ipairs(NHTarot.order) do
+        if EntityHasTag(entity,"nh_companion_"..id) then return id end
+    end
     for _,id in ipairs(NHCompanions.order) do
         if EntityHasTag(entity,"nh_companion_"..id) then return id end
     end
@@ -241,6 +295,16 @@ function NHCompanions.registerItems()
     })
 end
 
+function NHCompanions.active(player)
+    for _,pet in ipairs(EntityGetAllChildren(player,"noita_hideout_companion") or {}) do
+        local clock=EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_companion_clock")
+        if clock and ComponentGetValue2(clock,"value_int")<15*60*60 then
+            local id=ComponentGetValue2(clock,"value_string")
+            if NHCompanions.species[id] then return id,pet end
+        end
+    end
+end
+
 local function dismiss(entity)
     EntityRemoveFromParent(entity)
     EntityKill(entity)
@@ -250,7 +314,14 @@ end
 -- injectors with the same GameEffectComponent do not carry these tags.
 local supportTags={"noita_hideout_companion_aura","nh_companion_effect_protection_radioactivity",
     "nh_companion_effect_protection_melee","nh_companion_effect_faster_levitation"}
+local modifiers=dofile(pets.."modifiers.lua")
+NHCompanions.immunities=dofile(pets.."immunities.lua")
+NHCompanions.applyModifier=modifiers.apply
 function NHCompanions.clearSupport(player)
+    local hook=EntityGetFirstComponentIncludingDisabled(player,"LuaComponent","nh_dragon_shot")
+    if hook then EntityRemoveComponent(player,hook) end
+    NHCompanions.immunities.apply(player,nil)
+    modifiers.clear(player)
     for _,tag in ipairs(supportTags) do
         for _,aura in ipairs(EntityGetAllChildren(player,tag) or {}) do
             dismiss(aura)
@@ -259,20 +330,17 @@ function NHCompanions.clearSupport(player)
 end
 
 function NHCompanions.summon(player,id,lang,pay)
+    if NHTarot.types[id] then return dofile("mods/noita_hideout/files/tarot_runtime.lua").apply(player,id,pay) end
     if not NHCompanions.species[id] then return end
     local previous=EntityGetAllChildren(player,"noita_hideout_companion") or {}
     local x,y=EntityGetTransform(player)
     local pet=EntityLoad(pets..id..".xml",x+12,y-8)
     if not pet or pet==0 then return end
     local clock=EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_companion_clock")
-    local gifts=EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_gifts")
-    if not (gifts and clock and ComponentGetValue2(clock,"value_string")==id
-        and EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_trip")
-        and EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_position")) then
+    if not clock or ComponentGetValue2(clock,"value_string")~=id then
         EntityKill(pet)
         return
     end
-    ComponentSetValue2(gifts,"value_int",ProceduralRandomi(x+GameGetFrameNum(),y,1,1000000))
     EntityAddChild(player,pet)
     if EntityGetParent(pet)~=player then EntityKill(pet); return end
     local paid,reason=pay()
@@ -283,12 +351,14 @@ function NHCompanions.summon(player,id,lang,pay)
         if EntityGetIsAlive(child) then dismiss(child) end
     end
     NHCompanions.clearSupport(player)
+    EntityAddTag(pet,"nh_companion_roles")
+    NHCompanions.immunities.apply(player,id)
     local spec=NHCompanions.species[id]
     GamePrint(lang=="zh" and (spec.zh.."开始随行。") or (spec.en.." joined you."))
     return true
 end
 
-function NHCompanions.use(player,entity,lang,fromInventory)
+function NHCompanions.use(player,entity,lang,fromInventory,tarotPay)
     if not entity or not EntityHasTag(entity,"noita_hideout_summon_card") then return end
     if fromInventory then
         local parent=EntityGetParent(entity)
@@ -299,6 +369,7 @@ function NHCompanions.use(player,entity,lang,fromInventory)
     local remaining=item and ComponentGetValue2(item,"uses_remaining")
     if not NHCompanions.validCard({species=id,remaining=remaining}) then return end
     return NHCompanions.summon(player,id,lang,function()
+        if NHTarot.types[id] and tarotPay and not tarotPay() then return false end
         if remaining==1 then GameKillInventoryItem(player,entity)
         else ComponentSetValue2(item,"uses_remaining",remaining-1) end
         return true

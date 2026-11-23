@@ -1,0 +1,9 @@
+<Entity name="$nh_travel_console" tags="nh_travel_console,teleportable_NOT">
+    <!-- Interaction is at the monitor built into the lower portal control room. -->
+    <LightComponent r="125" g="208" b="206" radius="82" offset_y="-10" />
+    <LightComponent r="128" g="169" b="178" radius="55" offset_x="-51" offset_y="-92" />
+    <LightComponent r="76" g="185" b="195" radius="55" offset_x="-133" offset_y="-14" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/terminals/tick.lua" execute_every_n_frame="1" />
+    <InteractableComponent radius="27" ui_text="$nh_travel_console" />
+    <LuaComponent script_interacting="mods/noita_hideout/files/travel/console.lua" execute_every_n_frame="-1" />
+</Entity>

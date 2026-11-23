@@ -4,7 +4,7 @@ local function define(kind,tier,capacity,zh,en,seconds,material,amount)
     local filename=tier==1 and kind or kind.."_"..tier
     M[kind][tier]={tier=tier,capacity=capacity,zh=zh,en=en,filename=filename,
         name="$nh_hideout_"..filename,icon="mods/noita_hideout/files/items/"..filename..".png",
-        workSeconds=seconds,ingredient=material,amount=amount,emptyContainers=tier}
+        workSeconds=seconds,ingredient=material,amount=amount,containerScrap=tier}
 end
 
 define("pouch",1,4,"针剂包","Injector pouch",10,"slime",25)
@@ -14,22 +14,34 @@ define("card_wallet",1,4,"卡片夹","Card wallet",8,"fiber",4)
 define("card_wallet",2,8,"二级卡片夹","Tier II card wallet",30,"fiber",8)
 define("card_wallet",3,12,"三级卡片夹","Tier III card wallet",60,"fiber",12)
 
-M.remoteTerminal={kind="remote_terminal",zh="远程藏身处终端",en="Remote hideout terminal",uses=20,
-    name="$nh_hideout_remote_terminal",icon="mods/noita_hideout/files/items/remote_terminal.png",
-    noteZh="野外右键连接，打开物品栏存取。满耐久 20 点，每次连接消耗 1 点，关闭物品栏时断开。",
-    noteEn="Right-click in the field to connect. Open inventory to transfer items. Each connection uses one of 20 charges and ends when inventory closes."}
+M.linkOrder,M.links={},{}
+local function defineLink(kind,uses,seconds,zh,en)
+    M.linkOrder[#M.linkOrder+1]=kind
+    M.links[kind]={kind=kind,uses=uses,seconds=seconds,zh=zh,en=en,name="$nh_hideout_"..kind,
+        icon="mods/noita_hideout/files/items/"..kind..".png",
+        noteZh=("装备后按住左 Ctrl 呼叫支援，连接需 %d 秒，不耗耐久。野外右键部署 10 分钟的藏身处终端，每次消耗 1 点耐久，共 %d 点。"):format(seconds,uses),
+        noteEn=("Equip and hold Left Ctrl for support. The link takes %d s and costs no durability. Right-click to deploy a hideout terminal for 10 minutes using one of %d charges."):format(seconds,uses)}
+end
+defineLink("remote_terminal",20,5,"一级数据链","Tier I data link")
+defineLink("data_link_2",40,3,"二级数据链","Tier II data link")
+defineLink("data_link_3",80,1,"三级数据链","Tier III data link")
+-- Old profiles and already spawned items can contain either first-generation ID.
+M.links.data_link=M.links.remote_terminal
 
-function M.validRemoteUses(n)
-    return type(n)=="number" and n>=1 and n<=M.remoteTerminal.uses and n==math.floor(n)
+function M.linkUses(kind,n)
+    local d=M.links[kind]
+    if not d then return end
+    if kind=="data_link" and (n==nil or n==-1) then return d.uses end
+    if type(n)=="number" and n>=1 and n<=d.uses and n==math.floor(n) then return n end
 end
 
-function M.remoteItem()
-    local d=M.remoteTerminal
+function M.remoteItem(kind)
+    local d=M.links[kind or "remote_terminal"]
     return {kind=d.kind,remaining=d.uses,name=d.name,icon=d.icon}
 end
 
 function M.get(kind,tier)
-    if kind=="remote_terminal" and tier==nil then return M.remoteTerminal end
+    if M.links[kind] and tier==nil then return M.links[kind] end
     if tier==nil then tier=1 end
     local tiers=M[kind]
     return tiers and tiers[tier]

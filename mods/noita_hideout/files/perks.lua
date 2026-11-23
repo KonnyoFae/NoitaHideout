@@ -1,6 +1,6 @@
 -- A packed perk remains a single physical item. Equipped cards are direct
 -- children of this run's player; only the effect on that card is ours to remove.
-NHPerks={}
+NHPerks={enabled=false}
 local card_tag="noita_hideout_perk_card"
 local type_tag="noita_hideout_perk_type"
 local effect_tag="noita_hideout_perk_effect"
@@ -163,9 +163,9 @@ function NHPerks.unequip(state,player,slot,id,target)
     return true
 end
 
-function NHPerks.update(state,player)
+function NHPerks.update(state,player,retire)
     for slot,id in pairs(equipped(player)) do
-        if valid_slot(state,slot) then effect(id,card_info(id))
+        if not retire and valid_slot(state,slot) then effect(id,card_info(id))
         else
             -- A rolled-back profile may have fewer unlocked slots than the world.
             -- Release the physical card rather than hiding it in an inaccessible slot.

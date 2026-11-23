@@ -1,0 +1,5 @@
+<Entity name="wandstone" tags="nh_chain_effect">
+    <InheritTransformComponent />
+    <GameEffectComponent effect="EDIT_WANDS_EVERYWHERE" frames="-1" />
+    <MagicConvertMaterialComponent kill_when_finished="1" from_material="" from_material_tag="[liquid_common]" steps_per_frame="2" to_material="magic_liquid_mana_regeneration" clean_stains="0" is_circle="1" radius="64" loop="1" />
+</Entity>

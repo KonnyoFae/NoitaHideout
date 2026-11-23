@@ -77,6 +77,7 @@ function CreateItemActionEntity(action)
 end
 function EntityLoad(file)
     local e = entity(file)
+    if file:match("wand_level_0[123]%.xml$") then EntityAddComponent2(e,"LightComponent",{r=255,g=255,b=255}) end
     local item = {item_name = "Wand", always_use_item_name_in_ui = false}
     EntityAddComponent2(e, "ItemComponent", item)
     EntityAddComponent2(e, "AbilityComponent", {use_gun_script = true, mNextFrameUsable = 0,
@@ -201,3 +202,78 @@ assert(not ComponentGetIsEnabled(assert(EntityGetFirstComponentIncludingDisabled
 EntityRemoveComponent(made,script)
 local removed=assert(NHSpell.restore(assert(NHSpell.capture(made)),0,0))
 assert(not EntityGetFirstComponentIncludingDisabled(removed,"LuaComponent"))
+
+-- Vanilla merchants append this pickup effect after creating the card.
+-- Buying it removes its price component but leaves the Lua component behind.
+CreateItemActionEntity=create
+local shopEffect="data/scripts/items/shop_effect.lua"
+for _,id in ipairs({"DISC_BULLET","DISC_BULLET_BIG"}) do
+    local card=CreateItemActionEntity(id)
+    local fx=EntityAddComponent2(card,"LuaComponent",{script_item_picked_up=shopEffect,mTimesExecuted=1})
+    local enabled=id=="DISC_BULLET"
+    EntitySetComponentIsEnabled(card,fx,enabled)
+    local price=EntityAddComponent2(card,"ItemCostComponent",{cost=120})
+    assert(not NHSpell.capture(card))
+    EntityRemoveComponent(card,price)
+    local paid=assert(NHSpell.capture(card))
+    assert(paid.card.pickups[shopEffect]==enabled)
+    local copy=assert(NHSpell.restore(paid,0,0))
+    assert(assert(NHSpell.capture(copy)).card.pickups[shopEffect]==enabled)
+    assert(not EntityGetFirstComponentIncludingDisabled(copy,"ItemCostComponent"))
+    local plain=assert(NHSpell.restore(assert(NHSpell.capture(CreateItemActionEntity(id))),0,0))
+    assert(not EntityGetFirstComponentIncludingDisabled(plain,"LuaComponent"))
+    EntityAddChild(starter,card)
+    assert(NHWand.restore(assert(NHWand.capture(starter)),0,0))
+    ComponentSetValue2(fx,"script_kick","mods/other/kick.lua")
+    assert(not NHSpell.capture(card))
+    EntityRemoveFromParent(card)
+end
+
+do
+    dofile("mods/noita_hideout/files/store.lua")
+    for _,key in ipairs({"nest_wand_010","nest_wand_011","nest_wand_013","nest_wand_016"}) do
+        local preset=assert(NHDragonLoot.wandItem(key))
+        local entity=assert(NHWand.restore(preset,30,25))
+        local actual=assert(NHWand.capture(entity))
+        assert(actual.template==preset.template and #actual.cards==1 and actual.cards[1].id==preset.cards[1].id)
+        assert(NHWand.restore(actual,0,0))
+    end
+end
+
+do
+    local seed,generated
+    function dofile_once(path) assert(path=="data/scripts/gun/procedural/gun_procedural.lua") end
+    function SetRandomSeed(x,y) seed=x+32768*y end
+    function get_gun_data(cost,level,unshuffle)
+        assert(cost==({30,40,60})[level] and unshuffle==false)
+        generated=(generated or 0)+1
+        return {mana_max=100+seed%113,deck_capacity=3+seed%8}
+    end
+    function make_wand_from_gun_data(gun,wand)
+        local a=EntityGetFirstComponentIncludingDisabled(wand,"AbilityComponent")
+        ComponentSetValue2(a,"mana_max",gun.mana_max)
+        local light=EntityGetFirstComponentIncludingDisabled(wand,"LightComponent")
+        ComponentSetValue2(light,"r",128);ComponentSetValue2(light,"g",0)
+        ComponentObjectSetValue2(a,"gun_config","deck_capacity",gun.deck_capacity)
+    end
+    function wand_add_random_cards(_,wand,level)
+        assert(#EntityGetAllChildren(wand)==0)
+        for slot=1,level+1 do
+            local card=CreateItemActionEntity(slot%2==0 and "SPITTER" or "BULLET")
+            ComponentSetValue2(EntityGetFirstComponentIncludingDisabled(card,"ItemComponent"),"inventory_slot",slot-1,0)
+            EntityAddChild(wand,card)
+        end
+    end
+    for i=1,6 do
+        local value=32768+i
+        local record=assert(NHWand.generateDiscovery(value))
+        assert(seed==value and ents[last_load].dead and record.ability.mana_max==100+value%113)
+        assert(#record.cards==2+value%3 and record.template:find(("level_%02d.xml"):format(1+value%3),1,true))
+        local restored=assert(NHWand.restore(record,5,10))
+        local again=assert(NHWand.capture(restored))
+        assert(again.light and again.light.r==128 and again.light.g==0)
+        assert(again.gun_config.deck_capacity==record.gun_config.deck_capacity and #again.cards==#record.cards and generated==i)
+    end
+    wand_add_random_cards=function() error("temporary generation failure") end
+    assert(not NHWand.generateDiscovery(777) and ents[last_load].dead)
+end

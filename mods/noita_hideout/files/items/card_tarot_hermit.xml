@@ -1,0 +1,9 @@
+<Entity name="$nh_card_tarot_hermit" tags="noita_hideout_summon_card,nh_companion_tarot_hermit,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/card_tarot_hermit.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/card_tarot_hermit.png" offset_x="8" offset_y="8" />
+        <ItemComponent item_name="$nh_card_tarot_hermit" ui_description="$nh_card_tarot_hermit_desc" uses_remaining="40" ui_sprite="mods/noita_hideout/files/items/card_tarot_hermit.png" />
+        <UIInfoComponent name="$nh_card_tarot_hermit" />
+        <AbilityComponent ui_name="$nh_card_tarot_hermit" />
+    </Base>
+</Entity>

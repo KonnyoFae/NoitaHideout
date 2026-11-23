@@ -1,0 +1,5 @@
+<Entity tags="nh_staff_pose">
+    <SpriteComponent image_file="mods/noita_hideout/files/items/staff.png" offset_x="22" offset_y="8" z_index="-1.5" />
+    <VariableStorageComponent _tags="nh_pose_frame" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/staff_pose_cleanup.lua" execute_every_n_frame="1" />
+</Entity>

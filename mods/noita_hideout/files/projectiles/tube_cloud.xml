@@ -1,0 +1,6 @@
+<Entity tags="nh_tube_cloud">
+    <LifetimeComponent lifetime="300" />
+    <LightComponent radius="52" r="60" g="110" b="175" />
+    <LuaComponent execute_on_added="1" execute_every_n_frame="12"
+        script_source_file="mods/noita_hideout/files/projectiles/tube_cloud.lua" />
+</Entity>

@@ -1,0 +1,6 @@
+<Entity name="$nh_hideout_fire_tube">
+    <Base file="mods/noita_hideout/files/projectiles/tube_round.xml" />
+    <SpriteComponent image_file="mods/noita_hideout/files/projectiles/fire_bolt.png" offset_x="2" offset_y="2" emissive="1" />
+    <VariableStorageComponent _tags="nh_tube_payload" value_string="tube_cutter" />
+    <LuaComponent execute_every_n_frame="1" script_source_file="mods/noita_hideout/files/projectiles/tube_heading.lua" />
+</Entity>

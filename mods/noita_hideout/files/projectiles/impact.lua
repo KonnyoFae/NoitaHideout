@@ -1,4 +1,4 @@
--- All five projectiles run this only when removed, like Noita's Thunder Blast.
+-- Special rounds and throwables run their payload once on removal, including expiry.
 local entity=GetUpdatedEntityID()
 local shot=EntityGetFirstComponentIncludingDisabled(entity,"ProjectileComponent")
 local marker=EntityGetFirstComponentIncludingDisabled(entity,"VariableStorageComponent","nh_throwable_impact")
@@ -17,6 +17,8 @@ local effects={
     shock_grenade={damage=0.72,kind="DAMAGE_ELECTRICITY",resist="electricity",protection="PROTECTION_ELECTRICITY",
         stunProtection="STUN_PROTECTION_ELECTRICITY",effect="data/entities/misc/effect_electricity.xml",
         particles="spark_electric",sound="explosions/electric_small"},
+    flare_gun={damage=0.32,kind="DAMAGE_FIRE",effect="mods/noita_hideout/files/projectiles/sand_blindness.xml",
+        particles="spark_red",sound="explosions/fire"},
     sand_knife={damage=0.32,kind="DAMAGE_PROJECTILE",effect="mods/noita_hideout/files/projectiles/sand_blindness.xml",
         particles="sand",sound="explosions/magic_grenade_tiny"},
     metal_knife={damage=0.80,kind="DAMAGE_SLICE",particles="steel",sound="explosions/magic_grenade_tiny"},
@@ -25,7 +27,7 @@ local id=ComponentGetValue2(marker,"value_string")
 local burst=effects[id]
 if not burst then return end
 local definitions=dofile("mods/noita_hideout/files/throwables.lua")
-local radius=definitions.types[id].radius
+local radius=id=="flare_gun" and 22 or definitions.types[id].radius
 ComponentSetValue2(marker,"value_bool",true)
 
 GamePlaySound("data/audio/Desktop/explosion.bank",burst.sound,x,y)
@@ -55,6 +57,10 @@ for _,target in ipairs(EntityGetInRadiusWithTag(x,y,radius,"mortal") or {}) do
             model=burst.effect and EntityGetIsAlive(target) and EntityGetFirstComponent(target,"DamageModelComponent")
             if model and (ComponentGetValue2(model,"hp") or 0)>0 and canApplyStatus(target,model) then
                 LoadGameEffectEntityTo(target,burst.effect)
+                if id=="flare_gun" and GameGetGameEffectCount(target,"PROTECTION_FIRE")==0
+                    and (ComponentObjectGetValue2(model,"damage_multipliers","fire") or 1)>0 then
+                    LoadGameEffectEntityTo(target,"data/entities/misc/effect_on_fire.xml")
+                end
             end
         end
     end

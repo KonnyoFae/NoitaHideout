@@ -1,0 +1,5 @@
+<Entity tags="nh_staff_mana">
+    <InheritTransformComponent />
+    <LifetimeComponent lifetime="300" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/staff_mana.lua" execute_every_n_frame="6" />
+</Entity>

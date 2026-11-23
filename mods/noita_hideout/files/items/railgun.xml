@@ -1,0 +1,12 @@
+<Entity name="$nh_hideout_railgun" tags="nh_support_weapon,nh_loaded_gun,noita_hideout_railgun,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/railgun.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/railgun.png" offset_x="4" offset_y="9" />
+        <ItemComponent item_name="$nh_hideout_railgun" uses_remaining="20" ui_description="$nh_hideout_railgun_desc"
+            ui_sprite="mods/noita_hideout/files/items/railgun.png" />
+        <UIInfoComponent name="$nh_hideout_railgun" />
+        <AbilityComponent ui_name="$nh_hideout_railgun" />
+    </Base>
+    <HotspotComponent _tags="shoot_pos" offset.x="11" offset.y="-3" />
+    <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
+</Entity>

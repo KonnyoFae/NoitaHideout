@@ -1,0 +1,6 @@
+<Entity name="$nh_reinforcement_mg_turret" tags="nh_deployed_turret,nh_mg_turret,nh_terrain_mount">
+    <Base file="mods/noita_hideout/files/turrets/emplacement_base.xml">
+        <DamageModelComponent hp="12" max_hp="12" />
+    </Base>
+    <VariableStorageComponent _tags="nh_turret_ammo" value_int="3000" value_float="3000" />
+</Entity>

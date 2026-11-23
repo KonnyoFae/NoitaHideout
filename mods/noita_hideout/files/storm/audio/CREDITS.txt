@@ -1,0 +1,15 @@
+cycle_storm/drizzle
+“AMBIENT - Rain - Light (LOOP)” by Arctura
+https://freesound.org/people/Arctura/sounds/34065/
+Licensed under Creative Commons Attribution 3.0 Unported
+https://creativecommons.org/licenses/by/3.0/
+
+cycle_storm/downpour
+Heavy rain by Q.K., distributed through mymonths and Regional Weather
+CC0 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Both OGG sources are from Regional Weather.
+https://github.com/t-affeldt/regional_weather/tree/master/sounds
+Cycle Storm adjusted levels, crossfaded the loop seams and packaged the
+recordings in FMOD banks. In-game weather controls the mix between them.

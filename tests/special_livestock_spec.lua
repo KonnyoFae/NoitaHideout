@@ -6,6 +6,8 @@ function AddFlagPersistent(key) flags[key]=true end
 dofile("mods/noita_hideout/files/store.lua")
 dofile("mods/noita_hideout/files/potion.lua")
 
+-- This simulation exercises production clocks without world entities.
+NHWand={generateDiscovery=function(seed) return {kind="wand",ability={mana=seed},cards={}} end}
 local state=assert(NHStore.load())
 NHStore.newRun(state)
 local function buy(id,slot) return NHStore.buyGood(state,{id=id,pen=slot},state.farm.time) end

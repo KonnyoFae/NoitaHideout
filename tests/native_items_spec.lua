@@ -23,6 +23,24 @@ NHNative.registerTranslations()
 local first_registration = content
 NHNative.registerTranslations()
 assert(content == first_registration)
+assert(content:find("\nnh_hideout_locale,en,en,en,en,en,en,en,en,zh,en,en,\n",1,true))
+for row in content:gmatch("\n(nh_[^\r\n]+)") do
+    assert(row:sub(-1)==",", "Missing final CSV delimiter for "..row:match("^[^,]+"))
+end
+for _,sample in ipairs({
+    {"zh","完全汉化","zh"}, {"zh","任意语言名","zh"}, {"en","English","en"},
+    {"","完全汉化","zh"}, {"$nh_hideout_locale","简体中文","zh"}, {"","日本語","en"}
+}) do
+    function GameTextGet(key) return key=="$nh_hideout_locale" and sample[1] or sample[2] end
+    assert(NHNative.language()==sample[3])
+end
+local firearms=dofile("mods/noita_hideout/files/firearms.lua")
+for _,kind in ipairs({"scatter_revolver","marksman_rifle"}) do
+    local gun=firearms.items[kind]
+    local en='"'..gun.noteEn..'"'
+    local expected=string.rep(en..",",8)..gun.noteZh..","..en..","..en
+    assert(content:find("\nnh_hideout_"..kind.."_desc,"..expected..",\n",1,true))
+end
 local cols = {}
 for cell in content:match("nh_hideout_pouch,([^\n]+)"):gmatch("[^,]+") do cols[#cols + 1] = cell end
 assert(#cols == 11 and cols[1] == "Injector pouch" and cols[9] == "针剂包")
@@ -30,11 +48,11 @@ for _,kind in ipairs({"pouch","card_wallet","remote_terminal"}) do
     local row=assert(content:match("\nnh_hideout_"..kind.."_desc,([^\n]+)"))
     assert(row:find("Right-click",1,true) and row:find("右键",1,true))
 end
-for _,kit in ipairs({{"tactical_medkit","战术医疗包","15%"},{"advanced_medkit","高端医疗包","25%"}}) do
+for _,kit in ipairs({{"bandage","绷带","5%"},{"medkit","小医疗包","15%"},{"tactical_medkit","战术医疗包","25%"},{"advanced_medkit","高端医疗包","40%"}}) do
     local name=assert(content:match("\nnh_hideout_"..kit[1]..",([^\n]+)"))
     local desc=assert(content:match("\nnh_hideout_"..kit[1].."_desc,([^\n]+)"))
     assert(name:find(kit[2],1,true) and desc:find(kit[3],1,true) and desc:find("最大生命值",1,true))
-    assert(select(2,desc:gsub(",",""))==10)
+    assert(select(2,desc:gsub(",",""))==11)
 end
 local throwables=dofile("mods/noita_hideout/files/throwables.lua")
 for _,id in ipairs(throwables.order) do

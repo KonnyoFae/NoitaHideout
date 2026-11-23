@@ -36,7 +36,7 @@ assert(not NHStore.startOrder(s,"bandage") and s.resources.fiber==4)
 s.resources.sugar=4
 assert(NHStore.startOrder(s,"bandage") and not s.resources.fiber and s.resources.sugar==2)
 finish()
-assert(#s.warehouse==1 and s.warehouse[1].item.kind=="bandage" and s.warehouse[1].item.count==8)
+assert(#s.warehouse==1 and s.warehouse[1].item.kind=="bandage" and s.warehouse[1].item.count==4)
 
 -- A partial stack must keep its slot. At full capacity either kind of
 -- production must fail before taking any resources or rolls.
@@ -47,13 +47,13 @@ for slot=2,limit do
 end
 s.resources.fiber=4
 assert(not NHStore.startOrder(s,"bandage") and s.resources.fiber==4 and s.resources.sugar==2)
-assert(not NHStore.startOrder(s,"field_medkit") and s.resources.herb==2 and s.warehouse[1].item.count==8)
-assert(not s.order and NHStore.warehouseIngredientCount(s,"bandage")==8)
+assert(not NHStore.startOrder(s,"field_medkit") and s.resources.herb==2 and s.warehouse[1].item.count==4)
+assert(not s.order and NHStore.warehouseIngredientCount(s,"bandage")==4)
 -- A separately stored last roll, including a legacy record without count,
 -- can pay for a medkit and free up its own slot even with the earlier stack.
 s.warehouse[2].item={kind="bandage"}
 local consumedId=s.warehouse[2].id
-assert(NHStore.warehouseIngredientCount(s,"bandage")==9)
+assert(NHStore.warehouseIngredientCount(s,"bandage")==5)
 assert(NHStore.commit(s))
 local old=assert(NHStore.load())
 assert(NHStore.startOrder(s,"field_medkit") and s.order.output.slot==2)
@@ -64,8 +64,8 @@ s=assert(NHStore.load())
 assert(not NHStore.startOrder(s,"field_medkit") and s.order.output.slot==2)
 finish()
 local medkit=s.warehouse[NHStore.slotIndex(s,"warehouse",2,"medkit")]
-assert(medkit.item.kind=="medkit" and medkit.item.remaining==3 and medkit.id~=consumedId)
-assert(s.warehouse[1].item.count==8)
+assert(medkit.item.kind=="medkit" and medkit.item.remaining==8 and medkit.id~=consumedId)
+assert(s.warehouse[1].item.count==4)
 assert(#s.warehouse==limit and s.safe[1].item.kind=="bandage" and s.materials.blood==50)
 
 -- A full warehouse rejects a food order before taking the harvest.
@@ -90,5 +90,5 @@ assert(changed and delivered and NHStore.commit(s))
 s=assert(NHStore.load())
 assert(not s.order and not NHStore.advanceProduction(s,boost) and #s.warehouse==limit)
 local quickKit=s.warehouse[NHStore.slotIndex(s,"warehouse",free.slot,"medkit")].item
-assert(quickKit.kind=="medkit" and quickKit.remaining==3 and not s.materials.water and not s.materials.blood)
+assert(quickKit.kind=="medkit" and quickKit.remaining==8 and quickKit.count==4 and not s.materials.water and not s.materials.blood)
 print("Farm crafting: all four products, warehouse-only bandage payment, full slots, stale commits and single delivery passed.")

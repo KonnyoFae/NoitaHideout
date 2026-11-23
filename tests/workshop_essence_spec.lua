@@ -12,7 +12,7 @@ for _,entry in ipairs(NHStore.recipes) do
 end
 local recipe=assert(recipes.medical)
 assert(recipe.category=="medical" and recipe.facility=="medical" and not recipe.resources)
-assert(recipe.item.kind=="medkit" and recipe.item.remaining==3)
+assert(recipe.item.kind=="medkit" and recipe.item.remaining==8 and recipe.item.count==4)
 assert(not recipes.medkit_essence)
 local healingCost={medkit=0}
 for _,kind in ipairs({"tactical_medkit","advanced_medkit","field_surgery_kit","tactical_surgery_kit","advanced_surgery_kit"}) do
@@ -68,7 +68,7 @@ local function deliver()
     assert(not NHStore.advanceProduction(s,request))
 end
 deliver()
-assert(#s.warehouse==1 and s.warehouse[1].item.kind=="medkit" and s.warehouse[1].item.remaining==3)
+assert(#s.warehouse==1 and s.warehouse[1].item.kind=="medkit" and s.warehouse[1].item.remaining==8)
 
 -- A prepaid 0.20.0 order already contains its output and reserved slot.
 -- Loading it in the new version must deliver exactly once without another charge.
@@ -104,13 +104,13 @@ for _,typeId in ipairs(NHInjectors.order) do
     assert((s.resources[d.essence] or 0)==original)
     deliver()
     local item=s.warehouse[#s.warehouse].item
-    assert(item.kind=="dose" and item.subtype==typeId and item.remaining==3 and item.count==1)
+    assert(item.kind=="dose" and item.subtype==typeId and item.remaining==5 and item.count==1)
 end
 for _,example in ipairs({
-    {id="grenade_essence",base="grenade",category="weapons",key="essence_high_energy",cost=4,kind="grenade"},
+    {id="grenade_essence",base="grenade",category="weapons",key="essence_high_energy",cost=4,kind="magic_tube"},
 }) do
     local entry,original=recipes[example.id],recipes[example.base]
-    assert(entry.category==example.category and entry.facility==original.facility and entry.item.kind==original.item.kind and entry.item.count==8 and original.item.count==8)
+    assert(entry.category==example.category and entry.facility==original.facility and entry.item.kind==original.item.kind and entry.item.count==4 and original.item.count==1 and original.item.remaining==6 and entry.item.remaining==6)
     assert(entry.resources[example.key]==example.cost and #entry.inputs==0)
     s.resources[example.key]=example.cost
     local ok,reason=NHStore.startOrder(s,entry.id)
@@ -134,7 +134,7 @@ for _,example in ipairs({
     deliver()
     assert(s.warehouse[#s.warehouse].item.kind==example.kind)
 end
-assert(s.finished==5+#NHInjectors.order and #s.warehouse==s.finished)
+assert(s.finished==5+#NHInjectors.order and #s.warehouse==s.finished-1 and s.warehouse[#s.warehouse].item.count==5)
 
 -- Healing spells still fund the hideout's healing essence balance.
 s.levels.salvage=1

@@ -1,0 +1,10 @@
+<Entity name="$nh_hideout_ammo_rig" tags="noita_hideout_ammo_rig,item_pickup,item_physics,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base.xml">
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/ammo_rig.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/ammo_rig.png" offset_x="8" offset_y="8" />
+        <ItemComponent item_name="$nh_hideout_ammo_rig" ui_description="$nh_hideout_ammo_rig_desc" ui_sprite="mods/noita_hideout/files/items/ammo_rig.png" />
+        <UIInfoComponent name="$nh_hideout_ammo_rig" />
+        <AbilityComponent ui_name="$nh_hideout_ammo_rig" />
+    </Base>
+    <VariableStorageComponent _tags="nh_reserve" name="reserve_points" value_int="0" />
+</Entity>
