@@ -1,4 +1,6 @@
 NHBank={}
+local ew=NHEW or dofile("mods/noita_hideout/files/ew.lua")
+local sharedWallet="Wallet transfers are unavailable with shared gold."
 
 -- money is int64 in Noita, while a Lua number can only represent integers
 -- exactly up to maxGold. An infinite wallet replenishes itself after debits.
@@ -15,6 +17,7 @@ end
 -- Commit both the savings and the corresponding change owed to this run's
 -- wallet in one profile revision. Ordinary shop debits only affect savings.
 function NHBank.prepare(draft,player,request)
+    if not ew.walletAllowed() then return nil,sharedWallet end
     local deposit=request.direction=="deposit"
     if not deposit and request.direction~="withdraw" then return nil,"Invalid gold transfer." end
     local money=NHBank.wallet(player)
@@ -46,6 +49,9 @@ end
 -- earlier world applies just the missing difference, retaining pickups and
 -- purchases. A new run starts a new ledger and keeps the profile savings.
 function NHBank.reconcile(state,player)
+    -- The receipt belongs to the private wallet, including after a reload.
+    -- Leave both sides of a prepared transfer intact until that wallet returns.
+    if not ew.walletAllowed() then return false,sharedWallet end
     local key="noita_hideout.bank_wallet."..state.profile.."/"..state.runSerial
     local receipt=GlobalsGetValue(key,"0")
     local old,planned,before=receipt:match("^(-?%d+)/(-?%d+)/(%d+)$")

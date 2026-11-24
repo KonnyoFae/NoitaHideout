@@ -4,6 +4,14 @@ local mod_id = "noita_hideout"
 mod_settings_version = 1
 mod_settings = {
     {
+        id = "ew_rescue_mode",
+        ui_name = "EW 联机救援方式（房主） / EW rescue mode (host)",
+        ui_description = "重启联机后全房生效。增援模式下死亡后直接等待空投；原生模式下由队友击败替身复活。\nApplies to the lobby on restart. Wait for a drop pod in reinforcement mode, or defeat the Notplayer to revive in EW mode.",
+        value_default = "pod",
+        values = {{"pod","呼叫增援 / Call Reinforcements"},{"native","EW 原生救援 / EW revival"}},
+        scope = MOD_SETTING_SCOPE_RESTART,
+    },
+    {
         id = "return_key",
         ui_name = "终端返航（长按） · Recall (hold)",
         value_default = "10",

@@ -2,10 +2,13 @@
 -- both settle. The damage hook and the controller execute in separate Lua VMs.
 local R={}
 local root="mods/noita_hideout/files/"
+local ew=NHEW or dofile(root.."ew.lua")
+local releasedPlayer
 local function meter(player)
     return EntityGetFirstComponentIncludingDisabled(player,"VariableStorageComponent","nh_rescue")
 end
 local function captureGold(player,record,source,x,y)
+    if not ew.walletAllowed() then return false end
     local wallet=EntityGetFirstComponentIncludingDisabled(player,"WalletComponent")
     if not wallet then return false end
     local money=ComponentGetValue2(wallet,"money")
@@ -30,6 +33,7 @@ end
 -- Tags persist with components, so save/continue restores only our suspension.
 function R.lifePriority(player,available)
     if not player then return end
+    if available~=false and not ew.rescueAllowed() then return end
     if available==nil then
         local record=meter(player)
         available=record and (ComponentGetValue2(record,"value_string")~="" or ComponentGetValue2(record,"value_int")>0)
@@ -54,6 +58,7 @@ function R.lifePriority(player,available)
 end
 
 function R.intercept(player,dm)
+    if not ew.rescueAllowed() or not ew.walletAllowed() then return end
     local record=meter(player)
     if not record or ComponentGetValue2(dm,"hp")>0 then return end
     if ComponentGetValue2(record,"value_string")=="" then
@@ -80,9 +85,14 @@ end
 function R.polymorph(state,body)
     local dm=body and EntityGetFirstComponentIncludingDisabled(body,"DamageModelComponent")
     if not dm then return end
+    local tag="nh_rescue_poly_wait"
+    if not ew.rescueAllowed() then
+        -- EW takes over this body's death flags, even if we set them first.
+        if ComponentHasTag(dm,tag) then ComponentRemoveTag(dm,tag) end
+        return
+    end
     local key=worldKey(state)
     local species=GlobalsGetValue(key..".companion","")
-    local tag="nh_rescue_poly_wait"
     if species=="" and not state.insuranceActive then
         if ComponentHasTag(dm,tag) then
             ComponentRemoveTag(dm,tag)
@@ -112,6 +122,24 @@ function R.polymorph(state,body)
 end
 
 function R.arm(state,player)
+    if not ew.rescueAllowed() then
+        if releasedPlayer~=player then
+            -- Pre-compatibility saves can have native extra lives suspended and
+            -- an escrowed loss on the body. Keep the escrow for solo settlement.
+            R.lifePriority(player,false)
+            local record=meter(player)
+            if record then
+                if ComponentGetValue2(record,"value_string")=="" then
+                    EntityRemoveComponent(player,record)
+                else
+                    ComponentSetValue2(record,"value_bool",false)
+                end
+            end
+            releasedPlayer=player
+        end
+        return
+    end
+    releasedPlayer=nil
     local dm=EntityGetFirstComponentIncludingDisabled(player,"DamageModelComponent")
     if not dm then return end
     local key=worldKey(state)
@@ -155,6 +183,7 @@ function R.arm(state,player)
 end
 
 function R.settle(state,player,homeX,homeY,commit,dispatch)
+    if not ew.rescueAllowed() or not ew.walletAllowed() then return end
     local record=meter(player)
     if not record then return end
     local pending=ComponentGetValue2(record,"value_string")

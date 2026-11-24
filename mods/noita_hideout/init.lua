@@ -1,4 +1,10 @@
 local files = "mods/noita_hideout/files/"
+NHEW=dofile(files.."ew.lua")
+if ModIsEnabled and ModIsEnabled("quant.ew") and dofile(files.."ew_wait_peer.lua").install() then
+    dofile(files.."ew_reinforce_patch.lua").install()
+end
+local expeditions=dofile(files.."ew_expeditions.lua")
+dofile_once(files.."ew_items.lua")
 local storm = dofile(files .. "storm/runtime.lua")
 dofile_once(files .. "store.lua")
 dofile_once(files .. "bank.lua")
@@ -7,12 +13,14 @@ local mountain_storage=dofile(files .. "mountain_storage.lua")
 local terminals=dofile(files .. "terminals/station.lua")
 local remoteTerminal=dofile(files .. "terminals/remote.lua")
 local travel=dofile(files.."travel/network.lua")
+travel.setMultiplayer(NHEW)
 local terminalAccess=dofile(files.."terminals/access.lua")
 local fireSupport=dofile(files.."fire_support.lua")
 dofile_once(files .. "home_wand_edit.lua")
 dofile_once(files .. "wand.lua")
 dofile_once(files .. "potion.lua")
 dofile_once(files .. "transfers.lua")
+dofile_once(files .. "ew_deposit.lua")
 NHInventoryUse=dofile(files .. "inventory_use.lua")
 NHCompanions.registerItems()
 NHCardWallets.registerItem()
@@ -38,6 +46,16 @@ dofile_once(files .. "ui.lua")
 NHNative.registerTranslations()
 
 local deathScript=files.."enemy_loot.lua"
+-- EW enumerates extra modules in its OnModInit, including when it loads first.
+function OnModPreInit()
+    if ModIsEnabled("quant.ew") then
+        local modules="mods/quant.ew/files/api/extra_modules.lua"
+        ModLuaFileAppend(modules,files.."ew_module.lua")
+        ModLuaFileAppend(modules,files.."ew_claim.lua")
+        ModLuaFileAppend(modules,files.."ew_reinforce_rpc.lua")
+        ModLuaFileAppend(modules,files.."ew_reinforce_fx.lua")
+    end
+end
 function OnModInit()
     dofile(files .. "storm/register.lua")
     ammoRuntime.registerStaff()
@@ -95,12 +113,32 @@ local right_use
 local inventory_aim={x=1,y=0}
 local next_room_check,pending_visit=0,nil
 local bank_synced=false
+local wallet_allowed
+local waiting_since,waiting_notice,waiting_profile
 
 local function tr(zh, en)
     return lang == "zh" and zh or en
 end
 
 local error_translations = {
+    ["Pick up this item before storing it."]="请先用原版交互拾取，再从自己的物品栏存入。",
+    ["The original owner must handle this legacy item."]="这件旧物品的来源无法在联机中确认，已保留原物。",
+    ["This container belongs to another profile."]="这只容器的内容保存在另一位玩家的档案中，已保留原物。",
+    ["A free personal inventory slot is required."]="请先腾出一个个人物品栏位。",
+    ["Waiting for item ownership. Try again."]="正在等待房主确认物品归属，请稍后重试。",
+    ["Another player claimed this item."]="另一位玩家已预留或存入这件物品。",
+    ["Another deposit is pending."]="已有一件物品正在入库，请先完成或取消。",
+    ["Could not lock this item for deposit."]="无法锁定这件物品，已停止入库。",
+    ["Not enough room in the hideout profile to finish this deposit."]="藏身处档案空间不足，无法完成这次入库。",
+    ["The item could not be stored."]="这件物品未能入库。",
+    ["The selected item changed before deposit."]="物品已发生变化，已停止入库。",
+    ["The item could not be located."]="未找到申请入库的原物。",
+    ["Could not verify a local deposit receipt. The item remains locked."]="暂时无法核实本机的入库记录，物品仍由藏身处保管。",
+    ["Storage access is no longer available."]="已离开存取范围，入库申请已撤销。",
+    ["Destination is no longer accessible."]="当前无法使用原先选定的存入位置。",
+    ["Item ownership could not be verified."]="无法核实这件物品的联机归属，已保留原物。",
+    ["Entangled Worlds handles player death."]="EW 接管联机死亡判定，已有保单和同伴会保留。",
+    ["Wallet transfers are unavailable with shared gold."]="EW 共享金币或连接待确认期间，私人银行暂停存取。",
     ["Spell recipe unavailable."]="尚未解锁此法术的合成配方。",
     ["Fire support unavailable."]="请装备数据链并建造火力支援站。",
     ["No clear strike path."]="目标附近没有可用弹道，请重新标记。",
@@ -297,15 +335,49 @@ local function save(draft,only_time)
     return true
 end
 
--- The run token lives in the world save, the inventory in the save-slot profile.
--- Stage the token first so an interrupted allocation can retry the same serial.
+local function confirmed_world(profile)
+    if NHEW.bind(profile) and NHEW.ready() then return NHEW.world() end
+    local frame=GameGetFrameNum()
+    waiting_since=waiting_since or frame
+    if frame-waiting_since>=300 and not waiting_notice then
+        GamePrint(tr("藏身处等待联机确认，请检查双方的 EW 和藏身处版本。",
+            "Hideout is waiting for the host. Check that everyone's EW and Hideout versions match."))
+        waiting_notice=true
+    end
+end
+
+-- A solo run stages its token before allocating a serial. A multiplayer run
+-- selects a local expedition journal after the host confirms its world.
 local function attach()
-    if state and run_id then return true end
+    if state and run_id then
+        local world=NHEW.enabled() and NHEW.world()
+        if not world or state.ewActive==world then return true end
+        invalidate()
+        next_attempt=0
+        NHClock.reset()
+        NHFarm.resetClock()
+        pending_visit,popup,case_open,opened=nil,nil,nil,false
+    end
     if GameGetFrameNum() < next_attempt then return false end
     next_attempt = GameGetFrameNum() + 60
+    local scope
+    if waiting_profile then
+        scope=confirmed_world(waiting_profile)
+        if not scope then return false end
+    end
     local draft, err = NHStore.load()
     if not draft then report(err); return false end
-    local token = GlobalsGetValue(run_key, "")
+    if NHEW.enabled() and waiting_profile~=draft.profile then
+        waiting_profile=draft.profile
+        scope=confirmed_world(waiting_profile)
+        if not scope then return false end
+    end
+    if expeditions.select(draft,scope) then
+        local ok,reason=NHStore.commit(draft)
+        if not ok then report(reason); return false end
+    end
+    local token = scope and draft.profile.."/"..draft.runSerial or GlobalsGetValue(run_key, "")
+    if scope then GlobalsSetValue(run_key,token) end
     if token == "" then
         token = draft.profile .. "/" .. (draft.runSerial + 1)
         GlobalsSetValue(run_key, token)
@@ -322,6 +394,8 @@ local function attach()
         if not save(draft) then return false end
     end
     state, run_id = draft, serial
+    last_error,status=nil,""
+    waiting_since,waiting_notice,waiting_profile=nil,nil,nil
     if draft.closedThrough<serial then NHAffinity.bind(draft) end
     return true
 end
@@ -359,20 +433,29 @@ local function near_hideout(player)
     return terminalAccess.access(player,home_x,home_y,resolve_access)
 end
 
+function NHEWDeposit.canAccess(s,player,intent)
+    if intent.dest=="warehouse" or intent.dest=="docks" then return near_hideout(player) end
+    return intent.dest=="safe" or intent.dest=="gear" or intent.dest=="bag"
+end
+
 local function active_run()
-    return state and run_id and state.closedThrough < run_id
+    if not state or not run_id or state.closedThrough>=run_id then return false end
+    local scope=NHEW.enabled() and NHEW.world()
+    return not scope or scope==state.ewActive
 end
 
 local function active_draft()
     local draft, err = NHStore.load()
     if not draft then report(err); return end
-    if draft.profile ~= state.profile or draft.runSerial ~= run_id or draft.closedThrough >= run_id then
+    if draft.profile ~= state.profile or draft.ewActive~=state.ewActive or draft.runSerial ~= run_id or draft.closedThrough >= run_id then
         invalidate()
         report(tr("远征档案已经改变。", "The active run has changed."))
         return
     end
     return draft
 end
+
+NHEWReinforce=dofile(files.."ew_reinforce.lua")(function() return state end,active_draft,save,tr,feedback)
 
 local function commit_edit(edit, zh, en, arg)
     -- Edit a detached snapshot; a failed write must not leave changed fields in the HUD.
@@ -702,7 +785,7 @@ local function inventory_view()
     for _,good in ipairs(NHStore.shopGoods) do
         local ready,reason=NHStore.canBuyGood(state,good)
         local resource=NHStore.alchemyResources[good.resource]
-        if not good.insurance and not bank_synced then ready,reason=false,"Waiting for wallet settlement." end
+        if not good.insurance and NHEW.walletAllowed() and not bank_synced then ready,reason=false,"Waiting for wallet settlement." end
         model.shopGoods[#model.shopGoods+1]={id=good.id,category=good.category,name=tr(good.zh,good.en),
             pen=good.animal and ready and reason or nil, yield=good.yield,
             icon=good.icon,resourceName=resource and tr(resource.zh,resource.en),
@@ -1095,7 +1178,7 @@ local function workshop_action(player,action,index)
         if not bank_synced then report(reason); return end
         last_error,status=nil,""
     elseif action=="shop_buy" and type(index)=="table" then
-        if index.id~="rescue_policy" and not bank_synced then report("Waiting for wallet settlement."); return end
+        if index.id~="rescue_policy" and NHEW.walletAllowed() and not bank_synced then report("Waiting for wallet settlement."); return end
         if index.id=="rescue_policy" then
             commit_edit(NHStore.buyGood,"已投保，可救援一次。","Insured for one rescue.",index)
         elseif NHLivestock.species[index.id] then
@@ -1154,6 +1237,11 @@ end
 local function dispatch(player, action, index)
     terminalAccess.invalidateAccess()
     if not opened or not active_run() then return end
+    if action=="cancel_deposit" then
+        local ok,reason=NHEWDeposit.cancel(state,index)
+        if not ok and reason then report(reason) end
+        return
+    end
     if action=="travel_to" then
         if case_open then travel.choose(player,index) end
         return
@@ -1393,6 +1481,7 @@ local function dispatch(player, action, index)
             -- Vanilla can complete its outside-inventory throw before the post
             -- callback. Reclaim only this drag's original entity and empty slot.
             if not slot.entity and EntityGetRootEntity(id)==id then
+                if NHEW.enabled() then report("Pick up this item before storing it."); return end
                 if not place_in_slot(player,id,slot) then return end
             elseif slot.entity~=id then return end
             local inv = EntityGetFirstComponentIncludingDisabled(player,"Inventory2Component")
@@ -1501,7 +1590,8 @@ local function pickup_press(player,after_update)
                     and not pickup.stackTarget(state,player,slot.kind,slot.count,slot.entity)
                 if (toSafe or safeStack) and slot.kind~="other" and not EntityGetFirstComponentIncludingDisabled(slot.entity,"ItemCostComponent") then
                     local ok,err=quick_deposit(player,slot,false)
-                    if ok then feedback(tr("已拾取到安全箱。","Picked up into the secure case.")) else transfer_error(err) end
+                    if not ok then transfer_error(err)
+                    elseif err~="Item deposit queued." then feedback(tr("已拾取到安全箱。","Picked up into the secure case.")) end
                 end
                 return
             end
@@ -1579,6 +1669,14 @@ local function suppress_item_input(player)
 end
 
 function OnWorldInitialized()
+    NHEW.reset()
+    NHEWDeposit.reset()
+    if NHEW.enabled() then
+        for _,key in ipairs({"status","issuer","local_peer","item_request","reinforce_mode","reinforce_targets","reinforce_request",
+            "reinforce_sponsor_offer","reinforce_sponsor_reply","reinforce_redirect"}) do GlobalsSetValue("nh_ew."..key,"") end
+    end
+    wallet_allowed=nil
+    waiting_since,waiting_notice,waiting_profile=nil,nil,nil
     travel.reset()
     fireSupport.reset()
     ammoRuntime.reset()
@@ -1604,6 +1702,7 @@ function OnWorldInitialized()
 end
 
 function OnPlayerSpawned(player)
+    if not NHEW.localBody(player) then return end
     NHSurgery.reset(player)
     player_id = player
     set_home(player, true)
@@ -1631,9 +1730,14 @@ function OnPausedChanged(is_paused,is_inventory_pause)
     if save(draft,not produced) and cards and #cards>0 then feedback(NHCompanions.rewardText(cards,lang,state)) end
 end
 
+local function local_body_with_tag(tag)
+    for _,id in ipairs(EntityGetWithTag(tag) or {}) do
+        if NHEW.localBody(id) then return id end
+    end
+end
 local function current_player()
-    if player_id and EntityGetIsAlive(player_id) and EntityHasTag(player_id, "player_unit") then return player_id end
-    player_id = (EntityGetWithTag("player_unit") or {})[1]
+    if player_id and EntityGetIsAlive(player_id) and EntityHasTag(player_id,"player_unit") and NHEW.localBody(player_id) then return player_id end
+    player_id=local_body_with_tag("player_unit")
     return player_id
 end
 
@@ -1658,8 +1762,8 @@ function OnWorldPreUpdate()
         terminals.home(player,home_x,home_y)
         if active_run() then rescue.arm(state,player) end
     elseif active_run() then
-        local body=(EntityGetWithTag("polymorphed_player") or {})[1]
-        if not ammoRuntime.guardMimic(body) then rescue.polymorph(state,body) end
+        local body=local_body_with_tag("polymorphed_player")
+        if body and not ammoRuntime.guardMimic(body) then rescue.polymorph(state,body) end
     end
     -- Covers existing worlds and enemies with independent entity templates.
     if player and GameGetFrameNum()%15==0 then
@@ -1684,7 +1788,7 @@ function OnWorldPreUpdate()
             local ok,err,dest,slot=transfer(player,source,near_hideout(player))
             if ok then
                 status=""
-                if dest then NHUI.showTransfer(dest,source.kind,slot) end
+                if dest and err~="Item deposit queued." then NHUI.showTransfer(dest,source.kind,slot) end
             elseif err then transfer_error(err) end
         end
     end
@@ -1739,10 +1843,29 @@ function OnWorldPostUpdate()
     right_use=nil
     surgery_feedback(NHSurgery.update(player))
     if player then set_home(player, false) end
-    local traveler=player or (EntityGetWithTag("polymorphed_player") or {})[1]
-    if not run_id and not traveler then return end
+    local traveler=player or local_body_with_tag("polymorphed_player")
+    -- A saved spectator has no playable body. Its profile still has to bind
+    -- to this EW peer before the host can authorize a reinforcement.
+    if not run_id and not traveler and not (NHEW.enabled() and GameHasFlagRun("ew_flag_notplayer_active")) then return end
     if not attach() or not active_run() then return end
     local frame = GameGetFrameNum()
+    if state.ewDepositPending and NHEW.enabled() then
+        local event,reason=NHEWDeposit.update(state,player,NHEWDeposit.canAccess)
+        if event then
+            model_cache=nil
+            if event=="stored" then feedback(tr("物品已入库。","Item deposited."))
+            elseif event=="cancelled" then feedback(tr("入库申请已撤销。","Deposit cancelled."))
+            elseif reason then report(reason) end
+        end
+    end
+    if state.ewReinforcePending and frame%10==0 then
+        NHEWReinforce.settle()
+        if not state then return end
+    end
+    if frame%10==0 and NHEW.enabled() and (state.ewReinforceSponsors or GlobalsGetValue("nh_ew.reinforce_sponsor_offer","")~="") then
+        NHEWReinforce.updateSponsor()
+        if not state then return end
+    end
     if frame%60==0 then
         turretRuntime.upgradeEmplacements()
         turretRuntime.upgradeWorkshopDecoys()
@@ -1755,7 +1878,11 @@ function OnWorldPostUpdate()
         if active then mimicFrames=frames else rescue.polymorph(state,traveler) end
     end
     if not traveler then NHClock.suspend(); NHFarm.suspendClock(); opened,case_open=false,nil; return end
-    if player and not bank_synced then
+    local wallet_now=NHEW.walletAllowed()
+    if wallet_now~=wallet_allowed then
+        wallet_allowed,bank_synced,model_cache=wallet_now,false,nil
+    end
+    if player and wallet_now and not bank_synced then
         local reason
         bank_synced,reason=NHBank.reconcile(state,player)
         if bank_synced then model_cache=nil else report(reason) end
@@ -1844,6 +1971,7 @@ function OnWorldPostUpdate()
     if opened and nearby then
         model.bankGold=state.bankGold
         model.walletGold,model.walletInfinite=NHBank.wallet(player)
+        model.ewWalletPaused=not wallet_now
         if not bank_synced then model.walletGold=nil end
         model.farm=NHFarm.view(state,lang,farm_time)
     end
@@ -1879,6 +2007,7 @@ function OnWorldPostUpdate()
         model.cells,model.pouchCapacity=pouch.cells,d.capacity
     end
     model.mode = case_open and "case" or (popup and "container" or "closed")
+    model.ewDeposit=state.ewDepositPending and NHEWDeposit.view(state) or nil
     model.open, model.near, model.lang, model.status = opened, nearby, lang, status
     model.at_station=at_station
     model.landmarkName=not opened and landmark_name or nil
@@ -1908,6 +2037,9 @@ function OnPlayerDied()
     NHHomeWandEdit.update(nil,false)
     popup=nil
     opened, case_open = false, nil
+    -- EW can revive this same player. A death callback alone cannot close
+    -- the expedition or discard their carried injector pouch.
+    if NHEW.enabled() then return end
     if GlobalsGetValue(run_key, "") == "" then return end
     next_attempt = 0
     if not attach() or not active_run() then return end

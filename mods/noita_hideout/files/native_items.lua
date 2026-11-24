@@ -53,6 +53,11 @@ function NHNative.registerTranslations()
     if not original then return end
     local labels = {
         {"nh_hideout_locale","en","zh"},
+        {"nh_hideout_ew_await_pod","A living teammate can call reinforcements with a data link and 5 supply packs.","等待存活队友通过数据链呼叫增援（5 点补给）。"},
+        {"nh_hideout_ew_no_sponsor","Reinforcement canceled. No online teammate could cover the 5 supply packs. A teammate can call again.","增援已取消：在线队员的补给均不足 5 点。队友补足资源后可以重新呼叫。"},
+        {"nh_hideout_ew_redirect_pod","No clear revival space. A living teammate can move into the open and call again to redirect the same pod for free.","死亡地点附近没有可用空间。存活队友可移到空处，再次呼叫以免费改投这一舱。"},
+        {"nh_hideout_ew_wait_failed","Could not enter spectator mode safely. Your character and equipment were kept.","无法安全进入观战，已保留角色和装备。"},
+        {"nh_hideout_ew_wait_carrying_peer","Put down the teammate polymorphed into an item before entering spectator mode.","请先放下已变形成物品的队友，再进入观战。"},
         {"nh_storm_sites_confirmed","Incoming storm facilities","风暴设施信号已确认"},
         {"nh_storm_sites_pending_both","Look for oil rigs in the desert and a gas tower in the snowy wasteland.","前往地表沙漠接应油钻，前往落雪荒原接应气塔。"},
         {"nh_storm_sites_pending_well","Look for a gas tower in the snowy wasteland.","前往落雪荒原接应气塔。"},
@@ -79,6 +84,7 @@ function NHNative.registerTranslations()
         {"nh_travel_pyramid_unlocked","Pyramid · West Foot linked to the mothership.","金字塔西麓已接入母舰航线。"},
         {"nh_travel_gate_ready","Portal ready. Step inside to travel.","传送门已开启，走入即可通行。"},
         {"nh_travel_blocked","Landing unavailable. Check the departure point.","落点不可用，请在出发处重试。"},
+        {"nh_travel_ew_occupied","Cabin terrain or objects remain here. Move them or visit after a storm repair.","此处仍有舱体地形或物件，已保留现场。请移开物件或在风暴维修后再来。"},
         {"nh_travel_rescue_fallback","Mothership unavailable. Diverting to the mines entrance.","母舰暂时无法接收，救援改送矿井入口。"},
         {"nh_storm_scan_empty","No high-value sites within 2048 px. Intel retained.","2048 像素内未发现可用的高价值地点。本次未消耗情报包。"},
         {"nh_hideout_relic_chain","Relic chain","遗物链"},

@@ -1,4 +1,6 @@
 -- The box waits at zero HP if its drop cannot be created this frame.
+local ew=NHEW or dofile("mods/noita_hideout/files/ew.lua")
+if not ew.walletAllowed() then return end
 local box=GetUpdatedEntityID()
 local dm=EntityGetFirstComponentIncludingDisabled(box,"DamageModelComponent")
 if ComponentGetValue2(dm,"hp")>0 then return end

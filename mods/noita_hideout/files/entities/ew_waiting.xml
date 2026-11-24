@@ -1,0 +1,7 @@
+<Entity name="Hideout reinforcement observer" tags="nh_ew_waiting,ew_notplayer,ew_no_enemy_sync,polymorphed,polymorphed_player">
+    <StreamingKeepAliveComponent />
+    <ControlsComponent _enabled="0" enabled="0" />
+    <CharacterDataComponent _enabled="0" />
+    <CharacterPlatformingComponent _enabled="0" />
+    <WalletComponent money="0" />
+</Entity>

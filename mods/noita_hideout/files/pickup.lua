@@ -66,6 +66,7 @@ local function pickupPlan(state,player,kind,amount,source)
 end
 
 function P.stackDelivery(state,player,item,one)
+    if NHEWItems and NHEWItems.enabled() then return end
     local kind=item.kind
     local amount=one and (item.remaining or NHMedkits.capacity(kind) or 1) or NHStore.stackUnits(item)
     local _,left=pickupPlan(state,player,kind,amount)
@@ -82,7 +83,7 @@ function P.finishPickups(state,player)
     for _,id in ipairs(NHTransfers.carried(player)) do
         if EntityGetIsAlive(id) and EntityHasTag(id,"nh_merge_pickup") then
             EntityRemoveTag(id,"nh_merge_pickup")
-            if not EntityGetFirstComponentIncludingDisabled(id,"ItemCostComponent") and NHTransfers.available(state,player,id) then
+            if not (NHEWItems and NHEWItems.enabled()) and not EntityGetFirstComponentIncludingDisabled(id,"ItemCostComponent") and NHTransfers.available(state,player,id) then
                 local kind=NHTransfers.item_kind(id)
                 local apply=pickupPlan(state,player,kind,units(id,kind),id)
                 if apply then apply(id) end
@@ -112,6 +113,10 @@ end
 -- Return whether this press was claimed. Ordinary pickups with a free native
 -- slot (and shop purchases) continue through the engine's own pickup path.
 function P.interact(state,player,toSafe,nativeSlots)
+    if NHEWItems and NHEWItems.enabled() then
+        if toSafe and nearestItem(player) then return true,"Pick up this item before storing it." end
+        return
+    end
     local id=nearestItem(player)
     if not id or EntityGetFirstComponentIncludingDisabled(id,"ItemCostComponent") then return end
     local kind=NHNative.kind(id) or NHTransfers.item_kind(id)

@@ -277,3 +277,51 @@ do
     wand_add_random_cards=function() error("temporary generation failure") end
     assert(not NHWand.generateDiscovery(777) and ents[last_load].dead)
 end
+
+do
+    dofile("mods/noita_hideout/files/ew_items.lua")
+    NHEW={enabled=function() return true end}
+    function ComponentHasTag(c,tag)
+        for value in (comps[c].data._tags or ""):gmatch("[^,]+") do if value==tag then return true end end
+        return false
+    end
+    local e=assert(NHWand.restore(record,0,0))
+    local card=CreateItemActionEntity("LIGHT_BULLET")
+    local function attach(id)
+        EntityAddComponent2(id,"VariableStorageComponent",{name="ew_gid_lid",value_string="18446744073709551604",
+            value_int=15,value_bool=false,value_float=0})
+        return EntityAddComponent2(id,"LuaComponent",{_tags="ew_des_lua,ew_remove_on_send,enabled_in_inventory,enabled_in_hand,enabled_in_world",
+            script_throw_item="mods/quant.ew/files/system/entity_sync_helper/item_notify.lua"})
+    end
+    attach(e)
+    local callback=attach(card)
+    EntityAddTag(e,"ew_des")
+    local saved=assert(NHWand.capture(e))
+    assert(not saved.tags.ew_des and not saved.tags.polymorphable_NOT)
+    assert(NHWand.restore(saved,0,0))
+    assert(NHSpell.capture(card))
+    EntityAddChild(e,card)
+    assert(NHWand.capture(e))
+    local function var(entity,name,tags)
+        return EntityAddComponent2(entity,"VariableStorageComponent",{name=name,_tags=tags,
+            value_bool=false,value_int=0,value_float=0,value_string=""})
+    end
+    local rootState=var(e,"ew_no_ground","enabled_in_world,enabled_in_inventory")
+    assert(not NHWand.capture(e))
+    ComponentSetValue2(rootState,"_tags","enabled_in_world,quest")
+    assert(not NHWand.capture(e))
+    ComponentSetValue2(rootState,"_tags","")
+    local extra=var(e,"ew_no_ground")
+    assert(not NHWand.capture(e))
+    EntityRemoveComponent(e,extra)
+    local cardState=var(card,"ew_was_stealable","quest")
+    assert(not NHSpell.capture(card) and not NHWand.capture(e))
+    ComponentSetValue2(cardState,"_tags","")
+    assert(NHSpell.capture(card))
+    extra=var(card,"ew_was_stealable")
+    assert(not NHSpell.capture(card))
+    EntityRemoveComponent(card,extra)
+    ComponentSetValue2(callback,"script_kick","mods/other/kick.lua")
+    assert(not NHSpell.capture(card) and not NHWand.capture(e))
+    NHEW,NHEWItems=nil,nil
+end

@@ -320,9 +320,12 @@ local function item_details(slot,model,tr)
             tr("充能器、弹药盒各一件","One charger and one ammo box"),tr("随机掉落 · ","Bonus loot · ")..tr(loot.zh,loot.en)}
     end
     if bag then
+        local chance=bag.chances
         return {tr(bag.zh,bag.en).." ×"..(slot.count or 1),tr("右键打开，奖励落在脚边","Right-click to open at your feet"),
-            tr("必得金币","Guaranteed gold").." · "..tr("补给 ","Supplies ")..bag.supply.."% · "..tr("塔罗牌 ","Tarot ")..bag.tarot.."%",
-            tr("法术 ","Spell ")..bag.spell.."% · "..tr("法杖 ","Wand ")..bag.wand.."% · "..tr("召唤卡 ","Card ")..bag.card.."%"}
+            tr("必得 %d 金和一件补给","Always drops %d gold and one supply"):format(bag.gold*10),
+            tr("食物 %d%% · 医疗 %d%%","Food %d%% · Medical %d%%"):format(chance.food,chance.medical),
+            tr("工具 %d%% · 针剂 %d%%","Tool %d%% · Injector %d%%"):format(chance.tool,chance.dose),
+            tr("额外掉落 · 塔罗牌 %d%% · 同伴卡 %d%%","Bonus drops · Tarot %d%% · Companion card %d%%"):format(bag.tarot,bag.card)}
     end
     local food=foods[slot.kind]
     if food then
@@ -497,7 +500,8 @@ local function draw_shop_bank(model,left,top,width,scale,tr,dispatch,mx,my)
         tint(limit>0 and green or muted)
         GuiButton(gui,id,bx,y,caption,rowScale)
         local help=tr("点按转移 1 金币，按住加速","Click for 1 gold, hold to transfer faster")
-        if model.walletInfinite then help=tr("无限金币钱包不支持存取","Transfers unavailable with infinite gold")
+        if model.ewWalletPaused then help=tr("EW 共享金币或等待连接确认，私人银行暂停存取","Private wallet transfers paused while gold is shared or EW is connecting")
+        elseif model.walletInfinite then help=tr("无限金币钱包不支持存取","Transfers unavailable with infinite gold")
         elseif not model.walletGold then help=tr("当前钱包不可用","Wallet unavailable")
         else help=help.."\n"..tr("随身金币 ","Wallet ")..string.format("%.0f",model.walletGold) end
         GuiTooltip(gui,caption,help)
@@ -2291,6 +2295,26 @@ function NHUI.draw(model, dispatch)
     if model.rescue then draw_rescue(model.rescue,sw,tr,shieldLabelRight) end
     if model.deployment and not model.open then draw_deployment(model.deployment,sw,sh) end
     draw_notices(sw,sh)
+    if model.ewDeposit then
+        local pending=model.ewDeposit
+        local label=pending.canCancel and tr("正在入库","Deposit pending")
+            or pending.phase=="return" and tr("请腾出一个栏位取回物品","Free a slot to retrieve the item")
+            or pending.phase=="cancel" and tr("正在撤销入库","Cancelling deposit")
+            or tr("正在核对入库记录","Checking deposit")
+        local cancel=model.open and pending.canCancel and tr("取消入库","Cancel deposit")
+        local width=GuiGetTextDimensions(gui,label)
+        local cancelWidth=cancel and GuiGetTextDimensions(gui,cancel)+12 or 0
+        local x,y=math.floor((sw-width-cancelWidth)/2),sh-27
+        GuiZSetForNextWidget(gui,-9021)
+        GuiImageNinePiece(gui,5810,x-4,y-2,width+cancelWidth+8,14,0.95)
+        GuiZSetForNextWidget(gui,-9022)
+        tint(gold)
+        GuiText(gui,x,y,label)
+        if cancel then
+            GuiZSetForNextWidget(gui,-9022)
+            if GuiButton(gui,5811,x+width+6,y,cancel) then dispatch("cancel_deposit",pending.tx) end
+        end
+    end
     if not model.open then
         if model.surgery then
             local w=88

@@ -3857,3 +3857,27 @@ do
     end
 end
 print("New Enemies: valid and retired boss proxies, optional mod and unchanged custom templates passed.")
+
+-- A continued EW game can start with only a spectator. Require the actual
+-- controller to publish its issuer before the host can acknowledge the run.
+do
+    world={}
+    reset_entities()
+    entities[player].tags={nh_ew_waiting=true,polymorphed_player=true,ew_notplayer=true}
+    function ModIsEnabled(id) return id=="quant.ew" end
+    function ModDoesFileExist() return false end
+    function ModTextFileGetContent() end
+    function GameHasFlagRun(flag) return flag=="ew_flag_notplayer_active" end
+    local profile=state().profile
+    settings["noita_hideout.ew_owner_"..profile]="observer"
+    boot()
+    world["nh_ew.local_peer"]="0000000000000001"
+    OnWorldPostUpdate()
+    assert(world["nh_ew.issuer"]=="observer" and not NHEW.ready())
+    frame=frame+65
+    world["nh_ew.world_mark"]="observerRoom"
+    world["nh_ew.status"]="1|observerRoom|0|g|0|"..frame
+    OnWorldPostUpdate()
+    assert(state().ewActive=="observerRoom" and not NHEW.localBody(player))
+end
+print("EW spectator resumes the correct expedition without a playable body.")

@@ -24,6 +24,12 @@ local first_registration = content
 NHNative.registerTranslations()
 assert(content == first_registration)
 assert(content:find("\nnh_hideout_locale,en,en,en,en,en,en,en,en,zh,en,en,\n",1,true))
+local podNotice=assert(content:match("\nnh_hideout_ew_await_pod,([^\n]+)"))
+assert(podNotice:find("data link and 5 supply packs",1,true) and podNotice:find("数据链呼叫增援（5 点补给）",1,true))
+assert(content:match("\nnh_hideout_ew_wait_failed,[^\n]*已保留角色和装备"))
+local carryingNotice=assert(content:match("\nnh_hideout_ew_wait_carrying_peer,([^\n]+)"))
+assert(carryingNotice:find("Put down the teammate polymorphed into an item before entering spectator mode.",1,true))
+assert(carryingNotice:find("请先放下已变形成物品的队友，再进入观战。",1,true))
 for row in content:gmatch("\n(nh_[^\r\n]+)") do
     assert(row:sub(-1)==",", "Missing final CSV delimiter for "..row:match("^[^,]+"))
 end

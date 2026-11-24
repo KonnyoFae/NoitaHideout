@@ -153,7 +153,7 @@ local function native_callback(field, script, variant)
     return initializers[script]
 end
 
-local function check_script(c, variant, seen)
+local function check_script(c, variant, seen, entity)
     local members = assert(ComponentGetMembers(c), "Cannot inspect flask script")
     local hook, path
     for field in pairs(members) do
@@ -169,7 +169,10 @@ local function check_script(c, variant, seen)
     end
     if not hook then return end
     if hook~="script_source_file" then
-        assert(ComponentGetIsEnabled(c), "Unsupported flask script: "..path.." (disabled)")
+        local carriedWorldHook=hook=="script_death" and NHEWItems and NHEWItems.enabled() and EntityGetRootEntity(entity)~=entity
+            and NHEWItems.held(EntityGetRootEntity(entity),entity)
+        assert(ComponentGetIsEnabled(c) or carriedWorldHook, "Unsupported flask script: "..path.." (disabled)")
+        if not ComponentGetIsEnabled(c) then seen.disabledBreak=true end
     end
     -- Native fill and pickup scripts run once. A recurring copy of the same
     -- file has different behavior and would silently disappear on restore.
@@ -186,13 +189,15 @@ end
 local function check_state(entity, variant)
     for tag in (EntityGetTags(entity) or ""):gmatch("[^,]+") do
         local variant_tag = variant and (tag=="noita_hideout_"..variant or tag==variants[variant].tag)
-        assert(flask_tags[tag] or variant_tag, "Unsupported flask tag: "..tag)
+        assert(flask_tags[tag] or variant_tag or (NHEWItems and NHEWItems.runtimeTag(entity,tag)), "Unsupported flask tag: "..tag)
     end
     local seen = {}
     for _, c in ipairs(assert(EntityGetAllComponents(entity), "Cannot inspect flask components")) do
         local kind = ComponentGetTypeName(c)
-        if kind=="LuaComponent" then
-            check_script(c,variant,seen)
+        if NHEWItems and NHEWItems.metadata(c,kind,seen) then
+            -- Transient DES data must not be serialized into the flask.
+        elseif kind=="LuaComponent" then
+            check_script(c,variant,seen,entity)
         elseif kind=="VariableStorageComponent" then
             local name = ComponentGetValue2(c,"name")
             -- potion_material selects the initial fill. Transfer receipts are recreated on issue.
@@ -209,6 +214,7 @@ local function check_state(entity, variant)
             seen[kind]=true
         end
     end
+    return seen.disabledBreak
 end
 
 local function flask_components(entity)
@@ -438,10 +444,10 @@ local function capture(entity)
         local cost = ComponentGetValue2(price, "cost")
         assert(type(cost) == "number" and cost <= 0, "This flask still has a shop price")
     end
-    check_state(entity,variant)
+    local disabledBreak=check_state(entity,variant)
     local inv = c.MaterialInventoryComponent
     return refresh_name({
-        kind = "potion", materials = read_materials(inv), variant=variant,
+        kind = "potion", materials = read_materials(inv), variant=variant, disabledBreak=disabledBreak,
         -- Powder pouches disable native tinting. Sample their contents without that flag.
         color=variant~="powder_stash" and GameGetPotionColorUint(entity) or nil,
         icon=ComponentGetValue2(c.ItemComponent,"ui_sprite"),
@@ -492,6 +498,17 @@ function NHPotion.restore(record, x, y)
         assert(not record.variant or variants[record.variant],"Unknown material container template")
         entity = EntityLoad(record.variant and (pickup..record.variant..".xml") or empty_flask, x, y)
         assert(entity and entity ~= 0, "Empty flask failed to spawn")
+        if record.disabledBreak then
+            local found
+            for _,lua in ipairs(EntityGetComponentIncludingDisabled(entity,"LuaComponent") or {}) do
+                if native_callback("script_death",ComponentGetValue2(lua,"script_death"),record.variant) then
+                    assert(not found,"Duplicate flask break callback")
+                    EntitySetComponentIsEnabled(entity,lua,false)
+                    found=true
+                end
+            end
+            assert(found,"Could not restore flask break callback")
+        end
         local c = flask_components(entity)
         local inv = c.MaterialInventoryComponent
         if record.capacity then ComponentSetValue2(c.MaterialSuckerComponent, "barrel_size", record.capacity) end

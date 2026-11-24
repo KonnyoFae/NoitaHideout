@@ -48,6 +48,7 @@ end
 function NHCardWallets.carried(s,player,entity)
     if not entity or entity==0 or not EntityGetIsAlive(entity) or EntityGetRootEntity(entity)~=player
         or not EntityHasTag(entity,"noita_hideout_card_wallet") then return end
+    if NHEWItems and NHEWItems.enabled() and not NHEWItems.held(player,entity) then return end
     local release,token=NHTransfers.issuedRecord(s,entity)
     if release and release.row.item.kind=="card_wallet" then return release.row,token end
 end

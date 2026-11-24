@@ -107,7 +107,7 @@ end
 local function wand_tags(entity)
     local tags = {}
     for tag in (EntityGetTags(entity) or ""):gmatch("[^,]+") do
-        if tag ~= "noita_hideout_transfer_item" then tags[tag] = true end
+        if tag ~= "noita_hideout_transfer_item" and not (NHEWItems and NHEWItems.runtimeTag(entity,tag)) then tags[tag] = true end
     end
     return tags
 end
@@ -228,9 +228,12 @@ end
 
 local function check_root(entity, path)
     local editor
+    local seen={}
     for _, c in ipairs(EntityGetAllComponents(entity)) do
         local t = ComponentGetTypeName(c)
-        if t == "LuaComponent" then
+        if NHEWItems and NHEWItems.metadata(c,t,seen) then
+            -- EW rebuilds its transport bookkeeping after a native throw.
+        elseif t == "LuaComponent" then
             check_script(c, path)
         elseif t == "ItemCostComponent" then
             assert(get(c, "cost") == 0, "Cannot store a wand with an outstanding shop price")
@@ -276,13 +279,23 @@ local function card_pickup(c, id)
     return file, settings
 end
 
+local function card_scripts(entity)
+    local all=EntityGetComponentIncludingDisabled(entity,"LuaComponent") or {}
+    if not (NHEWItems and NHEWItems.enabled()) then return all end
+    local scripts={}
+    for _,c in ipairs(all) do
+        if not NHEWItems.metadata(c,"LuaComponent") then scripts[#scripts+1]=c end
+    end
+    return scripts
+end
+
 local function default_pickups(id, x, y)
     if stock_pickups[id] then return stock_pickups[id] end
     local probe = CreateItemActionEntity(id, x, y)
     assert(probe and probe ~= 0, "Unavailable spell: " .. id)
     local ok, profile = pcall(function()
         local result = {}
-        for _, c in ipairs(EntityGetComponentIncludingDisabled(probe, "LuaComponent") or {}) do
+        for _, c in ipairs(card_scripts(probe)) do
             local file, settings = card_pickup(c, id)
             assert(not result[file], "Duplicate spell pickup callback: " .. id)
             result[file] = settings
@@ -302,7 +315,7 @@ end
 
 local function pickup_states(entity, id)
     local states
-    for _, c in ipairs(EntityGetComponentIncludingDisabled(entity, "LuaComponent") or {}) do
+    for _, c in ipairs(card_scripts(entity)) do
         local file, settings = card_pickup(c, id)
         local expected = default_pickups(id, EntityGetTransform(entity))[file]
         assert(expected, "Nonstandard spell pickup callback: " .. id .. " " .. file)
@@ -323,17 +336,22 @@ local function capture_card(entity, action)
     local id = get(action, "action_id")
     assert(type(id) == "string" and id ~= "", "Spell has no action ID")
     assert(not (EntityGetAllChildren(entity) or {})[1], "Unsupported spell attachment: " .. id)
-    local stack
+    local stack,seen=nil,{}
     for _, var in ipairs(EntityGetComponentIncludingDisabled(entity,"VariableStorageComponent") or {}) do
         local name = get(var,"name")
         if name == "stackable_spells_count" then
             stack = get(var,"value_int")
             assert(stack >= 1 and stack == math.floor(stack), "Invalid spell stack")
-        else assert(name == transfer_marker, "Unsupported spell variable: " .. tostring(name)) end
+        else assert(name == transfer_marker or (NHEWItems and NHEWItems.metadata(var,"VariableStorageComponent",seen)),
+            "Unsupported spell variable: " .. tostring(name)) end
     end
     local item = required(entity, "ItemComponent")
     local x, y = get(item, "inventory_slot")
-    return {id = id, stack = stack, x = x, y = y, item = fields(item, card_fields), pickups = pickup_states(entity, id)}
+    local data=fields(item,card_fields)
+    if NHEWItems and NHEWItems.enabled() then
+        data.permanently_attached=NHEWItems.originalPermanent(entity,data.permanently_attached)
+    end
+    return {id = id, stack = stack, x = x, y = y, item = data, pickups = pickup_states(entity, id)}
 end
 
 local function capture(entity)
@@ -351,8 +369,12 @@ local function capture(entity)
             cards[#cards + 1] = capture_card(child, action)
         else
             local eater = first(child, "CellEaterComponent")
+            local count,seen=0,{}
+            for _,c in ipairs(EntityGetAllComponents(child) or {}) do
+                if not (NHEWItems and NHEWItems.metadata(c,ComponentGetTypeName(c),seen)) then count=count+1 end
+            end
             assert(path == broom and not cleaner and eater and get(eater, "only_stain")
-                and first(child, "InheritTransformComponent") and #(EntityGetAllComponents(child)) == 2
+                and first(child, "InheritTransformComponent") and count == 2
                 and not (EntityGetAllChildren(child) or {})[1], "Unsupported wand attachment: " ..
                     tostring(EntityGetName(child)) .. " (" .. tostring(EntityGetFilename(child)) .. ")")
             cleaner = fields(eater, {"radius", "eat_probability", "only_stain"})
@@ -410,7 +432,7 @@ local function configure_card(child, card, restoring)
     EntitySetComponentsWithTagEnabled(child, "enabled_in_world", false)
     if restoring then
         local needs_shop = card.pickups and card.pickups[shop_pickup] ~= nil
-        for _, c in ipairs(EntityGetComponentIncludingDisabled(child, "LuaComponent") or {}) do
+        for _, c in ipairs(card_scripts(child)) do
             local file = card_pickup(c, card.id)
             if file == shop_pickup then needs_shop = false end
             local enabled = card.pickups and card.pickups[file]

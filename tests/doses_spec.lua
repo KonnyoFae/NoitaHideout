@@ -356,3 +356,33 @@ globals={}
 assert(NHDoses.reconcile(mixed,player))
 assert(mixed.pouches[typed].cells[1].subtype=="lightning" and mixed.pouches[typed].cells[1].remaining==4)
 print("Doses: mixed typed stacks, legacy fire, shop isolation, use and rollback passed.")
+
+-- Two EW peers can use the same local profile number. A dose needs the
+-- issuing profile's actual ledger, including its uses and injector type.
+do
+    dofile("mods/noita_hideout/files/ew_items.lua")
+    dofile("mods/noita_hideout/files/ew_deposit.lua")
+    dofile("mods/noita_hideout/files/transfers.lua")
+    function EntityGetComponentIncludingDisabled() return {} end
+    local issuer="Owner"
+    NHEW={enabled=function() return true end,ready=function() return true end,
+        issuer=function() return issuer end,localBody=function(id) return id==player end}
+    local quick=10000
+    function EntityGetParent(id)
+        if id==quick then return player end
+        return entities[id] and entities[id].root==player and quick or 0
+    end
+    function EntityGetName(id) return id==quick and "inventory_quick" or "" end
+    function EntityHasTag() return false end
+    assert(not NHDoses.withdraw(mixed,player,nil,nil,nil,1,nil,typed))
+    local ok,e=NHDoses.withdraw(mixed,player,collect,nil,nil,1,nil,typed)
+    assert(ok and NHDoses.remaining(mixed,e)==4)
+    issuer="Guest"
+    assert(not NHDoses.remaining(mixed,e) and not NHDoses.consume(mixed,player,e,true))
+    assert(not NHDoses.deposit(mixed,player,e,nil,1,nil,typed))
+    assert(NHDoses.reconcile(mixed,player) and EntityGetIsAlive(e))
+    issuer="Owner"
+    assert(NHDoses.deposit(mixed,player,e,nil,1,nil,typed))
+    assert(mixed.pouches[typed].cells[1].remaining==4 and mixed.pouches[typed].cells[1].subtype=="lightning")
+    NHEW,NHEWItems=nil,nil
+end

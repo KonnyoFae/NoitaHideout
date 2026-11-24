@@ -48,6 +48,7 @@ function ComponentSetValue2(id, f, v) comp(id)[f] = v end
 function ComponentGetMembers(id) return comp(id) end
 function ComponentGetTypeName(id) return kinds[id % 100] end
 function ComponentHasTag(id,tag) return comp(id)._tags==tag end
+function ComponentGetTags(id) return comp(id)._tags end
 function ComponentGetIsEnabled(id) return not comp(id).disabled end
 function EntityGetAllComponents(e)
     local result = {}
@@ -246,6 +247,58 @@ do
     assert(record.materials.water==683 and record.materials.slime==17 and record.capacity==1500)
     assert(record.reactions==0 and record.hp==0.25 and record.extra_capacity)
     print("Warehouse refused modified flasks intact and round-tripped a native mixed flask including its transfer receipt.")
+
+    -- A held native flask can have its stock glass-break callback disabled
+    -- even without EW. Preserve that state explicitly when importing an EW flask.
+    dofile("mods/noita_hideout/files/ew_items.lua")
+    NHEW={enabled=function() return true end,ready=function() return true end,issuer=function() return "A" end,
+        localBody=function(id) return id==player end}
+    local quick=EntityLoad("inventory_quick")
+    entities[quick].name,entities[quick].parent="inventory_quick",player
+    local function setBreak(id)
+        local lua=entities[id].components.LuaComponent
+        lua.script_item_picked_up,lua.remove_after_executed=nil,false
+        lua.script_death="data/scripts/items/potion_glass_break.lua"
+    end
+    local flask=bottle("data/entities/items/pickup/potion_empty.xml")
+    entities[flask].parent=quick
+    function EntityGetRootEntity(id) return id==flask and player or entities[id].parent or id end
+    setBreak(flask)
+    entities[flask].components.LuaComponent.disabled=true
+    EntityAddComponent2(flask,"VariableStorageComponent",{name="ew_gid_lid",value_string="18446744073709551604",
+        value_int=24,value_bool=false,value_float=0})
+    local ewRecord=assert(NHPotion.capture(flask))
+    assert(ewRecord.disabledBreak and ewRecord.materials.water==683)
+    local oldLoad=EntityLoad
+    function EntityLoad(path,...)
+        local id=oldLoad(path,...)
+        setBreak(id)
+        return id
+    end
+    function EntitySetComponentIsEnabled(_,c,enabled) comp(c).disabled=not enabled end
+    local roundTrip=assert(NHPotion.restore(ewRecord,0,0))
+    assert(entities[roundTrip].components.LuaComponent.disabled)
+    assert(entities[roundTrip].components.MaterialInventoryComponent.count_per_material_type[3]==683)
+    assert(not entities[roundTrip].components.VariableStorageComponent)
+    local variable=entities[flask].components.VariableStorageComponent
+    variable._tags="enabled_in_inventory,enabled_in_world,enabled_in_hand"
+    assert(not NHPotion.capture(flask) and EntityGetIsAlive(flask))
+    variable._tags="enabled_in_inventory,custom_charges"
+    assert(not NHPotion.capture(flask) and EntityGetIsAlive(flask))
+    variable._tags=nil
+    local twin=EntityAddComponent2(roundTrip,"VariableStorageComponent",{name="ew_gid_lid",
+        value_string="18446744073709551604",value_int=24,value_bool=false,value_float=0})
+    local all=EntityGetAllComponents
+    function EntityGetAllComponents(e)
+        local parts=all(e)
+        if e==flask then parts[#parts+1]=twin end
+        return parts
+    end
+    assert(not NHPotion.capture(flask) and EntityGetIsAlive(flask))
+    EntityGetAllComponents=all
+    variable.value_float=2
+    assert(not NHPotion.capture(flask) and EntityGetIsAlive(flask))
+    NHEW,NHEWItems,EntityLoad=nil,nil,oldLoad
 end
 
 -- Recolour an older stored mix and a reloaded pouch using an inert native inventory.

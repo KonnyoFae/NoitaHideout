@@ -913,3 +913,73 @@ for category,tariff in ipairs(tariffs) do
         assert(support.pay(draft,1,id) and draft.resources[resource]==1,id)
     end
 end
+
+-- The data link selects one episode. Only the recipient checks the death
+-- terrain and opens the pod, even when the caller is far away or in midair.
+do
+    support.reset()
+    local show,eligible,obstructed,occupied=true,true,false,false
+    local selects,requests,pods,fx,errors=0,0,0,0,{}
+    local capsule,token=nil,{world="world_fx",x=600,y=-50}
+    local fxEvents={}
+    function GlobalsSetValue(key,value) fxEvents[#fxEvents+1]={key,value} end
+    function SessionNumbersGetValue(key) assert(key=="NEW_GAME_PLUS_COUNT");return "0" end
+    playerX,playerY=0,0
+    state.resources.supply_logistics=5
+    NHEWReinforce={visible=function() return show end,available=function() return eligible end,
+        redirectAvailable=function() return token.redirect end,
+        select=function(p,x,y) assert(p==100 and x==0 and y==0);selects=selects+1;return token end,
+        request=function(p,x,y,t)
+            assert(p==100 and t==token)
+            if t.redirect then assert(x==22 and y==0) else assert(x==600 and y==-50) end
+            requests=requests+1;return true
+        end}
+    function RaytracePlatforms(x,y,tx,ty)
+        if not obstructed and ty>y and y<=10 and ty>=10 then return true,tx,10 end
+        return false
+    end
+    function RaytraceSurfacesAndLiquiform() return false end
+    function EntityGetInRadiusWithTag(_,_,_,tag) return occupied==tag and {41} or {} end
+    function DoesWorldExistAt() return true end
+    function EntityLoad(path)
+        if path:match("/supply_pod.xml$") then pods=pods+1;capsule={};return capsule end
+        assert(path:match("/pod_open_fx.xml$"),path);fx=fx+1;return 91
+    end
+    local waiting=false
+    function EntityHasTag(id,tag) return (id==capsule and tag=="nh_supply_pod") or (id==41 and waiting and tag=="nh_ew_waiting") end
+    function EntityAddTag(id,tag) assert((id==capsule or id==91) and tag=="ew_no_enemy_sync") end
+    function EntityGetIsAlive(id) return id==100 or id==capsule end
+    function EntityKill(id) assert(id==capsule);capsule=nil end
+    function EntitySetTransform(id) assert(id==capsule) end
+    local function choosePlayers()
+        open();step("Left");step();step("Left");assert(view().menu.category==5)
+        step("Down");assert(view().menu.level==2 and view().projects[1]=="ew_player_drop" and view().payment.cost==(token.redirect and 0 or 5))
+    end
+    local function code()
+        for _,dir in ipairs({"Up","Down","Right","Left","Up"}) do step();step(dir) end
+    end
+    local function update()
+        support.update(state,100,function() error("support charged before host receipt") end,function(s) errors[#errors+1]=s end)
+    end
+    local function launch()
+        local order=view().call
+        assert(order.ticket==token and not order.targeted and not order.marker and not order.selected)
+        ctrl=false;step();frame=order.connectedAt;update()
+    end
+    choosePlayers();eligible=false;step("Up");assert(selects==0 and view().projectStatus=="ew_player_unavailable")
+    eligible=true;state.resources.supply_logistics=4;step();step("Up");assert(selects==0 and view().projectStatus=="insufficient_packs")
+    state.resources.supply_logistics=5;step();step("Right");assert(view().menu.entered==0)
+    obstructed=true;occupied="ew_peer";code();assert(selects==1);launch()
+    assert(pods==0 and fx==0 and #fxEvents==0 and requests==1 and #errors==0 and state.resources.supply_logistics==5)
+    token.redirect=true;state.resources.supply_logistics=0
+    choosePlayers();code();launch();assert(requests==1 and #errors==1)
+    occupied=false;choosePlayers();code();launch();assert(requests==2 and #errors==1 and state.resources.supply_logistics==0)
+    occupied="ew_client"
+    local landing=dofile("mods/noita_hideout/files/resupply.lua")
+    assert(landing.playerDropClear(22,2,41) and not landing.playerDropClear(22,2,100),"Ignore only the restored player's own body")
+    waiting=true
+    assert(landing.playerDropClear(22,2,100),"A teammate waiting for a drop has no physical body at the landing site")
+    ctrl=false;step();show=false;open();step("Left");step();step("Left");assert(view().menu.category==4 and not view().playerCategory)
+    support.reset();NHEWReinforce=nil
+end
+print("EW player support: data link sequence, death-site request, free alternate, crowd checks and single-player menu passed.")

@@ -1990,6 +1990,38 @@ do
     render(model,7081)
 end
 
+-- Hover details are drawn after the click is prepared but before dispatch.
+-- Exercise both in the same frame, including the warehouse's quick-sale view.
+do
+    local previousSafe,previousSupplies=model.secure_loot,model.warehouse.supplies
+    for _,kind in ipairs(NHLootBags.order) do
+        local bag=NHLootBags.types[kind]
+        local chance=bag.chances
+        model.secure_loot={{id=31,kind=kind,count=2,name=bag.zh}}
+        model.warehouse.supplies={{id=32,kind=kind,count=4,name=bag.zh}}
+        render(model,78)
+        render(model)
+        for _,mode in ipairs({"normal","quick-sale"}) do
+            if mode=="quick-sale" then render(model,7081);render(model) end
+            for _,v in ipairs({{1001,"safe",31,2},{1003,"warehouse",32,4}}) do
+                point(tiles[v[1]].x+1,tiles[v[1]].y+1)
+                assert(drawn[bag.zh.." ×"..v[4]])
+                assert(drawn[("必得 %d 金和一件补给"):format(10*bag.gold)])
+                assert(drawn[("食物 %d%% · 医疗 %d%%"):format(chance.food,chance.medical)])
+                assert(drawn[("工具 %d%% · 针剂 %d%%"):format(chance.tool,chance.dose)])
+                assert(drawn[("额外掉落 · 塔罗牌 %d%% · 同伴卡 %d%%"):format(bag.tarot,bag.card)])
+                model.rightUse=assert(NHUI.useTarget())
+                local cmd,req=render(model)
+                assert(cmd=="use_inventory" and req.container==v[2] and req.storedId==v[3]
+                    and req.kind==kind and req.count==v[4])
+            end
+        end
+        pointer={x=0,y=0}
+        render(model,7081)
+    end
+    model.secure_loot,model.warehouse.supplies=previousSafe,previousSupplies
+end
+
 local function testTieredMedkitDisplay()
     model.secure_loot={{id=1,kind="tactical_medkit",name="战术医疗包",remaining=5}}
     model.warehouse.supplies={{id=2,kind="advanced_medkit",name="高端医疗包",remaining=6}}
@@ -2074,6 +2106,13 @@ local function testRightUse()
     end
     local native_use=use()
     assert(native_use.container=="native" and native_use.entity==41 and native_use.lane=="tool" and native_use.xslot==0)
+    for _,kind in ipairs(NHLootBags.order) do
+        m.native_slots[1].kind,m.native_slots[1].count=kind,3
+        render(m)
+        local bagUse=use()
+        assert(bagUse.container=="native" and bagUse.entity==41 and bagUse.kind==kind and bagUse.count==3)
+    end
+    m.native_slots[1].kind,m.native_slots[1].count="medkit",nil
     pointer={x=21,y=22}; assert(not NHUI.useTarget(),"wands keep native handling")
     local oldSlot={x=tiles[1001].x+1,y=tiles[1001].y+1}
     render(m,39)
@@ -2540,4 +2579,17 @@ do
     render(m,82)
     assert(not render(m,7080))
     assert(noticeText.Second.x<noticeText.First.x and m.essences[1].key=="first")
+end
+
+do
+    local m={open=true,mode="case",lang="zh",near=false,capacity=2,secure_loot={},native_slots={},revision=1}
+    m.ewDeposit={tx="17",canCancel=true}
+    local cmd,tx=render(m,5811)
+    assert(cmd=="cancel_deposit" and tx=="17" and buttons[5811].name=="取消入库")
+    m.ewDeposit={tx="17",canCancel=false,phase="cancel"}
+    assert(not render(m,5811) and not buttons[5811])
+    m.ewDeposit.phase="return"
+    assert(not render(m,5811) and noticeText["请腾出一个栏位取回物品"] and not buttons[5811])
+    m.ewDeposit=nil
+    assert(not render(m,5811) and not panels[5810])
 end

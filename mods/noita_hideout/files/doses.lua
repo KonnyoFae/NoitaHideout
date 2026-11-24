@@ -34,6 +34,7 @@ local function commit(state, changed)
     local ok, err = NHStore.commit(changed)
     if not ok then return nil, err end
     state.revision, state.nextItemId = changed.revision, changed.nextItemId
+    state.ewDepositReceipt=changed.ewDepositReceipt
     state.warehouse = changed.warehouse
     state.summons, state.dragonLoot = changed.summons, changed.dragonLoot
     state.gelBonus,state.resources=changed.gelBonus,changed.resources
@@ -49,6 +50,18 @@ end
 
 local function receipt(token)
     return "noita_hideout.dose_delivered." .. token
+end
+
+local function personal(token)
+    if not (NHEWItems and NHEWItems.enabled()) then return true end
+    local issuer=NHEW.issuer()
+    return issuer and NHEWItems.scope(token)==issuer
+end
+
+local function new_token(s,entity)
+    local token=table.concat({s.profile,s.runSerial,s.nextItemId,GameGetFrameNum(),entity},"/")
+    if NHEWItems then return NHEWItems.ticket(token) end
+    return token
 end
 
 local function dispose(player, entity)
@@ -67,21 +80,25 @@ local pouch_tag = "noita_hideout_pouch_token"
 
 function NHDoses.isPouch(s, entity)
     if not entity or entity==0 or not EntityGetIsAlive(entity) or NHNative.kind(entity)~="pouch" then return end
+    if NHEWItems and NHEWItems.enabled() and not NHEWItems.held(EntityGetRootEntity(entity),entity) then return end
     local token=token_of(entity,pouch_tag)
-    if not token then return end
+    if not token or not personal(token) then return end
     for id,p in pairs(s.pouches) do
         if p.location=="bag" and p.token==token then return id end
     end
 end
 
 function NHDoses.takePouch(s, player, deliver, pouchId)
+    local multiplayer=NHEWItems and NHEWItems.enabled()
+    if multiplayer and not NHEWItems.ready() then return nil,"Waiting for item ownership. Try again." end
+    if multiplayer and not deliver then return nil,"A free personal inventory slot is required." end
     local pouch=s.pouches[pouchId]
     if not is_open_run(s) or not pouch or (pouch.location~="safe" and pouch.location~="warehouse") then return nil, "Pouch unavailable." end
     local x, y = EntityGetTransform(player)
     local id, err = NHNative.spawn("pouch", x, y - 4, pouch.tier)
     if not id then return nil, err end
     local changed = draft(s)
-    local token = table.concat({s.profile,s.runSerial,s.nextItemId,GameGetFrameNum(),id}, "/")
+    local token = new_token(s,id)
     local c = EntityAddComponent2(id, "VariableStorageComponent", {_tags=pouch_tag, name=pouch_tag, value_string=token})
     if not c or c==0 or token_of(id,pouch_tag)~=token then
         EntityKill(id)
@@ -90,7 +107,7 @@ function NHDoses.takePouch(s, player, deliver, pouchId)
     changed.pouches[pouchId]={id=pouchId,location="bag",token=token,originContainer=pouch.location,
         slot=pouch.slot,x=x,y=y,tier=pouch.tier,doses=pouch.doses,cells=pouch.cells}
     changed.nextItemId = changed.nextItemId + 1
-    if deliver and not deliver(id) then
+    if deliver and (not deliver(id) or (multiplayer and not NHEWItems.held(player,id))) then
         dispose(player, id)
         return nil, "Inventory slot changed."
     end
@@ -100,7 +117,8 @@ function NHDoses.takePouch(s, player, deliver, pouchId)
     return true, id
 end
 
-function NHDoses.storePouch(s, player, id, preferred, container, ground)
+function NHDoses.storePouch(s, player, id, preferred, container, ground,replay)
+    if NHEWItems and NHEWItems.enabled() and (ground or not NHEWItems.held(player,id)) then return nil,"Pick up this item before storing it." end
     container=container or "safe"
     local pouchId=NHDoses.isPouch(s,id)
     if not is_open_run(s) or not pouchId or EntityGetRootEntity(id) ~= (ground and id or player) then
@@ -110,6 +128,13 @@ function NHDoses.storePouch(s, player, id, preferred, container, ground)
     local slot = NHStore.freeSlot(s,container,preferred,"pouch")
     if not slot then return nil, "Secure valuables slot is full." end
     local pouch=s.pouches[pouchId]
+    if NHEWItems and NHEWItems.enabled() then
+        local intent={route="pouch",dest=container,slot=slot,pouchId=pouchId}
+        local record={kind="pouch",tier=pouch.tier,cells=pouch.cells,doses=pouch.doses,token=pouch.token}
+        local handled,why=NHTransfers.prepareEW(s,player,id,pouch.token,intent,record,replay)
+        if handled~=false then return handled,why end
+    end
+    if replay then changed.ewDepositReceipt=replay.tx end
     changed.pouches[pouchId]={id=pouchId,location=container,slot=slot,tier=pouch.tier,cells=pouch.cells,doses=pouch.doses}
     local ok, reason = commit(s, changed)
     if not ok then return nil, reason end
@@ -188,6 +213,7 @@ end
 
 function NHDoses.remaining(s,entity)
     local token=token_of(entity)
+    if not personal(token) then return end
     local record=token and s.issuedDoses and s.issuedDoses[token]
     if record then return record.remaining or NHStore.doseDurability,record.subtype or "fire" end
 end
@@ -200,7 +226,8 @@ end
 -- The bag payment owns this draft. Only publish the reward if payment succeeds.
 function NHDoses.registerLoot(s,entity,subtype,storedBag)
     local x,y=EntityGetTransform(entity)
-    local token=table.concat({s.profile,s.runSerial,s.nextItemId,GameGetFrameNum(),entity},"/")
+    local token=new_token(s,entity)
+    if not token then return false,"Waiting for item ownership. Try again." end
     local c=EntityAddComponent2(entity,"VariableStorageComponent",{_tags=token_tag,name=token_tag,value_string=token})
     if not c or token_of(entity)~=token then return false,"Could not mark the syringe." end
     s.issuedDoses=s.issuedDoses or {}
@@ -215,6 +242,9 @@ function NHDoses.confirmLoot(entity)
 end
 
 function NHDoses.withdraw(s, player, deliver, pouchEntity, safe_slot, cell, container, pouchId)
+    local multiplayer=NHEWItems and NHEWItems.enabled()
+    if multiplayer and not NHEWItems.ready() then return nil,"Waiting for item ownership. Try again." end
+    if multiplayer and not deliver then return nil,"A free personal inventory slot is required." end
     if not is_open_run(s) then return nil,"Run already closed." end
     local changed=draft(s)
     local remaining,subtype
@@ -233,7 +263,7 @@ function NHDoses.withdraw(s, player, deliver, pouchEntity, safe_slot, cell, cont
     y = y - 4
     local entity, err = NHNative.spawn("dose", x, y,subtype)
     if not entity or entity == 0 then return nil, err or "Could not create a syringe." end
-    local token = table.concat({s.profile, s.runSerial, s.nextItemId, GameGetFrameNum(), entity}, "/")
+    local token = new_token(s,entity)
     local c = EntityAddComponent2(entity, "VariableStorageComponent", {
         _tags = token_tag, name = token_tag, value_string = token,
     })
@@ -245,7 +275,7 @@ function NHDoses.withdraw(s, player, deliver, pouchEntity, safe_slot, cell, cont
     changed.issuedDoses[token] = {x=x,y=y,safeSlot=safe_slot,container=container,
         pouchId=not safe_slot and pouchId or nil,cell=cell,remaining=remaining,subtype=subtype}
     show_remaining(entity,remaining)
-    if deliver and not deliver(entity) then
+    if deliver and (not deliver(entity) or (multiplayer and not NHEWItems.held(player,entity))) then
         dispose(player, entity)
         return nil, "Inventory slot changed."
     end
@@ -255,7 +285,8 @@ function NHDoses.withdraw(s, player, deliver, pouchEntity, safe_slot, cell, cont
     return true, entity
 end
 
-local function retire(s, player, entity, to_pouch, fromInventory, slot, cell, container, pouchId, ground)
+local function retire(s, player, entity, to_pouch, fromInventory, slot, cell, container, pouchId, ground,replay)
+    if NHEWItems and NHEWItems.enabled() and (ground or not NHEWItems.held(player,entity)) then return nil,"Pick up this item before storing it." end
     if not is_open_run(s) then return nil, "Run already closed." end
     if not entity or entity == 0 or not EntityGetIsAlive(entity) or NHNative.kind(entity) ~= "dose" then
         return nil, "Select a syringe."
@@ -269,7 +300,7 @@ local function retire(s, player, entity, to_pouch, fromInventory, slot, cell, co
         return nil, "Select a syringe."
     end
     local token = token_of(entity)
-    if not token or not s.issuedDoses or not s.issuedDoses[token] then
+    if not token or not personal(token) or not s.issuedDoses or not s.issuedDoses[token] then
         return nil, "This syringe is no longer available."
     end
     local changed = draft(s)
@@ -287,8 +318,38 @@ local function retire(s, player, entity, to_pouch, fromInventory, slot, cell, co
     if to_pouch then
         if slot then
             if not add_stored_dose(changed,slot,remaining,container,subtype) then return nil,"Slot unavailable." end
-        elseif not NHStore.putPouchDose(edit_pouch(changed,pouchId),remaining,cell,subtype) then return nil,"Slot unavailable." end
+        else
+            local ok,actualCell=NHStore.putPouchDose(edit_pouch(changed,pouchId),remaining,cell,subtype)
+            if not ok then return nil,"Slot unavailable." end
+            cell=actualCell
+        end
+        if NHEWItems and NHEWItems.enabled() then
+            local dest,bagSlot,bagToken=container or "safe"
+            if not slot then
+                local target=s.pouches[pouchId]
+                dest,bagSlot,bagToken=target.location,target.slot,target.token
+                if dest=="bag" then
+                    local found=false
+                    for _,id in ipairs(NHTransfers.carried(player)) do
+                        if NHDoses.isPouch(s,id)==pouchId and NHEWItems.held(player,id) then found=true;break end
+                    end
+                    if not found then return nil,"Pouch unavailable." end
+                end
+            end
+            local intent={route="dose",dest=dest,pouchId=not slot and pouchId or nil,pouchSlot=bagSlot,pouchToken=bagToken,
+                cell=cell,slot=slot}
+            if slot then
+                local index=NHStore.slotIndex(s,dest,slot,"dose")
+                intent.stackId=index and s[dest][index].id
+            else
+                intent.previousCell=s.pouches[pouchId].cells[cell]
+            end
+            local record={kind="dose",remaining=remaining,subtype=subtype,token=token}
+            local handled,why=NHTransfers.prepareEW(s,player,entity,token,intent,record,replay)
+            if handled~=false then return handled,why end
+        end
     end
+    if replay then changed.ewDepositReceipt=replay.tx end
     changed.issuedDoses[token]=nil
     local ok,err=commit(s,changed)
     if not ok then return nil,err end
@@ -296,8 +357,8 @@ local function retire(s, player, entity, to_pouch, fromInventory, slot, cell, co
     return true,0
 end
 
-function NHDoses.deposit(s,player,entity,slot,cell,container,pouchId,ground)
-    return retire(s,player,entity,true,false,slot,cell,container,pouchId,ground)
+function NHDoses.deposit(s,player,entity,slot,cell,container,pouchId,ground,replay)
+    return retire(s,player,entity,true,false,slot,cell,container,pouchId,ground,replay)
 end
 
 function NHDoses.consume(s, player, entity, fromInventory)
@@ -305,6 +366,7 @@ function NHDoses.consume(s, player, entity, fromInventory)
 end
 
 function NHDoses.reconcile(s, player)
+    local multiplayer=NHEWItems and NHEWItems.enabled()
     if not is_open_run(s) then return true end
     local issued = s.issuedDoses or {}
     local seen, visited = {}, {}
@@ -314,28 +376,30 @@ function NHDoses.reconcile(s, player)
     end
     local function inspect(entity)
         if visited[entity] or not EntityGetIsAlive(entity) then return end
+        if multiplayer and not NHEWItems.held(player,entity) then return end
         visited[entity] = true
         local kind = NHNative.kind(entity)
         if kind == "pouch" then
             local token=token_of(entity,pouch_tag)
-            if token and missing_pouches[token] then
+            if token and personal(token) and missing_pouches[token] then
                 missing_pouches[token]=nil
                 if GlobalsGetValue(receipt(token),"")~="1" then GlobalsSetValue(receipt(token),"1") end
-            else dispose(player, entity) end
+            elseif not multiplayer then dispose(player, entity) end
             return
         end
         if kind ~= "dose" then return end
         local token = token_of(entity)
-        if token and issued[token] and not seen[token] then
+        if token and personal(token) and issued[token] and not seen[token] then
             seen[token] = true
             show_remaining(entity,issued[token].remaining or NHStore.doseDurability)
             if GlobalsGetValue(receipt(token), "") ~= "1" then GlobalsSetValue(receipt(token), "1") end
-        else
+        elseif not multiplayer then
             dispose(player, entity)
         end
     end
     -- Prioritize a carried copy when a rolled-back world reintroduces a twin.
     for _, id in ipairs(GameGetAllInventoryItems(player) or {}) do inspect(id) end
+    if multiplayer then return true end
     for _, id in ipairs(EntityGetWithTag(item_tag) or {}) do inspect(id) end
     for _, id in ipairs(EntityGetWithTag("noita_hideout_pouch") or {}) do inspect(id) end
     if not next(issued) and not next(missing_pouches) then return true end

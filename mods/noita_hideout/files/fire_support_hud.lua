@@ -12,10 +12,13 @@ local function labelPath(key,lang)
     return "mods/noita_hideout/files/support_labels/"..key.."_"..lang..".png"
 end
 local categoryLabels={zh={},en={}}
+local coopLabels={zh={},en={}}
 for lang,paths in pairs(categoryLabels) do
     for i,key in ipairs({"supply","strike","reinforcements","intel"}) do
         paths[i]=labelPath(key,lang)
+        coopLabels[lang][i]=paths[i]
     end
+    coopLabels[lang][5]=labelPath("players",lang)
 end
 local normalLabelScale=0.25
 local selectedMagnification=1.2
@@ -85,7 +88,7 @@ local function labelSize(gui,labels)
 end
 
 local function drawCategories(gui,v,lang,px,py,sw,sh)
-    local labels=categoryLabels[lang]
+    local labels=v.playerCategory and coopLabels[lang] or categoryLabels[lang]
     local selected=v.menu.category
     local gap=3
     local labelW,labelH=labelSize(gui,labels)
@@ -130,6 +133,7 @@ local function drawCategories(gui,v,lang,px,py,sw,sh)
             below=gap+activeH+(last-current)*(ph+gap)
             columnW=activeW
         end
+        if v.playerCode then below=below+11 end
         if v.projectStatus then
             status=labelPath(v.projectStatus,lang)
             local w,h=GuiGetImageDimensions(gui,status)
@@ -166,8 +170,18 @@ local function drawCategories(gui,v,lang,px,py,sw,sh)
             elseif i>current then
                 y=projectTop+(activeH+gap+(i-current-1)*(ph+gap))*scale
                 if i==current+1 then cue="down" end
-            elseif not v.projectStatus then cue="right" end
+            elseif not v.projectStatus and not v.playerCode then cue="right" end
             drawCard(gui,100+i*20,center-w*scale/2,y,w,h,scale,projects[i],active,cue)
+        end
+        if v.playerCode then
+            local y=projectTop+(activeH+3)*scale
+            for i,key in ipairs(v.playerCode) do
+                local matched=i<=(v.menu.entered or 0)
+                GuiOptionsAddForNextWidget(gui,GUI_OPTION.NoPositionTween)
+                GuiColorSetForNextWidget(gui,matched and 0.35 or 0.98,matched and 1 or 0.83,0.48,1)
+                GuiImage(gui,520+i,center+(i-3)*9*scale-2.5*scale,y,
+                    arrowPath..key:lower()..".png",1,scale,scale)
+            end
         end
         if status then
             local y=top+(largeH+below-statusH)*scale

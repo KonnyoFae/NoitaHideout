@@ -1,6 +1,8 @@
 -- Two revisioned snapshots in Noita's normal mod settings. A complete
 -- readback checks the settings API; it does not force the engine to flush.
 NHStore = {}
+local ew=NHEW or dofile("mods/noita_hideout/files/ew.lua")
+local depositHistory=dofile("mods/noita_hideout/files/ew_deposit_history.lua")
 NHStormProducts=dofile("mods/noita_hideout/files/storm_products.lua")
 NHStore.supplyTrade=dofile("mods/noita_hideout/files/supply_trade.lua")
 NHStore.alchemyResources=dofile("mods/noita_hideout/files/alchemy_resources.lua")
@@ -236,6 +238,44 @@ local function active_profile()
     return id
 end
 
+local function validateDeposit(p,activeWorld)
+    local err="Invalid pending multiplayer deposit"
+    assert(type(p)=="table" and type(p.world)=="string" and #p.world<=170 and p.world:match("^[%w_-]+$")
+        and (not activeWorld or p.world==activeWorld) and type(p.issuer)=="string" and #p.issuer<=40 and p.issuer:match("^%w+$")
+        and type(p.tx)=="string" and #p.tx<=15 and p.tx:match("^[1-9]%d*$") and (p.reserved==nil or p.reserved==true),err)
+    assert((p.phase=="prepare" or p.phase=="cancel" or p.phase=="verify" or p.phase=="return")
+        and (p.phase~="return" or p.outcome=="cancelled" or p.outcome=="denied"),err)
+    if p.intent~=nil or p.phase=="prepare" then
+        assert(whole(p.run) and type(p.hadItem)=="boolean" and type(p.original)=="boolean"
+            and (p.source==nil or type(p.source)=="string") and type(p.intent)=="table"
+            and type(p.intent.route)=="string" and type(p.intent.dest)=="string" and type(p.record)=="table",err)
+    else
+        assert(p.run==nil and p.record==nil and p.slot==nil and p.source==nil and p.original==nil and p.hadItem==nil
+            and (p.reason==nil or (type(p.reason)=="string" and #p.reason<=96)),err)
+        if p.phase=="return" then assert(p.keys==nil,err);return end
+    end
+    if p.slot~=nil then
+        local slot=p.slot
+        assert(type(slot)=="table" and (slot.bag=="attached" or ((slot.bag=="inventory_quick" or slot.bag=="inventory_full")
+            and type(slot.x)=="number" and whole(math.abs(slot.x)) and type(slot.y)=="number" and whole(math.abs(slot.y)))),err)
+    end
+    assert(type(p.keys)=="table" and type(p.keys[1])=="string",err)
+    for index,key in pairs(p.keys) do
+        assert((index==1 or index==2) and type(key)=="string" and #key<=156 and (index==1 or key>p.keys[1]),err)
+        local gid=key:match("^g/(%d+)$")
+        assert((gid and #gid<=20) or key:match("^t/ew/%w+/r/%d+/%d+/%d+/%d+/%d+/%d+$"),err)
+    end
+end
+
+function NHStore.reinforcementOrder(order,activeWorld)
+    if type(order)~="string" or #order>370 then return end
+    local world,caller,tx,target,ep,x,y=order:match("^([%w_-]+)|(%w+)|([1-9]%d*)|(%w+)|([1-9]%d*)|(-?%d+)|(-?%d+)$")
+    if world and world==activeWorld and #world<=170 and #caller<=40 and #target<=40 and caller~=target
+        and #tx<=15 and #ep<=15 and math.abs(tonumber(x))<1073741824 and math.abs(tonumber(y))<1073741824 then
+        return caller,tx,target
+    end
+end
+
 local function validate(s)
     assert(type(s) == "table" and s.version == 1, "Unknown profile version")
     for _, k in ipairs({"profile","revision","runSerial","closedThrough","nextItemId","finished"}) do
@@ -244,6 +284,26 @@ local function validate(s)
     assert(s.profile >= 1 and s.closedThrough <= s.runSerial
         and s.nextItemId >= 1, "Invalid profile counters")
     assert(whole(s.pendingChargerUses or 0),"Invalid legacy charger balance")
+    if s.ewDepositPending~=nil then validateDeposit(s.ewDepositPending,s.ewActive) end
+    if s.ewDepositReceipt~=nil then
+        local world,owner,seq=tostring(s.ewDepositReceipt):match("^([%w_-]+)|(%w+)|([1-9]%d*)$")
+        assert(world and #world<=170 and #owner<=40 and #seq<=15 and (not s.ewActive or world==s.ewActive),
+            "Invalid multiplayer deposit receipt")
+    end
+    if s.ewReinforcePending then
+        assert(type(s.ewReinforcePending)=="table" and next(s.ewReinforcePending),"Invalid pending reinforcement list")
+        for teammate,request in pairs(s.ewReinforcePending) do
+            local _,_,target=NHStore.reinforcementOrder(request,s.ewActive)
+            assert(target==teammate,"Invalid pending reinforcement")
+        end
+    end
+    if s.ewReinforceSponsors then
+        assert(type(s.ewReinforceSponsors)=="table","Invalid reinforcement payments")
+        for order,payment in pairs(s.ewReinforceSponsors) do
+            assert(NHStore.reinforcementOrder(order,s.ewActive) and type(payment)=="string"
+                and #payment<=15 and payment:match("^[1-9]%d*$"),"Invalid reinforcement payment")
+        end
+    end
     assert(whole(s.bankGold),"Invalid piggy bank balance")
     assert(type(s.bankWalletNet)=="number" and whole(math.abs(s.bankWalletNet)),"Invalid wallet transfer total")
     assert(type(s.checkpoints)=="table","Invalid Holy Mountain checkpoints")
@@ -305,6 +365,11 @@ local function validate(s)
         end
     end
     if s.transit then
+        for ticket,kind in pairs(s.transit.delivered or {}) do
+            assert(s.ewActive and type(ticket)=="string" and ticket:match("^ew/%w+/r/%d+/%d+/%d+/%d+/%d+/%d+$")
+                and type(kind)=="string" and kind~="card_wallet" and kind~="relic_chain"
+                and not s.transit.issued[ticket] and not s.transit.retired[ticket],"Invalid delivered multiplayer item")
+        end
         for _,release in pairs(s.transit.issued) do
             if release.row.item.kind=="card_wallet" then assert(NHCardWallets.valid(release.row.item),"Invalid issued card wallet") end
             validateConsumable(release.row.item)
@@ -667,6 +732,10 @@ local function unpack_slot(raw)
         local starter=s.pouches[s.starterPouchId]
         if starter and starter.location=="safe" then starter.slot=s.safeCapacity end
     end
+    s.ewDepositHistory=depositHistory.compact(s.ewDepositHistory,s.ewActive)
+    for world,slot in pairs(s.ewExpeditions or {}) do
+        slot.ewDepositHistory=depositHistory.compact(slot.ewDepositHistory,world)
+    end
     validate(s)
     return s
 end
@@ -711,7 +780,78 @@ local function write_verified(key, value)
     assert(ModSettingGet(key) == value, ok and "Settings readback failed" or tostring(err))
 end
 
-function NHStore.commit(state)
+-- EW does not recreate missing ordinary equipment from the issuer's profile.
+-- Once delivery is confirmed, its ticket and kind suffice for redeposit.
+-- Private containers and split remainders still need their complete payload.
+local function compactEWReleases(s,saved)
+    local j,prior=s.transit,saved.transit
+    if not s.ewActive or s.ewActive~=saved.ewActive or not j or not prior or j.run~=prior.run or j.run~=s.runSerial
+        or not next(j.issued) or not ew.world or ew.world()~=s.ewActive then return end
+    local owner=ew.issuer()
+    if not owner then return end
+    local issued,delivered
+    local prefix="ew/"..owner.."/r/"..s.profile.."/"..j.run.."/"
+    for ticket,release in pairs(j.issued) do
+        local kind=release.row.item.kind
+        local container=release.container
+        if type(ticket)=="string" and ticket:sub(1,#prefix)==prefix and ticket:sub(#prefix+1):match("^%d+/%d+/%d+/%d+$")
+            and (container=="warehouse" or container=="safe" or container=="gear" or container=="docks")
+            and kind~="card_wallet" and kind~="relic_chain" and not release.splitDeposit and not release.chargerOverflow
+            and ((prior.delivered and prior.delivered[ticket]==kind) or
+                (prior.issued[ticket] and prior.issued[ticket].row.item.kind==kind
+                    and GlobalsGetValue("noita_hideout.delivered."..ticket,"")=="1")) then
+            if not issued then
+                issued,delivered={},{}
+                for k,v in pairs(j.issued) do issued[k]=v end
+                for k,v in pairs(j.delivered or {}) do delivered[k]=v end
+            end
+            issued[ticket],delivered[ticket]=nil,kind
+        end
+    end
+    if issued then s.transit={run=j.run,retired=j.retired,issued=issued,delivered=delivered} end
+end
+
+local function stageDeliveries(next_state)
+    if (next_state.pendingChargerUses or 0)>0 then
+        local rows={}
+        for i,row in ipairs(next_state.warehouse) do rows[i]=row end
+        next_state.warehouse=rows
+        local kind=NHShields.charger
+        while next_state.pendingChargerUses>0 and next_state.nextItemId<max_safe_integer do
+            local slot=NHStore.freeSlot(next_state,"warehouse",nil,kind)
+            if not slot then break end
+            local n=math.min(32,next_state.pendingChargerUses)
+            local item={kind=kind,name="$nh_hideout_"..kind,icon=NHShields.chargers[kind].icon}
+            NHMedkits.unpack(item,n)
+            rows[#rows+1]={id=next_state.nextItemId,slot=slot,item=item}
+            next_state.nextItemId=next_state.nextItemId+1
+            next_state.pendingChargerUses=next_state.pendingChargerUses-n
+        end
+    end
+    NHCompanions.stageDelivery(next_state)
+    NHDragonLoot.stageDelivery(next_state)
+    NHGelPool.stageDelivery(next_state)
+end
+
+-- A new history group, the world/issuer/transaction identifiers and two
+-- maximum-length item keys fit in 768 encoded bytes, including table lengths,
+-- revision growth and a short return reason. Parked orders share this profile.
+local function depositHeadroom(pending)
+    if not pending then return 0 end
+    if pending.reserved then return 768 end
+    -- Original orders could occupy the last byte. Once shrunk, keep enough
+    -- of the freed space for a host acknowledgement and revision rollover.
+    return pending.intent and 0 or 96
+end
+local function depositReserve(state,settling)
+    local bytes=settling and 0 or depositHeadroom(state.ewDepositPending)
+    for _,expedition in pairs(state.ewExpeditions or {}) do
+        bytes=bytes+depositHeadroom(expedition.ewDepositPending)
+    end
+    return bytes
+end
+
+function NHStore.commit(state,settlingDeposit)
     local ok, result = pcall(function()
         validate(state)
         local saved, active, slots, head_key = read_slots()
@@ -720,27 +860,14 @@ function NHStore.commit(state)
         local next_state = {}
         for k, v in pairs(state) do next_state[k] = v end
         next_state.revision = saved.revision + 1
-        if (next_state.pendingChargerUses or 0)>0 then
-            local rows={}
-            for i,row in ipairs(next_state.warehouse) do rows[i]=row end
-            next_state.warehouse=rows
-            local kind=NHShields.charger
-            while next_state.pendingChargerUses>0 and next_state.nextItemId<max_safe_integer do
-                local slot=NHStore.freeSlot(next_state,"warehouse",nil,kind)
-                if not slot then break end
-                local n=math.min(32,next_state.pendingChargerUses)
-                local item={kind=kind,name="$nh_hideout_"..kind,icon=NHShields.chargers[kind].icon}
-                NHMedkits.unpack(item,n)
-                rows[#rows+1]={id=next_state.nextItemId,slot=slot,item=item}
-                next_state.nextItemId=next_state.nextItemId+1
-                next_state.pendingChargerUses=next_state.pendingChargerUses-n
-            end
-        end
-        NHCompanions.stageDelivery(next_state)
-        NHDragonLoot.stageDelivery(next_state)
-        NHGelPool.stageDelivery(next_state)
+        local previous,pending=saved.ewDepositPending,next_state.ewDepositPending
+        local settling=settlingDeposit and previous and previous.world==next_state.ewActive
+            and (not pending or (pending.world==previous.world and pending.issuer==previous.issuer and pending.tx==previous.tx))
+        if not settling then stageDeliveries(next_state) end
+        compactEWReleases(next_state,saved)
         validate(next_state)
         local payload = encode(next_state)
+        assert(#payload+depositReserve(next_state,settling)<=max_bytes,"Hideout profile needs room to finish its deposit (1 MiB)")
         local raw = "NH1:" .. checksum(payload) .. ":" .. payload
         local key = slots[active == 1 and 2 or 1]
         -- On the very first write, publish the empty revision first. An orphan
@@ -756,6 +883,7 @@ function NHStore.commit(state)
     state.revision,state.nextItemId=result.revision,result.nextItemId
     state.warehouse,state.summons,state.dragonLoot=result.warehouse,result.summons,result.dragonLoot
     state.gelBonus,state.resources=result.gelBonus,result.resources
+    state.transit=result.transit
     return true
 end
 
@@ -801,7 +929,7 @@ function NHStore.putPouchDose(pouch, remaining, slot, subtype)
     if not NHStore.acceptsDose(cell,remaining,subtype) then return false end
     pouch.cells[slot]={remaining=remaining,subtype=subtype,count=(cell and cell.count or 0)+1}
     pouch.doses=pouch.doses+1
-    return true
+    return true,slot
 end
 
 function NHStore.takePouchDose(pouch,slot)
@@ -1077,6 +1205,7 @@ function NHStore.canBuyGood(state,good)
         return true
     end
     if good.insurance then
+        if not ew.rescueAllowed() then return false,"Entangled Worlds handles player death." end
         if state.insuranceActive then return false,"Already insured." end
         if (state.resources.arcane_scrap or 0)<good.scrap then return false,"Not enough arcane scrap." end
         return true

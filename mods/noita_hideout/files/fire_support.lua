@@ -7,6 +7,12 @@ local locations=dofile("mods/noita_hideout/files/storm/sites/locations.lua")
 local cabin=dofile("mods/noita_hideout/files/travel/cabin.lua")
 local recon={resource="intel_logistics",station="intel",shortage="Not enough intel logistics packs."}
 local pricing,services={},{}
+local playerDrop={resource="supply_logistics",shortage=resupply.shortage}
+local playerProjects={"ew_player_drop"}
+local playerCode={"Up","Down","Right","Left","Up"}
+pricing.ew_player_drop={cost=5}
+services.ew_player_drop=playerDrop
+local function playersVisible() return NHEWReinforce and NHEWReinforce.visible() end
 -- Each menu entry carries its unlock tier and its fixed price per call.
 local function category(service,entries)
     local order={}
@@ -435,10 +441,37 @@ local function projectStatus(state,project)
     if not call and salvo and patterns[project] then return "support_busy" end
     if call then return call.phase=="finished" and "switch_designator" or "support_busy" end
     local required=pricing[project].level
-    if NHStore.level(state,service.station)<required then return "need_station_"..required end
+    if required and NHStore.level(state,service.station)<required then return "need_station_"..required end
     if project=="site_radar" and locations.active(GameGetFrameNum()) then return "radar_active" end
     if radarScripts[project] and hasRadar(owner,project) then return "radar_active" end
-    if (state.resources[service.resource] or 0)<pricing[project].cost then return "insufficient_packs" end
+    local cost=service==playerDrop and NHEWReinforce.redirectAvailable() and 0 or pricing[project].cost
+    if (state.resources[service.resource] or 0)<cost then return "insufficient_packs" end
+    if service==playerDrop and not NHEWReinforce.available() then return "ew_player_unavailable" end
+end
+
+local function enterPlayerCode(state,edge)
+    local key
+    for _,name in ipairs(directions) do
+        if edge[name] then
+            if key then menu.entered=0;return end
+            key=name
+        end
+    end
+    if not key then return end
+    local entered=menu.entered or 0
+    if key=="Left" and entered==0 then menu.level=1;return end
+    if projectStatus(state,"ew_player_drop") then menu.entered=0;return end
+    if key~=playerCode[entered+1] then menu.entered=key==playerCode[1] and 1 or 0;return end
+    menu.entered=entered+1
+    if menu.entered==#playerCode then
+        local x,y=EntityGetTransform(owner)
+        local ticket,reason=NHEWReinforce.select(owner,x,y)
+        if not ticket then menu.entered=0;if reason then GamePrint(reason) end;return end
+        local link=state.gearLink
+        call={phase="connecting",project="ew_player_drop",linkId=link.id,ticket=ticket,
+            connectedAt=GameGetFrameNum()+60*NHEquipment.links[link.item.kind].seconds}
+        menu=nil
+    end
 end
 
 local function browse(c,state)
@@ -457,10 +490,14 @@ local function browse(c,state)
         stageKeys[key]=down
     end
     menu.fresh=false
+    local categories=playersVisible() and 5 or 4
+    if menu.category>categories then menu.category,menu.level,menu.entered=2,1,nil end
     if menu.level==1 then
-        if edge.Left then menu.category=(menu.category+2)%4+1
-        elseif edge.Right then menu.category=menu.category%4+1
-        elseif edge.Down then menu.level,menu.project=2,1 end
+        if edge.Left then menu.category=(menu.category+categories-2)%categories+1
+        elseif edge.Right then menu.category=menu.category%categories+1
+        elseif edge.Down then menu.level,menu.project,menu.entered=2,1,0 end
+    elseif menu.category==5 then
+        enterPlayerCode(state,edge)
     elseif edge.Left then
         menu.level=menu.level-1
     else
@@ -588,6 +625,8 @@ function S.pay(draft,linkId,project,boxTier)
     local service=services[project]
     if not draft.gearLink or (linkId and draft.gearLink.id~=linkId) then return false,"Data link unavailable." end
     if not service then return false,"Unknown support project." end
+    -- Player recoveries are paid once by the successful EW recovery receipt.
+    if service==playerDrop then return false,"Player recovery requires a confirmed receipt." end
     if NHStore.level(draft,service.station)<math.max(boxTier or 0,pricing[project].level) then return false,"Support station level too low." end
     local cost=pricing[project].cost
     if (draft.resources[service.resource] or 0)<cost then return false,service.shortage end
@@ -671,9 +710,22 @@ function S.update(state,player,commit,report)
     local function pay()
         return commit(function(draft) return S.pay(draft,order.linkId,order.project,order.tier) end)
     end
-    if not call.paid and call.phase~="finished" and (state.resources[service.resource] or 0)<pricing[call.project].cost then
+    local redirect=service==playerDrop and call.ticket and call.ticket.redirect
+    if not redirect and not call.paid and call.phase~="finished" and (state.resources[service.resource] or 0)<pricing[call.project].cost then
         closeCall()
         report(service.shortage)
+        return
+    end
+    if service==playerDrop then
+        if not playersVisible() then closeCall();return end
+        if GameGetFrameNum()<call.connectedAt then return end
+        local ticket=call.ticket
+        closeCall()
+        local x,y=ticket.x,ticket.y
+        if ticket.redirect then x,y=resupply.alternatePlayerSite(player) end
+        if not x then report("No clear supply landing site.");return end
+        local ok,reason=NHEWReinforce.request(player,x,y,ticket)
+        if not ok and reason then report(reason) end
         return
     end
     if service==recon and not call.targeted then
@@ -762,15 +814,17 @@ function S.view(state,player)
     if not menu and not call and not airborne and not salvo and #activeZones==0 then return end
     local x,y=EntityGetTransform(player)
     if aboard(x,y) then return end
-    local projects=menu and S.projects[menu.category]
+    local projects=menu and (menu.category==5 and playerProjects or S.projects[menu.category])
     local project=menu and menu.level>=2 and projects[menu.project]
     local status=menu and menu.level>=2 and projectStatus(state,project)
     local payment
     local service=services[project]
     if service then
-        payment={resource=service.resource,cost=pricing[project].cost,stock=state.resources[service.resource] or 0}
+        local cost=service==playerDrop and NHEWReinforce.redirectAvailable() and 0 or pricing[project].cost
+        payment={resource=service.resource,cost=cost,stock=state.resources[service.resource] or 0}
     end
-    return {menu=menu,projects=projects,projectStatus=status,
+    return {menu=menu,projects=projects,projectStatus=status,playerCategory=menu and playersVisible(),
+        playerCode=menu and menu.category==5 and menu.level==2 and playerCode or nil,
         call=call,x=x,y=y,payment=payment,airborne=airborne,salvo=salvo,activeZones=activeZones,
         alert=call and patterns[call.project] and patterns[call.project].alert}
 end

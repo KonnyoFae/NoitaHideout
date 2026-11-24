@@ -209,3 +209,85 @@ do
     R.arm(policy,p)
     assert(not R.settle(policy,p,10,20,settle,dispatch) and crate==paidCrate and trips==1)
 end
+
+-- Entering EW must not replay a private transfer against the team wallet,
+-- steal its death flag, or discard a policy / rescue that predates this build.
+do
+    dofile(root.."bank.lua")
+    local ew=NHEW
+    local soloRescue,soloWallet=ew.rescueAllowed,ew.walletAllowed
+    local p=spawn("insured",44,78)
+    local dm=EntityAddComponent2(p,"DamageModelComponent",{hp=4,max_hp=4})
+    local w=EntityAddComponent2(p,"WalletComponent",{money=75,mHasReachedInf=false})
+    local life=EntityAddComponent2(p,"GameEffectComponent",{effect="RESPAWN",mIsSpent=false})
+    local policy={profile=111,runSerial=1,insuranceActive=true,insuranceSerial=1,
+        resources={arcane_scrap=100},bankGold=200,bankWalletNet=-25}
+    R.arm(policy,p)
+    local rec=assert(EntityGetFirstComponentIncludingDisabled(p,"VariableStorageComponent","nh_rescue"))
+    assert(rec.value_bool and dm.wait_for_kill_flag_on_death and life.disabled)
+    local receipt="noita_hideout.bank_wallet.111/1"
+    world[receipt]="0/-25/75"
+    ew.rescueAllowed=function() return false end
+    ew.walletAllowed=function() return false end
+    local pet=spawn("cat")
+    entities[pet].tags.noita_hideout_companion=true
+    EntityAddChild(p,pet)
+    EntityAddComponent2(pet,"VariableStorageComponent",{_tags="nh_companion_clock",value_string="cat"})
+    dm.hp=-1
+    R.arm(policy,p)
+    R.lifePriority(p)
+    R.intercept(p,dm)
+    assert(not life.disabled and dm.wait_for_kill_flag_on_death and not dm.kill_now and dm.hp==-1)
+    assert(not EntityGetFirstComponentIncludingDisabled(p,"VariableStorageComponent","nh_rescue"))
+    assert(policy.insuranceActive and EntityGetIsAlive(pet) and w.money==75)
+    local stashed=policy.resources.arcane_scrap
+    policy.insuranceActive=false
+    assert(not NHStore.buyGood(policy,{id="rescue_policy"}) and policy.resources.arcane_scrap==stashed)
+    policy.insuranceActive=true
+    assert(not NHBank.prepare(policy,p,{direction="deposit",amount=20}))
+    assert(not NHBank.prepare(policy,p,{direction="withdraw",amount=20}))
+    assert(not NHBank.reconcile(policy,p))
+    assert(policy.bankGold==200 and policy.bankWalletNet==-25 and w.money==75 and world[receipt]=="0/-25/75")
+    assert(NHStore.spendGold(policy,8) and NHStore.creditGold(policy,8))
+
+    local poly=spawn("sheep")
+    local polyHP=EntityAddComponent2(poly,"DamageModelComponent",{hp=0,max_hp=1,wait_for_kill_flag_on_death=true})
+    ComponentAddTag(polyHP,"nh_rescue_poly_wait")
+    R.polymorph(policy,poly)
+    assert(polyHP.hp==0 and polyHP.wait_for_kill_flag_on_death and not polyHP.kill_now)
+    assert(not ComponentHasTag(polyHP,"nh_rescue_poly_wait") and not world["nh_rescue.111.1.return"])
+
+    local oldCrate=assert(EntityLoad(root.."items/lost_gold_case.xml",12,13))
+    local value=EntityGetFirstComponentIncludingDisabled(oldCrate,"VariableStorageComponent","nh_lost_gold")
+    value.value_string="19"
+    entities[oldCrate].components.DamageModelComponent.hp=0
+    updated=oldCrate
+    dofile(root.."lost_gold_case.lua")
+    assert(EntityGetIsAlive(oldCrate) and value.value_string=="19")
+    local nugget=EntityLoad(root.."items/lost_gold.xml",14,15)
+    local gold=EntityGetFirstComponentIncludingDisabled(nugget,"VariableStorageComponent","nh_lost_gold")
+    gold.value_string,gold.value_bool="11",true
+    dofile(root.."lost_gold_pickup.lua")
+    item_pickup(nugget,p)
+    assert(EntityGetIsAlive(nugget) and gold.value_string=="11" and w.money==75 and not w.mHasReachedInf)
+
+    -- This legacy player already lost gold before joining. Keep the record
+    -- and consume it only once if they return to the same private run.
+    local escrow=EntityAddComponent2(p,"VariableStorageComponent",{_tags="nh_rescue",value_bool=true,
+        value_string="policy:44:78:0:31:0",value_int=1})
+    R=dofile(root.."rescue.lua")
+    R.arm(policy,p)
+    assert(not escrow.value_bool and not R.settle(policy,p,0,0,function() error("unexpected charge") end))
+    assert(escrow.value_string=="policy:44:78:0:31:0" and w.money==75 and policy.insuranceActive)
+    ew.walletAllowed=soloWallet
+    assert(NHBank.reconcile(policy,p) and w.money==50 and world[receipt]=="-25")
+    assert(NHBank.reconcile(policy,p) and w.money==50)
+    assert(NHBank.prepare(policy,p,{direction="withdraw",amount=10})==10 and NHBank.reconcile(policy,p))
+    assert(w.money==60 and policy.bankGold==190 and world[receipt]=="-15")
+    assert(not R.settle(policy,p,0,0,function() error("EW still handles death") end))
+    ew.rescueAllowed=soloRescue
+    local recovered,_,owed=R.settle(policy,p,0,0,function(edit) return edit(policy) end)
+    assert(recovered=="policy" and owed==31 and not policy.insuranceActive and w.money==60)
+    assert(not R.settle(policy,p,0,0,function() error("duplicate settlement") end))
+end
+print("EW preserves death ownership, extra lives, policies, lost gold, private shop gold and bank receipts.")

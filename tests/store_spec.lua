@@ -305,3 +305,43 @@ do
         assert(NHGuns.rounds(upgraded.warehouse[1].item)==413)
     end
 end
+
+do
+    selected=8
+    profiles[selected]={}
+    local old=save(load())
+    assert(old.ewDepositPending==nil and old.ewActive==nil)
+    old.ewActive="ROOM_A-1"
+    old.ewDepositPending={world=old.ewActive,issuer="PLAYER1",tx="2",phase="prepare",run=old.runSerial,
+        keys={"g/123","t/ew/PLAYER1/r/1/2/3/4/5/6"},intent={route="item",dest="warehouse"},record={kind="potion"},
+        original=false,hadItem=true,slot={bag="inventory_quick",x=1,y=0}}
+    local held=save(old)
+    assert(held.ewDepositPending.tx=="2" and held.ewDepositPending.slot.x==1)
+    local function refuses(change)
+        local draft=load()
+        change(draft)
+        local ok,why=NHStore.commit(draft)
+        assert(not ok and why:find("Invalid pending multiplayer deposit",1,true))
+        local durable=load()
+        assert(durable.revision==held.revision and durable.ewDepositPending.tx=="2")
+    end
+    refuses(function(s) s.ewDepositPending=false end)
+    refuses(function(s) s.ewDepositPending.tx=nil end)
+    refuses(function(s) s.ewDepositPending.tx=2 end)
+    refuses(function(s) s.ewDepositPending.keys={"g/123","g/123"} end)
+    refuses(function(s) s.ewDepositPending.world="ROOM_B" end)
+    refuses(function(s) s.ewDepositPending.slot.x="1" end)
+    refuses(function(s) s.ewDepositPending.reserved="yes" end)
+    refuses(function(s) s.ewDepositPending={world=s.ewActive,issuer="PLAYER1",tx="2",phase="prepare",keys={"g/123"}} end)
+    refuses(function(s) s.ewDepositPending={world=s.ewActive,issuer="PLAYER1",tx="2",phase="cancel"} end)
+    held.ewDepositPending.slot=nil -- Order saved before the native inventory slot was recorded.
+    held.ewDepositPending.phase="return"
+    held.ewDepositPending.outcome="cancelled"
+    held=save(held)
+    assert(held.ewDepositPending.phase=="return")
+    held.ewDepositPending={world=held.ewActive,issuer="PLAYER1",tx="2",phase="cancel",keys={"g/123"},reserved=true}
+    held=save(held)
+    held.ewDepositPending.phase,held.ewDepositPending.outcome,held.ewDepositPending.keys="return","cancelled",nil
+    assert(save(held).ewDepositPending.phase=="return")
+end
+print("Store: missing legacy deposit fields, valid pending orders and atomic rejection of damaged orders passed.")

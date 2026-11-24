@@ -36,6 +36,9 @@ if __name__ == "__main__":
             ("mg_turret_zh", "召唤机枪塔"), ("mg_turret_en", "Summon MG Turret"),
             ("chaingun_turret_zh", "召唤链炮塔"), ("chaingun_turret_en", "Summon Chaingun Turret"),
             ("missile_turret_zh", "召唤连发导弹塔"), ("missile_turret_en", "Summon Missile Turret"),
+            ("players_zh", "玩家增援"), ("players_en", "Teammates"),
+            ("ew_player_drop_zh", "呼叫增援"), ("ew_player_drop_en", "Call Reinforcements"),
+            ("ew_player_unavailable_zh", "暂无可增援队友"), ("ew_player_unavailable_en", "No Teammate Available"),
         ):
             expected = render(word, sheet, glyphs)
             path = labels / (key + ".png")

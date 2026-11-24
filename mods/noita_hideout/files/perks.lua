@@ -52,8 +52,8 @@ local function valid_slot(state,slot)
     return type(slot)=="number" and slot==math.floor(slot) and slot>=1 and slot<=NHStore.level(state,"perk_slots")
 end
 
-local function equipped_record(state,player,slot,id)
-    if not GameIsInventoryOpen() or not valid_slot(state,slot) or not id or equipped(player)[slot]~=id then
+local function equipped_record(state,player,slot,id,replay)
+    if (not replay and not GameIsInventoryOpen()) or not valid_slot(state,slot) or not id or equipped(player)[slot]~=id then
         return nil,"Inventory slot changed."
     end
     return record(card_info(id))

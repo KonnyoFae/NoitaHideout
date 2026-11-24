@@ -1,10 +1,12 @@
 local root="mods/noita_hideout/files/travel/"
 local cabin=dofile(root.."cabin.lua")
+local coopCabin=dofile(root.."ew_cabin.lua")
 local routes=dofile(root.."routes.lua")
 local landmarks=dofile("mods/noita_hideout/files/terminals/landmarks.lua")
 local access=dofile("mods/noita_hideout/files/terminals/access.lua")
 local N={}
 local prefix,cycle,checkedFrame="nh_travel.",nil,nil
+local adapter,room,owner,shipKey
 local repairRound,repairedRound="",""
 local function read(key) return GlobalsGetValue(prefix..key,"") end
 local function write(key,value) GlobalsSetValue(prefix..key,value) end
@@ -37,17 +39,32 @@ end
 local function syncCycle(frame)
     if frame and frame==checkedFrame then return end
     checkedFrame=frame
+    local world,issuer
+    if adapter and adapter.enabled() then
+        if adapter.ready() then world,issuer=adapter.world(),adapter.issuer() end
+        if not world or not issuer then
+            cycle,room,owner,shipKey=nil,nil,nil,nil
+            menu,held,startHold,latched,hint,lastMountain,lastLandmark=nil,nil,nil,false,nil,nil,nil
+            return
+        end
+    end
     local ng=tonumber(SessionNumbersGetValue and SessionNumbersGetValue("NEW_GAME_PLUS_COUNT")) or 0
-    if cycle==ng then return end
-    if cycle~=nil then
+    if cycle==ng and room==world and owner==issuer then return end
+    if cycle~=nil and room==world and owner==issuer then
         write("trip","")
         write("gate","")
         write("exit","")
     end
-    cycle=ng
+    cycle,room,owner=ng,world,issuer
     menu,held,startHold,latched,hint,lastMountain,lastLandmark=nil,nil,nil,false,nil,nil,nil
     access.invalidateAccess()
-    prefix=ng==0 and "nh_travel." or ("nh_travel.ng"..ng..".")
+    if world then
+        prefix="nh_travel.ew."..world.."."..issuer..".ng"..ng.."."
+        shipKey=world.."."..ng.."."..cabin.revision
+    else
+        prefix=ng==0 and "nh_travel." or ("nh_travel.ng"..ng..".")
+        shipKey=nil
+    end
     repairRound,repairedRound=read("repair_round"),read("repaired_round")
     local gate=read("gate")
     local source,kind,rest=gate:match("^([^,]+,[^,]+),(%a+),(.+)$")
@@ -58,9 +75,12 @@ local function syncCycle(frame)
     end
     return true
 end
-function N.reset() cycle=nil; syncCycle() end
+function N.setMultiplayer(value) adapter=value end
+function N.reset() cycle=nil; checkedFrame=nil; syncCycle() end
 function N.scheduleRepair(round)
     syncCycle()
+    if cycle==nil then return end
+    if shipKey then coopCabin.schedule(shipKey,round); return end
     local stamp=tostring(round)
     if stamp~=repairRound then
         repairRound=stamp
@@ -68,6 +88,7 @@ function N.scheduleRepair(round)
     end
 end
 function N.inCabin(player,x,y)
+    if cycle==nil or (adapter and adapter.enabled() and (not adapter.ready() or room~=adapter.world())) then return false end
     if not x then x,y=EntityGetTransform(player) end
     return cabin.inside(x,y) and read("built")==cabin.revision
 end
@@ -117,7 +138,16 @@ local function protect(player)
     end
 end
 
+local function localConsole()
+    local id=here(terminalX,terminalY,4,"nh_travel_console")
+    if not id then id=EntityLoad(root.."console.xml",terminalX,terminalY) end
+    return id and id~=0
+end
+
 local function ensureCabin(player)
+    if shipKey then
+        return coopCabin.ensure(shipKey,cabin,player,read,write,function(p,x,y) protect(p); move(p,x,y) end,localConsole)
+    end
     local built=read("built")
     local restoring=built~=cabin.revision or repairRound~=repairedRound
     if restoring then
@@ -155,9 +185,7 @@ local function ensureCabin(player)
             or not RaytracePlatforms(terminalX,terminalY-8,terminalX,terminalY+5) then return false end
     end
     if not DoesWorldExistAt(terminalX-8,terminalY-8,terminalX+8,terminalY+8) then return not restoring end
-    local id=here(terminalX,terminalY,4,"nh_travel_console")
-    if not id then id=EntityLoad(root.."console.xml",terminalX,terminalY) end
-    if not id or id==0 then return false end
+    if not localConsole() then return false end
     if restoring then
         write("built",cabin.revision)
         access.invalidateAccess()
@@ -177,6 +205,7 @@ local function begin(player,kind,x,y,bx,by)
 end
 function N.rescue(player,hx,hy)
     syncCycle()
+    if cycle==nil or (adapter and adapter.enabled() and not adapter.rescueAllowed()) then return false end
     write("gate","")
     begin(player,"rescue",infirmaryX,infirmaryY,hx,hy)
 end
@@ -255,6 +284,7 @@ end
 
 function N.choose(player,index)
     syncCycle()
+    if cycle==nil then return end
     local row=menu and menu.rows[index]
     if not row or not GameIsInventoryOpen() or not atConsole(EntityGetTransform(player)) or read("trip")~="" then return end
     local gx,gy=cabin.point(cabin.gate)
@@ -276,7 +306,10 @@ function N.update(player,hx,hy,blocked)
     local x,y=EntityGetTransform(player)
     -- Native NG+ can replace the world between updates. Check it on the
     -- maintenance tick and before acting on an outstanding trip or a gate.
-    if cycle==nil or frame%15==0 then syncCycle(frame) end
+    local coop=adapter and adapter.enabled()
+    if coop and (not adapter.ready() or adapter.world()~=room or adapter.issuer()~=owner)
+        or cycle==nil or frame%15==0 then syncCycle(frame) end
+    if cycle==nil then return end
     if frame%15==0 then
         landmarks.update(x,y,prefix)
         access.invalidateAccess()
@@ -290,7 +323,7 @@ function N.update(player,hx,hy,blocked)
         return
     end
     if frame%15==0 and (cabin.overlaps(x,y,x,y,240)
-        or (frame%60==0 and repairRound~=repairedRound and read("built")==cabin.revision)) then
+        or (not shipKey and frame%60==0 and repairRound~=repairedRound and read("built")==cabin.revision)) then
         if inFormerCabin(x,y) then
             begin(player,"refit",infirmaryX,infirmaryY,hx,hy)
             return
