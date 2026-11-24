@@ -1,0 +1,8 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/bow/arrow.xml">
+        <VelocityComponent gravity_y="150" />
+        <ProjectileComponent lifetime="180" damage="0" collide_with_entities="0" on_collision_die="1" />
+    </Base>
+    <VariableStorageComponent _tags="nh_bow_field" name="aid" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/bow/plant.lua" execute_every_n_frame="-1" execute_on_removed="1" />
+</Entity>

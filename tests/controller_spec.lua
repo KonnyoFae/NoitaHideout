@@ -176,14 +176,15 @@ function EntityLoad(path,x,y)
         for _,tag in ipairs({"nh_gifts","nh_trip","nh_position"}) do
             EntityAddComponent2(next_id,"VariableStorageComponent",{_tags=tag,value_int=0,value_float=0})
         end
-    elseif file=="scatter_revolver" or file=="marksman_rifle" or file=="battle_staff" then
-        local size=file=="battle_staff" and 120 or file=="scatter_revolver" and 6 or 10
+    elseif file=="scatter_revolver" or file=="marksman_rifle" or file=="battle_staff" or file=="hunting_bow" then
+        local size=({battle_staff=120,hunting_bow=60,scatter_revolver=6,marksman_rifle=10})[file]
         EntityAddTag(next_id,"wand")
         EntityAddTag(next_id,"nh_firearm")
         EntityAddComponent2(next_id,"ItemComponent",{item_name=file,ui_sprite=file..".png"})
         EntityAddComponent2(next_id,"AbilityComponent",{mana=size,use_gun_script=true})
         EntityAddComponent2(next_id,"VariableStorageComponent",{_tags="nh_magazine",name=file,value_int=size,value_string="-1"})
         if file=="battle_staff" then EntityAddComponent2(next_id,"VariableStorageComponent",{_tags="nh_staff_clock",value_int=0}) end
+        if file=="hunting_bow" then EntityAddComponent2(next_id,"VariableStorageComponent",{_tags="nh_bow_clock",value_int=0}) end
     elseif file=="tarot_life" or file=="effect_invisibility" or file=="effect_stains_drop_faster" then
         EntityAddComponent2(next_id,"GameEffectComponent",{effect=file=="tarot_life" and "RESPAWN" or file,frames=-1})
     elseif file=="lost_gold_case" then
@@ -582,6 +583,8 @@ for _,recipe in ipairs(NHStore.recipes) do
         assert(entry.icon==recipe.item.icon and recipe.item.kind=="spell",recipe.id)
     elseif recipe.id=="battle_staff" then
         assert(entry.icon=="mods/noita_hideout/files/items/staff_icon.png" and recipe.item.rounds==120)
+    elseif recipe.id=="hunting_bow" then
+        assert(entry.icon=="mods/noita_hideout/files/items/hunting_bow_icon.png" and recipe.item.rounds==60 and recipe.item.mode==1)
     elseif recipe.category=="weapons" or (recipe.category=="medical" and recipe.item.kind~="dose") then
         assert(entry.icon=="mods/noita_hideout/files/items/"..recipe.item.kind..".png",recipe.id)
     end
@@ -3738,6 +3741,38 @@ do
     assert(not EntityGetIsAlive(staff) and saved.kind=="battle_staff" and saved.rounds==65 and saved.mode==4)
 end
 print("Battle staff: warehouse quick transfer, full and freed wand lanes, old drops and ammo/mode round trip passed.")
+
+do
+    settings,flags={},{}
+    new_world()
+    inventory_open=true
+    local profile=state()
+    profile.resources.arcane_scrap=12
+    assert(NHStore.startOrder(profile,"hunting_bow"))
+    assert(NHStore.advanceProduction(profile,{run=profile.runSerial,orderId=profile.order.id,progress=profile.order.required}))
+    assert(NHStore.commit(profile))
+    boot(); tick()
+    local target
+    NHUI.quickTarget=function() return target end
+    local function shift(slot) target=slot; tick(); tick(225,nil,nil,"left"); tick() end
+    local function equip()
+        local row=assert(state().warehouse[1])
+        shift({key="warehouse",safeSlot=row.slot,kind=row.item.kind,entity=row.id})
+        return assert(EntityGetWithTag("noita_hideout_hunting_bow")[1])
+    end
+    local bow=equip()
+    local core=entities[EntityGetAllChildren(bow)[1]].comps
+    assert(core.ItemComponent.permanently_attached and core.ItemActionComponent.action_id=="NH_HUNTING_BOW")
+    local mag=entities[bow].comps.VariableStorageComponentnh_magazine
+    mag.value_int,mag.value_float=1,4
+    for _,slot in ipairs(tick().native_slots) do
+        if slot.entity==bow then assert(slot.lane=="wand"); shift(slot); break end
+    end
+    local stored=assert(state().warehouse[1]).item
+    assert(stored.kind=="hunting_bow" and stored.rounds==1 and stored.mode==4)
+    mag=entities[equip()].comps.VariableStorageComponentnh_magazine
+    assert(mag.value_int==1 and mag.value_float==4)
+end
 
 do
     settings,flags={},{}

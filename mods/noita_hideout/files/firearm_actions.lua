@@ -67,6 +67,9 @@ local function ammunition(kind,icon)
 end
 ammunition("scatter_revolver","data/ui_gfx/gun_actions/buckshot.png")
 ammunition("marksman_rifle","data/ui_gfx/gun_actions/light_bullet.png")
+table.insert(actions,{id="NH_HUNTING_BOW",name="$nh_hideout_hunting_bow",description="$nh_hideout_hunting_bow_desc",
+    sprite="mods/noita_hideout/files/items/hunting_bow_icon.png",type=ACTION_TYPE_UTILITY,spawn_level="0",spawn_probability="0",price=0,mana=0,
+    action=function() end})
 table.insert(actions,{id="NH_BATTLE_STAFF",name="$nh_hideout_battle_staff",description="$nh_hideout_battle_staff_desc",
     sprite="data/ui_gfx/gun_actions/energy_shield.png",type=ACTION_TYPE_UTILITY,spawn_level="0",spawn_probability="0",price=0,mana=0,
     action=function() end})

@@ -1,0 +1,10 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/bow/arrow.xml">
+        <ProjectileComponent damage="0.6" lifetime="50" on_death_explode="1" on_lifetime_out_explode="1">
+            <config_explosion never_cache="1" damage="1.4" damage_mortals="1" explosion_radius="20" physics_throw_enabled="0"
+                hole_enabled="0" camera_shake="1" explosion_sprite="data/particles/explosion_016.xml" explosion_sprite_lifetime="0.2"
+                sparks_enabled="1" spark_material="spark" audio_enabled="1" audio_event_name="explosions/magic_rocket_small" />
+        </ProjectileComponent>
+    </Base>
+    <LuaComponent script_source_file="mods/noita_hideout/files/bow/split.lua" execute_every_n_frame="-1" execute_on_removed="1" />
+</Entity>

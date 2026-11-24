@@ -1,0 +1,7 @@
+<Entity>
+    <SpriteComponent _tags="nh_planted_arrow" image_file="data/projectiles_gfx/arrow.xml" />
+    <SpriteComponent _tags="nh_bow_ring" image_file="data/particles/area_indicator_064_blue.png" offset_x="32" offset_y="32" alpha="0.55" has_special_scale="1" special_scale_x="1" special_scale_y="1" />
+    <LightComponent radius="30" r="70" g="230" b="120" />
+    <VariableStorageComponent _tags="nh_bow_field" name="aid" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/bow/field_tick.lua" execute_every_n_frame="12" />
+</Entity>

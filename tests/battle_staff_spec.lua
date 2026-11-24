@@ -1,8 +1,8 @@
 local root="mods/noita_hideout/files/"
 local staff=dofile(root.."battle_staff.lua")
 NHFirearms=dofile(root.."firearms.lua")
-local paths,clock,mag,controls={},{value_int=0},{value_int=120},{mButtonDownFire=false}
-local segments,buffs,forms,hits={},{},0,0
+local paths,clock,mag,controls={},{value_int=0,value_float=0},{value_int=120},{mButtonDownFire=false}
+local buffs,forms,hits={},0,0
 local velocity,shot,poly={},{},{frames=3600}
 local enemyMotion={}
 local pos={[1]={0,0},[3]={8,0},[4]={30,0},[5]={0,30},[6]={8,0}}
@@ -50,6 +50,7 @@ function EntityGetFirstComponentIncludingDisabled(id,kind,tag)
     if id==10 and tag=="nh_staff_mimic_guard" then return guard end
     if kind=="ControlsComponent" then return controls end
     if tag=="nh_staff_clock" then return clock end
+    if tag=="nh_magazine" then return mag end
 end
 function EntityGetFirstComponent(id,kind,tag)
     if id==3 and kind=="CharacterDataComponent" then return enemyMotion end
@@ -87,7 +88,7 @@ function GamePlaySound(bank,event)
     elseif event=="player/kick" then assert(bank=="data/audio/Desktop/player.bank"); thumps=thumps+1 end
 end
 local function drawnAngle()
-    local index=tonumber(heldSprite.rect_animation:match("^swing_(%d+)$")) or 0
+    local index=tonumber(heldSprite.rect_animation:match("^swing_%d+_(%d+)$")) or 0
     local localAngle=index*math.pi/32
     return pos[2][3]+math.atan2(heldSprite.special_scale_y*math.sin(localAngle),heldSprite.special_scale_x*math.cos(localAngle))
 end
@@ -97,15 +98,10 @@ function GameGetFrameNum() return frameNow end
 function GameShootProjectile(owner,x,y,tx,ty,id,message)
     assert(owner==1)
     if id==13 then assert(message==false); fields=fields+1 end
-    if id==8 then
-        local dx,dy=math.cos(drawnAngle()),math.sin(drawnAngle())
-        assert(message==false and math.abs(tx-x-18*dx)<0.001 and math.abs(ty-y-18*dy)<0.001)
-        assert(math.abs((x-pos[2][1])*dy-(y-pos[2][2])*dx)<0.001)
-    end
+
 end
 function EntityLoad(path,x,y)
     if path==root.."companions/matter_field.xml" then return 13 end
-    if path==root.."projectiles/staff_blade.xml" then segments[#segments+1]=math.sqrt((x-1)^2+y^2);return 8 end
     if path==root.."projectiles/staff_orb.xml" then return 9 end
     assert(path==root.."staff_mana.xml");return 11
 end
@@ -116,58 +112,58 @@ NHNative={held=function() return 2 end}
 NHProducts={aim=function() return 1,0 end}
 local function tick(index,down,frame,blocked,reloading,canMimic)
     frameNow=frame
+    mag.value_float=index
     dofile(root.."equipment_sprite_mirror.lua")
     controls.mButtonDownFire=down
     return staff.update(1,2,mag,index,mag.value_int,frame,blocked,reloading,canMimic)
 end
+for mode,stages in ipairs({4,4,3,4}) do
+    local start=mode*200
+    tick(mode,false,start)
+    assert(heldSprite.rect_animation=="charge_"..mode.."_0")
+    for level=0,stages-1 do
+        tick(mode,true,start+1+30*level)
+        assert(heldSprite.rect_animation=="charge_"..mode.."_"..level)
+    end
+    -- Dropping a charged staff restores the saved mode's uncharged colour.
+    frameNow=frameNow+3
+    dofile(root.."equipment_sprite_mirror.lua")
+    assert(heldSprite.rect_animation=="charge_"..mode.."_0")
+    staff.reset()
+end
 mag.value_int=0
 dragonPresent=true
-tick(1,true,10); tick(1,false,11);assert(drawnAngle()<0 and hits==0)
-for frame=12,17 do tick(1,false,frame) end
-assert(drawnAngle()>0 and #segments==0 and hits==1 and mag.value_int==0 and fields==1)
-assert(swings==1 and thumps==1)
-assert(enemyMotion.mVelocity[1]>0 and enemyMotion.mVelocity[2]<0)
+tick(2,true,10); tick(2,false,11);assert(heldSprite.rect_animation:match("^swing_2_") and drawnAngle()<0 and hits==0)
+for frame=12,17 do tick(2,false,frame) end
+assert(drawnAngle()>0 and hits==1 and mag.value_int==0 and fields==1)
+assert(swings==1 and thumps==1 and enemyMotion.mVelocity[1]>0 and enemyMotion.mVelocity[2]<0)
 dragonPresent=false
-tick(1,false,19);assert(heldSprite.rect_animation=="default" and heldSprite.visible)
+tick(2,false,19);assert(heldSprite.rect_animation=="charge_2_0" and heldSprite.visible)
 mag.value_int=120
-tick(1,true,20); tick(1,true,79); assert(mag.value_int==120)
-tick(1,true,80);tick(1,true,140);tick(1,true,200);tick(1,true,300);tick(1,false,301)
-assert(drawnAngle()<-math.pi/2 and #segments==3)
-for frame=302,313 do
-    -- Turn the native wand and flip its axes during a locked swing.
-    pos[2][3]=frame*0.02
-    pos[2][4]=frame%3==0 and -1 or 1
-    pos[2][5]=frame%2==0 and -1 or 1
-    tick(1,false,frame)
-    local t=(frame-301)/12
-    local expected=math.rad(96)*(2*t*t*(3-2*t)-1)
-    assert(math.cos(drawnAngle()-expected)>=math.cos(math.pi/64)-1e-8)
-end
-assert(hits==3 and mag.value_int==117 and #segments==21)
-assert(swings==2 and thumps==2)
-for index,distance in ipairs(segments) do assert(math.abs(distance-(13+18*((index-1)%3)))<0.001) end
-tick(1,true,320);tick(1,true,360,true);tick(1,false,361);assert(#segments==21 and mag.value_int==117)
+tick(2,true,20);tick(2,true,51);assert(mag.value_int==120 and heldSprite.rect_animation=="charge_2_1")
+tick(2,true,52,true);tick(2,false,53);assert(hits==1 and mag.value_int==120)
 NHProducts.aim=function() return -1,0 end
 pos[2]={1,0,0,-1,1}
-tick(1,true,370);assert(math.cos(drawnAngle()-math.rad(228))>=math.cos(math.pi/64))
-tick(2,false,371);tick(2,false,372);assert(heldSprite.rect_animation=="default" and heldSprite.visible)
-tick(1,true,375)
+tick(3,false,60);tick(3,true,61)
 for age=0,6 do
-    tick(1,false,376+age)
+    tick(3,false,62+age)
+    assert(heldSprite.rect_animation:match("^swing_3_"))
     local t=age/6
     local expected=math.pi-math.rad(48)*(2*t*t*(3-2*t)-1)
     assert(math.cos(drawnAngle()-expected)>=math.cos(math.pi/64)-1e-8)
 end
 NHProducts.aim=function() return 1,0 end
-tick(2,true,400);assert(mag.value_int==97 and shot.mWhoShot==1)
+pos[2]={1,0,0,1,1}
+tick(1,false,80)
+tick(1,true,81);tick(1,true,141);tick(1,false,142)
+assert(mag.value_int==114 and shot.mWhoShot==1)
 dragonPresent=true
-tick(3,true,436);tick(3,true,495);assert(#buffs==1 and mag.value_int==87 and velocity.mVelocity[2]>0)
-tick(3,true,496);assert(#buffs==2 and mag.value_int==77)
-assert(fields==3)
+tick(1,true,180);tick(1,false,210)
+tick(1,true,270);tick(1,false,300)
+assert(#buffs==2 and mag.value_int==108 and fields==3 and velocity.mVelocity[2]>0)
 dragonPresent=false
 do
     local oldQuery,oldComponent,oldRay=EntityGetInRadius,EntityGetFirstComponent,RaytracePlatforms
-    local resume=clock.value_int
     pos[14]={21,0}
     local boxes={[101]={11,-2,31,2},[102]={6,5,8,7},[103]={6,-3,8,-1},[104]={5,-1,7,1}}
     function PhysicsBodyIDQueryBodies(x1,y1,x2,y2)
@@ -203,48 +199,96 @@ do
         if tx>=edge and (wall or math.abs(ty)<=2) then return true,edge,y+(ty-y)*(edge-x)/(tx-x) end
         return false
     end
-    local function sweep(start,charge)
+    local function sweep(start,mode)
         staff.reset()
-        tick(1,true,start)
-        if charge then tick(1,true,start+60) end
-        local release=start+(charge and 61 or 1)
-        for frame=release,release+10 do tick(1,false,frame) end
+        tick(mode,true,start)
+        for frame=start+1,start+11 do tick(mode,false,frame) end
     end
     local beforeHits,beforeSwings,beforeThumps=hits,swings,thumps
-    sweep(700,false)
+    sweep(700,2)
     assert(impulses[101] and impulses[101].x==11 and impulses[102])
     assert(hits==beforeHits+1 and swings==beforeSwings+1 and thumps==beforeThumps+1)
     local base=impulses[101].ix
     impulses={}
-    sweep(720,true)
-    assert(impulses[101].ix>base and impulses[102] and thumps==beforeThumps+2)
+    sweep(720,3)
+    assert(impulses[101].ix==base and impulses[102] and thumps==beforeThumps+2)
     wall=true
     impulses={}
-    sweep(810,false)
+    sweep(810,2)
     assert(not next(impulses) and hits==beforeHits+2 and swings==beforeSwings+3 and thumps==beforeThumps+2)
     EntityGetInRadius,EntityGetFirstComponent,RaytracePlatforms=oldQuery,oldComponent,oldRay
     PhysicsBodyIDQueryBodies=function() return {} end
     staff.reset()
-    clock.value_int=resume
+    clock.value_int=556
     mag.value_int=77
+end
+-- Verify release-time costs, payload counts and charge poses for the remaining spells.
+do
+    local loadOld,getOld,addOld=EntityLoad,EntityGetFirstComponentIncludingDisabled,EntityAddComponent2
+    local rows,objects,miss={},{}
+    function dofile_once(path) return dofile(path) end
+    function EntitySetComponentsWithTagEnabled(id,tag,on)
+        assert(objects[id] and tag=="nh_planted_arrow" and on==false)
+    end
+    function EntityLoad(path)
+        if miss then return 0 end
+        local id=100+#rows
+        rows[#rows+1]=path:match("([^/]+)%.xml$")
+        objects[id]={ProjectileComponent={},VelocityComponent={},nh_bow_field={},nh_bow_ring={}}
+        return id
+    end
+    function EntityGetFirstComponentIncludingDisabled(id,kind,tag)
+        if objects[id] then return objects[id][tag or kind] end
+        return getOld(id,kind,tag)
+    end
+    function EntityAddComponent2(id,kind,fields) objects[id][kind]=fields;return fields end
+    local function shoot(mode,level,points,frame)
+        staff.reset()
+        mag.value_int=points
+        tick(mode,true,frame)
+        local held,charge=tick(mode,true,frame+level*30)
+        assert(held==points and charge==level and heldSprite.rect_animation=="charge_"..mode.."_"..level)
+        return tick(mode,false,frame+level*30+1)
+    end
+    local cases={{1,0,"rocket",1,1},{1,3,"staff_rail",10,1},{2,1,"pebble_player",2,1},
+        {2,2,"duck",4,3},{2,3,"meteor",8,4},{3,1,"staff_sheep",5,1},
+        {4,0,"heal_bullet",2,1},{4,1,"anchor",8,1},{4,2,"supply_pack",16,1},{4,3,"staff_crystal",32,1}}
+    for i,entry in ipairs(cases) do
+        local mode,level,file,cost,count=unpack(entry)
+        local before=#rows
+        assert(shoot(mode,level,120,1000+200*i)==120-cost and #rows==before+count)
+        for j=before+1,#rows do
+            assert(rows[j]==file)
+            if count>1 then assert(objects[99+j].HomingComponent) end
+        end
+    end
+    local before=#rows
+    local pts,_,_,_,reload=shoot(2,3,1,4000)
+    assert(pts==1 and reload and #rows==before)
+    miss=true
+    assert(shoot(4,3,32,4200)==32 and #rows==before)
+    EntityLoad,EntityGetFirstComponentIncludingDisabled,EntityAddComponent2=loadOld,getOld,addOld
+    staff.reset()
+    clock.value_int,mag.value_int=556,77
 end
 local shield={allowMimic=function() return allowed end,sync=function() end}
 do
     local query,filename,ray=EntityGetInRadiusWithTag,EntityGetFilename,RaytracePlatforms
     local function preview(frame,...)
-        local points,charge,cast,target=tick(4,false,frame,...)
+        local points,charge,cast,target=tick(3,false,frame,...)
         assert(points==mag.value_int and not charge and not cast)
         return target
     end
     assert(preview(555).status=="cooldown" and preview(556).form==form)
     assert(preview(556,false,false,function() return false end).status=="immune")
-    mag.value_int=29;assert(preview(556).status=="ammo");mag.value_int=77
+    mag.value_int=9;assert(preview(556).status=="ammo");mag.value_int=77
     assert(preview(556,true,true).status=="reload" and not preview(556,true,false))
     EntityGetInRadiusWithTag=function() return {3} end
     for _,species in ipairs({"acidshooter","acidshooter_weak","vault/acidshooter","crypt/acidshooter"}) do
         EntityGetFilename=function() return "data/entities/animals/"..species..".xml" end
         assert(preview(556).substitute=="slimeshooter")
-        local points,_,cast,target=tick(4,true,556)
+        tick(3,true,556)
+        local points,_,cast,target=tick(3,false,616)
         assert(cast and target.status=="ready" and paths[target.form]:find('polymorph_target="data/entities/animals/slimeshooter.xml"',1,true) and points==77 and mag.value_int==77)
     end
     EntityGetFilename=filename;targetName="$animal_acidshooter";assert(preview(556).substitute=="slimeshooter");targetName=""
@@ -271,12 +315,12 @@ do
     EntityGetInRadiusWithTag,RaytracePlatforms=query,ray
     assert(mag.value_int==77 and clock.value_int==556 and forms==0)
 end
-function LoadGameEffectEntityTo(owner,path) assert(owner==1 and path==form and mag.value_int==47);forms=forms+1;return 0 end
-tick(4,false,555);mob=false;local _,_,cast=tick(4,true,556);assert(not cast and mag.value_int==77)
-mob=true;tick(4,false,557); _,_,cast=tick(4,true,558);allowed=false;cast(shield,{});assert(forms==0 and mag.value_int==77)
+function LoadGameEffectEntityTo(owner,path) assert(owner==1 and path==form and mag.value_int==67);forms=forms+1;return 0 end
+tick(3,false,555);mob=false;tick(3,true,556);local _,_,cast=tick(3,false,616);assert(not cast and mag.value_int==77)
+mob=true;tick(3,true,620); _,_,cast=tick(3,false,680);allowed=false;cast(shield,{});assert(forms==0 and mag.value_int==77)
 allowed=true;cast(shield,{});assert(forms==1 and mag.value_int==77 and clock.value_int==556)
-function LoadGameEffectEntityTo() assert(mag.value_int==47);return 42 end
-cast(shield,{});assert(mag.value_int==47)
+function LoadGameEffectEntityTo() assert(mag.value_int==67);return 42 end
+cast(shield,{});assert(mag.value_int==67)
 function GameGetGameEffect(_,kind) assert(kind=="POLYMORPH");return poly end
 function ComponentHasTag(comp,tag) return comp[tag] end
 function EntityAddComponent2(id,kind,fields)

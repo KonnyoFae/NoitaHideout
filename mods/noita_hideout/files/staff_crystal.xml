@@ -1,0 +1,7 @@
+<Entity tags="summon_player">
+    <Base file="data/entities/buildings/hpcrystal.xml">
+        <GenomeDataComponent herd_id="player" />
+        <LuaComponent _tags="hpcrystal_effect" execute_every_n_frame="60" script_source_file="mods/noita_hideout/files/staff_crystal.lua" />
+    </Base>
+    <LifetimeComponent lifetime="1800" />
+</Entity>

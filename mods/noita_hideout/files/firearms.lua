@@ -1,8 +1,11 @@
 -- Each reloadable weapon reserves its single native wand slot for its built-in action.
-local F={order={"scatter_revolver","marksman_rifle","battle_staff"},rigs={},packs={}}
+local F={order={"scatter_revolver","marksman_rifle","battle_staff","hunting_bow"},rigs={},packs={}}
 F.items={
+    hunting_bow={zh="猎杀弓",en="Hunting bow",magazine=60,loadFrames=60,scrap=12,fixed=true,
+        icon="mods/noita_hideout/files/items/hunting_bow_icon.png",noteZh="按住拉弓，每半秒升一档，松开发射。B 切换火力、侦查、辅助和机动，R 换弹。",
+        noteEn="Hold to draw, gaining a tier every half second. Release to shoot. B changes mode and R reloads."},
     battle_staff={zh="武装杖",en="Battle staff",magazine=120,loadFrames=72,scrap=12,fixed=true,
-        icon="mods/noita_hideout/files/items/staff_icon.png",noteZh="点按松手杖击；按住每秒耗 1 点蓄力，最多三层。也可切换店长光球、魔力冲击或拟态。",noteEn="Tap and release to strike. Hold to charge for 1 point per second (max 3). Other modes: guardian orb, mana pulse and mimic."},
+        icon="mods/noita_hideout/files/items/staff_icon.png",noteZh="按住蓄力，松手释放。每半秒升一档。B 切换施法、召唤、变形和恢复，R 装填。召唤与变形可点按免费杖击。",noteEn="Hold to charge one tier per half second and release to cast. B switches spells, summons, transformation and recovery. Tap in summon or transformation mode to strike for free."},
     scatter_revolver={zh="多功能左轮",en="Multimode revolver",magazine=36,loadFrames=54,scrap=6,
         icon="mods/noita_hideout/files/items/scatter_revolver.png",noteZh="36 点共用弹匣：速射、马格南、霰弹、喷枪。R 整匣装填。",noteEn="36-point magazine: auto, magnum, scatter or spray. R reloads."},
     marksman_rifle={zh="多功能步枪",en="Multimode rifle",magazine=60,loadFrames=72,scrap=10,
@@ -11,9 +14,27 @@ F.items={
 
 F.mods=dofile("mods/noita_hideout/files/ammo_mods.lua")
 F.modes=dofile("mods/noita_hideout/files/firearm_modes.lua")
-F.staffModes={{id="strike",zh="杖击",en="Strike",cost=0},{id="orb",zh="店长光球",en="Guardian orb",cost=20},
-    {id="pulse",zh="魔力冲击",en="Mana pulse",cost=10},{id="mimic",zh="拟态",en="Mimic",cost=30}}
-function F.modeList(kind) return kind=="battle_staff" and F.staffModes or F.modes.guns[kind] end
+F.staffModes={
+    {id="cast",zh="施法",en="Spellcasting",costs={1,3,6,10},
+        spells={{"魔法飞弹","Magic missile"},{"法力冲击","Mana pulse"},{"店长光球","Guardian orb"},{"小轨道炮","Mini railgun"}}},
+    {id="summon",zh="召唤",en="Summoning",costs={0,2,4,8},
+        spells={{"杖击","Strike"},{"岩石精灵","Rock spirit"},{"追踪鸭群","Homing ducks"},{"追踪陨石","Homing meteors"}}},
+    {id="transform",zh="变形",en="Transformation",costs={0,5,10},
+        spells={{"杖击","Strike"},{"变羊弹","Sheep bolt"},{"自身拟态","Mimic"}}},
+    {id="restore",zh="恢复",en="Recovery",costs={2,8,16,32},
+        spells={{"治疗魔弹","Healing bolt"},{"护盾治疗领域","Healing ward"},{"一级补给包","Supply box I"},{"生命魔晶","Life crystal"}}},
+}
+F.bowModes=dofile("mods/noita_hideout/files/bow/modes.lua")
+for _,modes in ipairs({F.staffModes,F.bowModes}) do
+    for _,mode in ipairs(modes) do
+        mode.cost=mode.costs[1]
+        mode.minCost=math.min(unpack(mode.costs))
+    end
+end
+function F.modeList(kind)
+    if kind=="hunting_bow" then return F.bowModes end
+    return kind=="battle_staff" and F.staffModes or F.modes.guns[kind]
+end
 local function ammoTier(rigId,packId,zh,en,capacity,refill,rigScrap,packScrap,gold)
     local art="mods/noita_hideout/files/items/"
     local rig={zh=zh.."弹挂",en=en.." ammo rig",icon=art..rigId..".png",capacity=capacity,scrap=rigScrap,

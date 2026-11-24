@@ -1,0 +1,4 @@
+<Entity tags="nh_bow_ward">
+    <Base file="data/entities/misc/perks/shield.xml" />
+    <LifetimeComponent lifetime="24" />
+</Entity>

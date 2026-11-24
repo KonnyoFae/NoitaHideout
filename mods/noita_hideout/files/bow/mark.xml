@@ -1,0 +1,8 @@
+<Entity tags="nh_bow_mark">
+    <Base file="data/entities/misc/effect_weaken.xml">
+        <LifetimeComponent lifetime="18" />
+    </Base>
+    <LightComponent radius="36" r="110" g="220" b="255" />
+    <SpriteComponent image_file="data/particles/area_indicator_032_purple.png" offset_x="16" offset_y="16" emissive="1"
+        has_special_scale="1" special_scale_x="0.55" special_scale_y="0.55" z_index="-2" />
+</Entity>

@@ -1645,7 +1645,7 @@ function OnWorldPreUpdate()
     if player and GameGetFrameNum()%60==0 then
         NHNative.refreshLinkArt()
         NHStormProducts.refreshLegacyItems(player)
-        for _,kind in ipairs({"scatter_revolver","marksman_rifle","battle_staff"}) do
+        for _,kind in ipairs({"scatter_revolver","marksman_rifle","battle_staff","hunting_bow"}) do
             for _,id in ipairs(EntityGetWithTag("noita_hideout_"..kind) or {}) do
                 NHFirearms.ensureBuiltInAction(id,kind)
                 if kind=="battle_staff" then NHFirearms.repairStaff(id,player)

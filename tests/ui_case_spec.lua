@@ -129,7 +129,7 @@ do
     m.lang,a.menu,a.hover="zh",true,2
     render(m)
     assert(drawn["> 马格南 · 3 <"] and drawn["霰弹 · 6"] and drawn["松开确认"])
-    a.menu,a.modes,a.index=false,NHFirearms.staffModes,4
+    a.menu,a.modes,a.index=false,NHFirearms.staffModes,3
     a.mimicTarget={x=90,y=65,status="ready",form="test.xml"};render(m)
     assert(drawn["可拟态"] and noticeText["可拟态"].x<90 and noticeText["可拟态"].y<65)
     a.mimicTarget.status="unsupported";a.mimicTarget.form=nil;render(m);assert(drawn["未收录形态"] and not drawn["可拟态"])

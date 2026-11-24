@@ -1,0 +1,8 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/projectiles/support_rail.xml">
+        <ProjectileComponent speed_min="1500" speed_max="1500" lifetime="22" damage="8" ground_penetration_coeff="5"
+            ground_penetration_max_durability_to_destroy="8" camera_shake_when_shot="3" knockback_force="2">
+            <config_explosion damage="2" explosion_radius="16" camera_shake="4" max_durability_to_destroy="8" ray_energy="600000" />
+        </ProjectileComponent>
+    </Base>
+</Entity>

@@ -1,5 +1,6 @@
 local R={}
 local staff=dofile("mods/noita_hideout/files/battle_staff.lua")
+local bow=dofile("mods/noita_hideout/files/bow/controller.lua")
 R.registerStaff=staff.register
 R.guardMimic=staff.guardMimic
 local targetKey="nh_ammo_gold_target"
@@ -16,6 +17,7 @@ function R.bind(s)
 end
 
 function R.reset()
+    bow.reset()
     staff.reset()
     activeGun,activeRig,heldSince,due=nil,nil,nil,nil
     R.bind(nil)
@@ -60,6 +62,7 @@ end
 function R.update(s,player,commit,input)
     local gun=NHNative.held(player)
     if not gun or not EntityHasTag(gun,"nh_firearm") then
+        bow.reset()
         staff.reset()
         activeGun,activeRig,heldSince,due=nil,nil,nil,nil
         return
@@ -76,10 +79,16 @@ function R.update(s,player,commit,input)
     local id=row and row.id
     local reserve=row and row.item.reserve or 0
     if activeGun~=gun or activeRig~=id then
+        bow.reset()
         staff.reset()
         activeGun,activeRig,heldSince,due=gun,id,nil,nil
     end
     local frame=GameGetFrameNum()
+    local function beginReload()
+        due=frame+def.loadFrames
+        local x,y=EntityGetTransform(player)
+        GamePlaySound("data/audio/Desktop/animals.bank","animals/shotgun_cock",x,y)
+    end
     local menu,hover
     if not input.enabled then heldSince,due=nil,nil
     else
@@ -92,15 +101,13 @@ function R.update(s,player,commit,input)
                 if selected and selected~=index then
                     index=selected
                     ComponentSetValue2(mag,"value_float",index)
-                    if points>=modes[index].cost then due=nil end
+                    if points>=(modes[index].minCost or modes[index].cost) then due=nil end
                 end
                 menu,heldSince=false,nil
             end
         end
-        if points<def.magazine and reserve>0 and not due and not heldSince and (input.reload or points<modes[index].cost) then
-            due=frame+def.loadFrames
-            local playerX,playerY=EntityGetTransform(player)
-            GamePlaySound("data/audio/Desktop/animals.bank","animals/shotgun_cock",playerX,playerY)
+        if points<def.magazine and reserve>0 and not due and not heldSince and (input.reload or points<(modes[index].minCost or modes[index].cost)) then
+            beginReload()
         end
     end
     if points>=def.magazine or reserve<=0 then due=nil end
@@ -122,11 +129,17 @@ function R.update(s,player,commit,input)
     end
     local blocked=due~=nil or heldSince~=nil or not input.enabled
     if ComponentGetValue2(mag,"value_bool")~=blocked then ComponentSetValue2(mag,"value_bool",blocked) end
-    local charge,cast,mimicTarget
-    if kind=="battle_staff" then
+    local charge,cast,mimicTarget,needsReload
+    if kind=="hunting_bow" then
+        points,charge,needsReload=bow.update(player,gun,mag,index,points,frame,blocked or input.pressed or input.reload)
+    elseif kind=="battle_staff" then
         local aiming=input.enabled and not heldSince and not input.pressed
-        points,charge,cast,mimicTarget=staff.update(player,gun,mag,index,points,frame,blocked or input.pressed or input.reload,
+        points,charge,cast,mimicTarget,needsReload=staff.update(player,gun,mag,index,points,frame,blocked or input.pressed or input.reload,
             aiming and due~=nil,input.canMimic)
+    end
+    if needsReload and reserve>0 then
+        beginReload()
+        ComponentSetValue2(mag,"value_bool",true)
     end
     if ComponentGetValue2(ability,"mana")~=points then ComponentSetValue2(ability,"mana",points) end
     return {rounds=points,max=def.magazine,reserve=reserve,modes=modes,index=index,menu=menu,hover=hover,

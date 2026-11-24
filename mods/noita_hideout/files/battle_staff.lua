@@ -3,7 +3,8 @@ local root="mods/noita_hideout/files/"
 local dragonAttack=dofile(root.."companions/dragon_attack.lua")
 local formRoot=root.."staff_forms/"
 local forms={}
-local started,level,wasDown,swing
+local payloads=dofile(root.."staff_payloads.lua")
+local started,wasDown,swing,lastMode
 
 local function unstableForm(path)
     local name=path and path:match("([^/]+)%.xml$")
@@ -71,7 +72,7 @@ local function resolveForm(player,id)
     if best then return forms[best.path],best.name end
 end
 
-function staff.reset() started,level,wasDown,swing=nil,0,false,nil end
+function staff.reset() started,wasDown,swing,lastMode=nil,false,nil,nil end
 staff.reset()
 
 function staff.guardMimic(body)
@@ -125,7 +126,7 @@ local function bodyContacts(x,y,dx,dy,stroke,halfStep,radius)
                 local along=math.max(0,math.min(radius,ax*nx+ay*ny))
                 local tx,ty=x+nx*along,y+ny*along
                 local wall,wx,wy=RaytracePlatforms(x,y,tx,ty)
-                local pad=2+stroke.charge
+                local pad=2
                 if wall then tx,ty,pad=wx,wy,0.5 end
                 for _,overlap in ipairs(PhysicsBodyIDQueryBodies(tx-pad,ty-pad,tx+pad,ty+pad) or {}) do
                     if overlap==body then contacts[body]={x=tx,y=ty}; break end
@@ -151,13 +152,13 @@ local function strike(player,stroke,id,x,y)
     stroke.hit[id]=true
     if EntityGetFirstComponent(id,"DamageModelComponent") or hostile(player,id) then
         EntityInflictDamage(id,1,"DAMAGE_MELEE","$nh_hideout_battle_staff","NORMAL",
-            stroke.kx*80,stroke.ky*80,player,x,y,2+stroke.charge)
+            stroke.kx*80,stroke.ky*80,player,x,y,2)
     end
 end
 
 local function strikeTargets(player,x,y,dx,dy,stroke,halfStep)
-    local width=2+stroke.charge
-    local radius=13+18*stroke.charge+width
+    local width=2
+    local radius=13+width
     local contacts=bodyContacts(x,y,dx,dy,stroke,halfStep,radius)
     -- A prop's origin may be outside the arc even though its near face was hit.
     for _,id in ipairs(EntityGetInRadius(x,y,radius+32) or {}) do
@@ -179,7 +180,7 @@ local function strikeTargets(player,x,y,dx,dy,stroke,halfStep)
                 local dist=math.sqrt(ax*ax+ay*ay)
                 local arc=halfStep+math.asin(math.min(1,width/math.max(1,dist)))
                 if dist<=radius and dx*ax+dy*ay>=dist*math.cos(arc) and not RaytracePlatforms(x,y,tx,ty) then
-                    push(id,stroke.kx,stroke.ky,210+55*stroke.charge)
+                    push(id,stroke.kx,stroke.ky,210)
                     strike(player,stroke,id,tx,ty)
                 end
             end
@@ -210,6 +211,16 @@ local function repel(player,x,y,dx,dy)
 end
 
 local poseStep=2*math.pi/64
+local function showPose(gun,clock,name,frame)
+    local sprite=EntityGetFirstComponent(gun,"SpriteComponent","enabled_in_hand")
+    ComponentSetValue2(clock,"value_float",frame)
+    if sprite and ComponentGetValue2(sprite,"rect_animation")~=name then
+        ComponentSetValue2(sprite,"rect_animation",name)
+        ComponentSetValue2(sprite,"next_rect_animation",name)
+        EntityRefreshSprite(gun,sprite)
+    end
+end
+
 local function pose(gun,clock,angle,frame)
     local x,y,rotation=EntityGetTransform(gun)
     local sprite=EntityGetFirstComponent(gun,"SpriteComponent","enabled_in_hand")
@@ -221,14 +232,8 @@ local function pose(gun,clock,angle,frame)
     local localAngle=math.atan2(signY*math.sin(relative),signX*math.cos(relative))
     local step=math.floor(localAngle/poseStep+0.5)
     local index=step%64
-    local name=index==0 and "default" or "swing_"..index
-    ComponentSetValue2(clock,"value_float",frame)
-    if ComponentGetValue2(sprite,"rect_animation")~=name then
-        ComponentSetValue2(sprite,"rect_animation",name)
-        ComponentSetValue2(sprite,"next_rect_animation",name)
-        EntityRefreshSprite(gun,sprite)
-    end
-    -- Preserve the unwrapped sweep angle and put the drill exactly on the drawn axis.
+    local name="swing_"..swing.mode.."_"..index
+    showPose(gun,clock,name,frame)
     return x,y,angle+signX*signY*(step*poseStep-localAngle)
 end
 
@@ -239,25 +244,9 @@ local function advanceSwing(player,gun,clock,frame)
     local angle=swing.aim+swing.side*swing.arc*(2*progress*progress*(3-2*progress)-1)
     local x,y
     x,y,angle=pose(gun,clock,angle,frame)
-    local dx,dy=math.cos(angle),math.sin(angle)
     local center=(swing.last+angle)*0.5
     strikeTargets(player,x,y,math.cos(center),math.sin(center),swing,math.abs(angle-swing.last)*0.5)
     swing.last=angle
-    if swing.charge>0 then
-        for distance=13,13+18*swing.charge,2 do
-            for side=-swing.charge,swing.charge,2 do
-                GameCreateParticle("spark_green",x+dx*distance-dy*side,y+dy*distance+dx*side,1,0,0,true,false,false)
-            end
-        end
-        if age%2==0 then
-            for segment=1,swing.charge do
-                local distance=13+18*(segment-1)
-                local sx,sy=x+dx*distance,y+dy*distance
-                local drill=EntityLoad(root.."projectiles/staff_blade.xml",sx,sy)
-                if drill and drill~=0 then GameShootProjectile(player,sx,sy,sx+dx*18,sy+dy*18,drill,false) end
-            end
-        end
-    end
     if age==swing.duration then swing=nil end
 end
 
@@ -313,6 +302,42 @@ local function mimic(player,x,y,dx,dy)
     return best
 end
 
+local function mimicCast(player,gun,mag,clock,frame,points,cost,form)
+    return function(shield,state)
+        if NHNative.held(player)~=gun or ComponentGetValue2(mag,"value_int")~=points or not shield.allowMimic(player) then return end
+        local prior=ComponentGetValue2(clock,"value_int")
+        ComponentSetValue2(mag,"value_int",points-cost)
+        ComponentSetValue2(clock,"value_int",frame+60)
+        print("[noita_hideout] mimic cast: "..form)
+        local effect=LoadGameEffectEntityTo(player,form)
+        if (not effect or effect==0) and EntityGetIsAlive(player) then
+            ComponentSetValue2(mag,"value_int",points)
+            ComponentSetValue2(clock,"value_int",prior)
+            shield.sync(state,player)
+        elseif effect and effect~=0 and EntityGetIsAlive(effect) then
+            local body=EntityGetRootEntity(effect)
+            if body and body~=0 and EntityHasTag(body,"polymorphed_player") then staff.guardMimic(body) end
+        end
+    end
+end
+
+local function quickStrike(player,gun,clock,x,y,dx,dy,frame,mode)
+    local aim=math.atan2(dy,dx)
+    local side=dx<0 and -1 or 1
+    local arc=math.rad(48)
+    -- A level strike lifts loose objects slightly off the floor.
+    local kx,ky=dx,dy-0.28*math.abs(dx)
+    local length=math.sqrt(kx*kx+ky*ky)
+    kx,ky=kx/length,ky/length
+    local ix,iy=GameVecToPhysicsVec(kx*150,ky*150)
+    swing={mode=mode,start=frame,duration=6,side=side,arc=arc,aim=aim,last=aim-side*arc,
+        kx=kx,ky=ky,ix=ix,iy=iy,hit={},bodies={}}
+    GamePlaySound("data/audio/Desktop/player.bank","player/throw",x,y)
+    dragonAttack(player,dx,dy)
+    advanceSwing(player,gun,clock,frame)
+    ComponentSetValue2(clock,"value_int",frame+7)
+end
+
 function staff.update(player,gun,mag,index,points,frame,blocked,reloading,canMimic)
     local controls=EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")
     local clock=EntityGetFirstComponentIncludingDisabled(gun,"VariableStorageComponent","nh_staff_clock")
@@ -320,87 +345,73 @@ function staff.update(player,gun,mag,index,points,frame,blocked,reloading,canMim
     local down=ComponentGetValue2(controls,"mButtonDownFire")
     local pressed=down and not wasDown
     wasDown=down
-    if index~=1 or blocked then swing=nil end
-    if blocked and not (index==4 and reloading) then started,level=nil,0; return points end
+    local changed=lastMode and lastMode~=index
+    lastMode=index
+    local idle="charge_"..index.."_0"
+    if blocked or changed then
+        started,swing=nil,nil
+        showPose(gun,clock,idle,frame)
+        if not (index==3 and reloading) then return points end
+    end
+
+    local mode=NHFirearms.staffModes[index]
     local ready=frame>=ComponentGetValue2(clock,"value_int")
     local x,y=EntityGetTransform(player)
     local dx,dy=NHProducts.aim(player,x,y)
     dx,dy=dx or 1,dy or 0
-    if index==1 then
-        if swing then advanceSwing(player,gun,clock,frame);return points end
-        if pressed and ready then started,level=frame,0 end
-        if started then
-            local spent=math.min(points,math.min(3,math.floor((frame-started)/60))-level)
-            if spent>0 then
-                points,level=points-spent,level+spent
-                ComponentSetValue2(mag,"value_int",points)
-            end
-            local aim=math.atan2(dy,dx)
-            local side=dx<0 and -1 or 1
-            local arc=math.rad(48+16*level)
-            if down then
-                local angle=aim-side*arc
-                local handX,handY
-                handX,handY,angle=pose(gun,clock,angle,frame)
-                if spent>0 then GameCreateParticle("spark_blue",handX+13*math.cos(angle),handY+13*math.sin(angle),6,0,-10,true) end
-            else
-                local duration=6+2*level
-                -- A level strike lifts loose objects slightly off the floor.
-                local kx,ky=math.cos(aim),math.sin(aim)-0.28*math.abs(math.cos(aim))
-                local length=math.sqrt(kx*kx+ky*ky)
-                kx,ky=kx/length,ky/length
-                local strength=150+45*level
-                local ix,iy=GameVecToPhysicsVec(kx*strength,ky*strength)
-                swing={start=frame,duration=duration,charge=level,side=side,arc=arc,aim=aim,last=aim-side*arc,
-                    kx=kx,ky=ky,ix=ix,iy=iy,hit={},bodies={}}
-                GamePlaySound("data/audio/Desktop/player.bank","player/throw",x,y)
-                dragonAttack(player,dx,dy)
-                advanceSwing(player,gun,clock,frame)
-                started,level=nil,0
-                ComponentSetValue2(clock,"value_int",frame+duration+1)
-            end
-        end
-        return points,started and level
-    end
-    started,level=nil,0
-    local mode=NHFirearms.staffModes[index]
-    local target=index==4 and mimic(player,x,y,dx,dy) or nil
+    local target=index==3 and mimic(player,x,y,dx,dy) or nil
     if target and target.form then
         if reloading then target.status="reload"
-        elseif points<mode.cost then target.status="ammo"
+        elseif points<mode.costs[3] then target.status="ammo"
         elseif not ready then target.status="cooldown"
         elseif canMimic and not canMimic(player) then target.status="immune" end
     end
-    if index==4 and (not pressed or not target or target.status~="ready" or blocked) then return points,nil,nil,target end
-    if not down or not ready or points<mode.cost then return points end
+    if blocked then return points,nil,nil,target end
+    if swing then advanceSwing(player,gun,clock,frame); return points,nil,nil,target end
+    if pressed and ready then started=frame end
+    if not started then
+        showPose(gun,clock,idle,frame)
+        return points,nil,nil,target
+    end
+    local level=math.min(#mode.costs-1,math.floor((frame-started)/30))
+    if down then
+        showPose(gun,clock,"charge_"..index.."_"..level,frame)
+        return points,level,nil,target
+    end
+
+    started=nil
+    local cost=mode.costs[level+1]
+    if (index==2 or index==3) and level==0 then
+        quickStrike(player,gun,clock,x,y,dx,dy,frame,index)
+        return points,nil,nil,target
+    end
+    showPose(gun,clock,idle,frame)
+    if cost>points then return points,nil,nil,target,true end
+    if index==3 and level==2 then
+        if target and target.status=="ready" then
+            return points,nil,mimicCast(player,gun,mag,clock,frame,points,cost,target.form),target
+        end
+        return points,nil,nil,target
+    end
+
     local ok
-    if index==2 then ok=orb(player,x,y,dx,dy)
-    elseif index==3 then ok=pulse(player,x,y,dx,dy)
-    elseif target then
-        local form=target.form
-        return points,nil,function(shield,state)
-            if NHNative.held(player)~=gun or ComponentGetValue2(mag,"value_int")~=points or not shield.allowMimic(player) then return end
-            local prior=ComponentGetValue2(clock,"value_int")
-            ComponentSetValue2(mag,"value_int",points-mode.cost)
-            ComponentSetValue2(clock,"value_int",frame+60)
-            print("[noita_hideout] mimic cast: "..form)
-            local effect=LoadGameEffectEntityTo(player,form)
-            if (not effect or effect==0) and EntityGetIsAlive(player) then
-                ComponentSetValue2(mag,"value_int",points)
-                ComponentSetValue2(clock,"value_int",prior)
-                shield.sync(state,player)
-            elseif effect and effect~=0 and EntityGetIsAlive(effect) then
-                local body=EntityGetRootEntity(effect)
-                if body and body~=0 and EntityHasTag(body,"polymorphed_player") then staff.guardMimic(body) end
-            end
-        end,target
-    end
+    local delay=10
+    if index==1 then
+        if level==0 then ok=payloads.missile(player,x,y,dx,dy)
+        elseif level==1 then
+            ok=pulse(player,x,y,dx,dy)
+            if ok then dragonAttack(player,dx,dy) end
+            delay=60
+        elseif level==2 then ok=orb(player,x,y,dx,dy); delay=36
+        else ok=payloads.rail(player,x,y,dx,dy) end
+    elseif index==2 then ok=payloads.summon(player,x,y,dx,dy,level)
+    elseif index==3 then ok=payloads.sheep(player,x,y,dx,dy)
+    else ok=payloads.restore(player,x,y,dx,dy,level) end
     if ok then
-        if index==3 then dragonAttack(player,dx,dy) end
-        points=points-mode.cost
+        points=points-cost
         ComponentSetValue2(mag,"value_int",points)
-        ComponentSetValue2(clock,"value_int",frame+(index==2 and 36 or 60))
+        ComponentSetValue2(clock,"value_int",frame+delay)
     end
-    return points
+    return points,nil,nil,target
 end
 return staff

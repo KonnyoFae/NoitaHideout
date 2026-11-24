@@ -2254,8 +2254,15 @@ function NHUI.draw(model, dispatch)
         local a=model.ammo
         if a.mimicTarget then drawMimicTarget(a.mimicTarget,sw,sh,tr) end
         local mode=a.modes[a.index]
-        local line=("%s  %d/%d  ·  %s"):format(tr(mode.zh,mode.en),a.rounds,a.max,
-            mode.cost==0 and (a.charge and tr("蓄力 %d/3","Charge %d/3"):format(a.charge) or tr("无需弹药","No ammo needed")) or tr("可射 %d 次","%d shots"):format(math.floor(a.rounds/mode.cost)))
+        local status
+        if mode.costs then
+            local level=a.charge or 0
+            status=tr("蓄力 %d/%d · %d 点","Draw %d/%d · %d ammo"):format(level,#mode.costs-1,mode.costs[level+1])
+            if mode.spells then status=tr(unpack(mode.spells[level+1])).." · "..status end
+        elseif mode.cost==0 then
+            status=a.charge and tr("蓄力 %d/3","Charge %d/3"):format(a.charge) or tr("无需弹药","No ammo needed")
+        else status=tr("可射 %d 次","%d shots"):format(math.floor(a.rounds/mode.cost)) end
+        local line=("%s  %d/%d  ·  %s"):format(tr(mode.zh,mode.en),a.rounds,a.max,status)
         tint(white)
         GuiText(gui,sw-10-GuiGetTextDimensions(gui,line),62,line)
         local hint=a.loading and tr("装填 %.1fs","Reload %.1fs"):format(a.loading/60) or
@@ -2268,7 +2275,7 @@ function NHUI.draw(model, dispatch)
             GuiZSetForNextWidget(gui,-80)
             GuiImageNinePiece(gui,7810,sw/2-114,sh/2-37,228,77,0.94)
             for index,entry in ipairs(a.modes) do
-                local label=("%s · %d"):format(tr(entry.zh,entry.en),entry.cost)
+                local label=tr(entry.zh,entry.en).." · "..(entry.costs and table.concat(entry.costs,"/") or entry.cost)
                 if index==a.hover then label="> "..label.." <" end
                 GuiZSetForNextWidget(gui,-81)
                 tint(index==a.hover and gold or index==a.index and green or white)

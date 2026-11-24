@@ -1,0 +1,6 @@
+<Entity><Base file="mods/noita_hideout/files/bow/arrow.xml">
+    <ProjectileComponent damage="0.8" lifetime="44" />
+</Base>
+    <HomingComponent target_tag="nh_bow_no_auto_target" detect_distance="140" homing_targeting_coeff="38" homing_velocity_multiplier="1" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/companions/swarm_target.lua" execute_every_n_frame="6" />
+</Entity>

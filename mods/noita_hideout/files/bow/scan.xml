@@ -1,0 +1,9 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/bow/arrow.xml">
+        <VelocityComponent gravity_y="0" />
+        <ProjectileComponent damage="0" collide_with_entities="0" bounces_left="3" bounce_always="1" bounce_at_any_angle="1" bounce_energy="1" />
+    </Base>
+    <SpriteComponent _tags="nh_bow_ring" image_file="data/particles/area_indicator_064_blue.png" offset_x="32" offset_y="32" alpha="0.55" has_special_scale="1" special_scale_x="1" special_scale_y="1" />
+    <VariableStorageComponent _tags="nh_bow_field" name="scout" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/bow/field_tick.lua" execute_every_n_frame="6" />
+</Entity>
