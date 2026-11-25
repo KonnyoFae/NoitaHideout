@@ -84,3 +84,59 @@ assert(entity.tier(10000)==3 and entity.incomeBasisPoints(1000)==0 and entity.in
 state.affinity.dryad=360001
 assert(not NHStore.commit(state))
 print("Companion affinity persists across summons, worlds and failed writes, keeping fractional progress and capped independent ranks.")
+
+-- A chicken closes its old production cycle on the very frame the griffin
+-- leaves. Its earned private card is delivered at minute end even after a
+-- failed commit and a restored controller, with the cat gone by then too.
+state=assert(NHStore.load())
+world={}
+state.affinity.griffin,state.affinity.cat=10000*36,99*36
+start()
+state.levels.livestock=1
+state.farm.herds={chick={adults=1,young={},progress=NHLivestock.species.chick.period-81,owed=0}}
+state.summons={livestock=1,pending={}}
+state.companionIncomeSeed=17 -- the private roll is 607/10,000, below the griffin's 900
+assert(NHStore.commit(state))
+local activePet,species,searches=10,"griffin",0
+NHCompanions.active=function(player)
+    assert(player==1)
+    searches=searches+1
+    return species,activePet
+end
+function EntityGetIsAlive(id) return id==activePet end
+function EntityGetParent() return 1 end
+NHCompanions.observeProduction(state,0,0,1)
+activePet,species=11,"cat"
+NHCompanions.productionPartyChanged()
+NHCompanions.observeProduction(state,81,81,1)
+for frame=82,189 do
+    if (frame-81)%6==0 then entity.follow("cat",6) end
+    NHCompanions.observeProduction(state,frame,frame,1)
+end
+activePet,species=nil,nil
+NHCompanions.observeProduction(state,190,190,1)
+assert(searches==2 and not NHCompanions.productionCurrent(state))
+local segments=NHCompanions.productionSegments(state,0,3600)
+assert(#segments==4 and segments[1].id=="griffin" and segments[1].to==81)
+assert(segments[2].basis==99 and segments[2].to==117)
+assert(segments[3].basis==100 and segments[3].to==189 and segments[4].to==190)
+local function claim()
+    local draft=assert(NHStore.load())
+    local _,produced,cards=NHFarm.sync(draft,3600)
+    assert(produced and #cards==1 and cards[1]=="griffin")
+    assert(draft.companionIncomeSeed==820607 and #draft.warehouse==1)
+    return draft
+end
+local draft=claim()
+fail_head=true
+assert(not NHStore.commit(draft))
+fail_head=false
+NHCompanions.resetProduction()
+draft=claim()
+assert(NHStore.commit(draft))
+NHCompanions.checkpointProduction(draft)
+NHCompanions.resetProduction()
+assert(#NHCompanions.productionSegments(draft,0,3600)==0)
+draft=assert(NHStore.load())
+assert(not NHFarm.sync(draft,3600) and draft.companionIncomeSeed==820607)
+print("Minute production attributes the closing batch to its companion and replays the same awarded card after a failed write.")

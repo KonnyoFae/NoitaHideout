@@ -1,0 +1,5 @@
+<Entity tags="nh_dart_needle">
+    <InheritTransformComponent />
+    <SpriteComponent image_file="mods/noita_hideout/files/projectiles/sedative_needle.png" offset_x="12" offset_y="3" z_index="-1.4" />
+    <LifetimeComponent lifetime="900" serialize_duration="1" />
+</Entity>

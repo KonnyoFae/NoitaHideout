@@ -1,12 +1,16 @@
 <Entity name="$nh_hideout_auto_grenade" tags="nh_support_weapon,nh_loaded_gun,noita_hideout_auto_grenade,item_pickup,item_physics,teleportable_NOT">
     <Base file="mods/noita_hideout/files/items/base.xml">
-        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/auto_grenade_world.png" />
-        <SpriteComponent image_file="mods/noita_hideout/files/items/auto_grenade_world.png" offset_x="2" offset_y="7" />
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/auto_grenade_shape.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/auto_grenade_art.png" offset_x="4" offset_y="14"
+            has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" />
         <ItemComponent item_name="$nh_hideout_auto_grenade" uses_remaining="36" ui_description="$nh_hideout_auto_grenade_desc"
             ui_sprite="mods/noita_hideout/files/items/auto_grenade.png" />
         <UIInfoComponent name="$nh_hideout_auto_grenade" />
         <AbilityComponent ui_name="$nh_hideout_auto_grenade" />
     </Base>
+    <SpriteComponent _tags="enabled_in_world,nh_support_ground_art" image_file="mods/noita_hideout/files/items/auto_grenade_art.png"
+        offset_x="12" offset_y="12" has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" z_index="-1" />
+    <LuaComponent _enabled="0" _tags="enabled_in_hand,nh_equipment_mirror" script_source_file="mods/noita_hideout/files/equipment_sprite_mirror.lua" execute_every_n_frame="1" />
     <HotspotComponent _tags="shoot_pos" offset.x="10" offset.y="-2" />
     <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
 </Entity>

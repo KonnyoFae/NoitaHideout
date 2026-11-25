@@ -1,6 +1,5 @@
-<Entity name="$nh_card_dryad" tags="noita_hideout_summon_card,nh_companion_dryad,item_pickup,item_physics,teleportable_NOT">
-    <Base file="mods/noita_hideout/files/items/base.xml">
-        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/card_dryad_world.png" />
+<Entity name="$nh_card_dryad" tags="noita_hideout_summon_card,nh_companion_dryad,item_pickup,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base_floating_item.xml">
         <SpriteComponent image_file="mods/noita_hideout/files/items/card_dryad_world.png" offset_x="5" offset_y="6" />
         <ItemComponent item_name="$nh_card_dryad" ui_description="$nh_card_dryad_desc" uses_remaining="80"
             ui_sprite="mods/noita_hideout/files/items/card_dryad.png" />

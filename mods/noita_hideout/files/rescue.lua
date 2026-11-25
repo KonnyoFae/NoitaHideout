@@ -4,6 +4,11 @@ local R={}
 local root="mods/noita_hideout/files/"
 local ew=NHEW or dofile(root.."ew.lua")
 local releasedPlayer
+local watch
+local function rewind()
+    if not watch then watch=NHRewind or dofile(root.."rewind_watch.lua") end
+    return watch
+end
 local function meter(player)
     return EntityGetFirstComponentIncludingDisabled(player,"VariableStorageComponent","nh_rescue")
 end
@@ -58,9 +63,10 @@ function R.lifePriority(player,available)
 end
 
 function R.intercept(player,dm)
+    if ComponentGetValue2(dm,"hp")>0 then return end
     if not ew.rescueAllowed() or not ew.walletAllowed() then return end
     local record=meter(player)
-    if not record or ComponentGetValue2(dm,"hp")>0 then return end
+    if not record then return end
     if ComponentGetValue2(record,"value_string")=="" then
         local species,pet=NHCompanions.active(player)
         if not species and ComponentGetValue2(record,"value_int")==0 then return end
@@ -83,6 +89,7 @@ end
 -- Latch the fatal position on the temporary body, then bill the real wallet
 -- after the native transformation effect restores it.
 function R.polymorph(state,body)
+    if body and GlobalsGetValue("nh_rewind.clock","")~="" and rewind().polymorph(body,state) then return end
     local dm=body and EntityGetFirstComponentIncludingDisabled(body,"DamageModelComponent")
     if not dm then return end
     local tag="nh_rescue_poly_wait"

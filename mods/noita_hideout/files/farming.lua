@@ -1,5 +1,6 @@
 dofile("mods/noita_hideout/files/livestock.lua")
-NHFarm={crops={},order={}}
+local minuteIncome=dofile("mods/noita_hideout/files/minute_income.lua")
+NHFarm={crops={},order={},minute=3600,levelBasisPoints=minuteIncome.levelBonus,income=minuteIncome}
 local longestCycle=0
 
 local function crop(key,zh,en,amount,seconds,equipment)
@@ -53,6 +54,7 @@ function NHFarm.validate(state,whole)
             assert(not kind.equipment or NHStore.level(state,"agri_equipment")>0,"Farm equipment missing")
         else assert(plot.readyAt==nil,"Empty field has a harvest time") end
     end
+    minuteIncome.validate(farm,whole)
     NHLivestock.validate(state,whole)
 end
 
@@ -100,67 +102,54 @@ end
 -- Normally one batch matures at a time. Bound the number of reward rolls
 -- per source per tick when a restored world is far ahead of its profile.
 NHFarm.batchLimit=128
-function NHFarm.batches(now,nextAt,period,space)
-    if now<nextAt then return 0 end
-    return math.min(1+math.floor((now-nextAt)/period),space,NHFarm.batchLimit)
-end
-
-local function cropRoom(state,id)
-    return math.floor((NHStore.maxResourceAmount-(state.resources[id] or 0))/NHFarm.crops[id].amount)
-end
-
-local function cropBatches(state,plot,now)
-    return NHFarm.batches(now,plot.readyAt,NHFarm.crops[plot.crop].frames,cropRoom(state,plot.crop))
+function NHFarm.nextMinute(now)
+    return now-now%NHFarm.minute+NHFarm.minute
 end
 
 function NHFarm.due(state,now)
     local farm=state.farm
-    if now-farm.time>=600 then return true end
-    for id in pairs(farm.pending or {}) do
-        if cropRoom(state,id)>0 then return true end
+    if now>=NHFarm.nextMinute(farm.time) and active(farm) then return true end
+    if not farm.minuteIncome then
+        -- Test the legacy debt on load and once per second until it can be
+        -- committed. Unrelated transactions can still use the old compact
+        -- snapshot (notably a cancellation in a nearly full EW profile).
+        if now~=farm.time and now%60~=0 then return false end
+        if farm.pending and next(farm.pending) then return true end
+        for _,plot in pairs(farm.plots) do
+            if plot.crop and plot.readyAt<=farm.time then return true end
+        end
+        for _,herd in pairs(farm.herds or {}) do
+            if herd.owed>0 then return true end
+        end
+        return false
     end
-    for _,plot in pairs(farm.plots) do
-        if plot.crop and now>=plot.readyAt and cropBatches(state,plot,now)>0 then return true end
-    end
-    return NHLivestock.due(state,math.max(farm.time,now))
+    return minuteIncome.ready(state)
 end
 
-function NHFarm.sync(state,now)
+function NHFarm.sync(state,now,changingCrop)
     local farm=state.farm
-    if not active(farm) and not farm.pending then return false,false end
-    local elapsed=math.max(now,farm.time)
-    local previous=farm.time
-    local advanced=elapsed>previous
+    local growing=active(farm)
+    local converting=farm.minuteIncome and not farm.minuteIncome.searchVersion
+    if not farm.minuteIncome then
+        if not growing and not farm.pending then return false,false,{} end
+        if not changingCrop and now<=farm.time and not NHFarm.due(state,farm.time) then return false,false,{} end
+        minuteIncome.adopt(state)
+    elseif converting then
+        minuteIncome.adopt(state)
+    end
+    local elapsed=growing and math.max(now,farm.time) or farm.time
+    local boundary=elapsed-elapsed%NHFarm.minute
+    local from=farm.time
+    if boundary>from then
+        minuteIncome.advance(state,from,boundary)
+        minuteIncome.close(farm.minuteIncome)
+        from=boundary
+    end
+    minuteIncome.advance(state,from,elapsed)
+    local advanced=elapsed>farm.time
     farm.time=elapsed
-    local crops=0
-    if farm.pending then
-        for id,owed in pairs(farm.pending) do
-            local count=math.min(owed,cropRoom(state,id),NHFarm.batchLimit)
-            if count>0 then
-                state.resources[id]=(state.resources[id] or 0)+count*NHFarm.crops[id].amount
-                farm.pending[id]=owed>count and owed-count or nil
-                crops=crops+count
-            end
-        end
-        if not next(farm.pending) then farm.pending=nil end
-    end
-    for slot=1,NHStore.level(state,"farmland") do
-        local plot=farm.plots[slot]
-        if plot and plot.crop and elapsed>=plot.readyAt then
-            local count=cropBatches(state,plot,elapsed)
-            if count>0 then
-                local kind=NHFarm.crops[plot.crop]
-                state.resources[plot.crop]=(state.resources[plot.crop] or 0)+count*kind.amount
-                plot.readyAt=plot.readyAt+count*kind.frames
-                crops=crops+count
-            end
-        end
-    end
-    local awards=crops>0 and NHCompanions.reward(state,"farm",crops) or {}
-    local animalBatches,animalAwards=NHLivestock.settle(state,previous,elapsed)
-    for _,id in ipairs(animalAwards) do awards[#awards+1]=id end
-    local produced=crops+animalBatches>0
-    return advanced or produced,produced,awards
+    local produced,awards=minuteIncome.pay(state)
+    return advanced or produced or converting or false,produced,awards
 end
 
 local function quotedPlot(state,request)
@@ -178,18 +167,9 @@ function NHFarm.plant(state,request,now)
     if not kind then return false,"Unknown crop." end
     if kind.equipment and NHStore.level(state,"agri_equipment")==0 then return false,"Farm equipment is required." end
     if plot.token>=NHStore.maxResourceAmount then return false,"Farm plot changed." end
-    NHFarm.sync(state,now)
+    NHFarm.sync(state,now,plot.crop~=nil)
     local farm=state.farm
     local deadline=plot.readyAt or farm.time+kind.frames
-    if plot.crop and deadline<=farm.time then
-        -- Keep completed old batches even if their inventory is full. Only
-        -- the next, unfinished cycle changes to the newly selected crop.
-        local period=NHFarm.crops[plot.crop].frames
-        local owed=1+math.floor((farm.time-deadline)/period)
-        farm.pending=farm.pending or {}
-        farm.pending[plot.crop]=(farm.pending[plot.crop] or 0)+owed
-        deadline=deadline+owed*period
-    end
     farm.plots[request.plot]={token=plot.token+1,crop=request.crop,readyAt=deadline}
     return true
 end
@@ -197,8 +177,11 @@ end
 function NHFarm.view(state,lang,now)
     local view={plots={},crops={},equipment=NHStore.level(state,"agri_equipment")>0}
     now=math.max(now,state.farm.time)
+    view.remaining=math.max(0,math.ceil((NHFarm.nextMinute(state.farm.time)-now)/60))
+    local pet,basis=NHCompanions.productionCurrent(state)
+    local cropMultiplier=1+minuteIncome.bonus(state,"farmland","farm",pet,basis)/10000
     local livestockRates
-    view.pens,view.produce,livestockRates=NHLivestock.view(state,lang,now)
+    view.pens,view.produce,livestockRates=NHLivestock.view(state,lang,now,pet,basis)
     view.dragonPending=NHDragonLoot.pendingCount(state)
     view.gelPending=NHGelPool.pendingDoses(state)
     view.gelSpicePending=state.gelBonus and state.gelBonus.spice or 0
@@ -206,19 +189,20 @@ function NHFarm.view(state,lang,now)
     for id=1,NHStore.level(state,"farmland") do
         local plot=state.farm.plots[id] or {token=0}
         if plot.crop then fieldCounts[plot.crop]=(fieldCounts[plot.crop] or 0)+1 end
-        local remaining=plot.crop and math.max(0,math.ceil((plot.readyAt-now)/60)) or 0
+        local remaining=plot.crop and view.remaining or 0
         view.plots[id]={id=id,token=plot.token,crop=plot.crop,remaining=remaining,
-            blocked=plot.crop~=nil and remaining==0 and cropBatches(state,plot,now)==0}
+            blocked=plot.crop~=nil and (state.resources[plot.crop] or 0)>=NHStore.maxResourceAmount}
     end
     for _,id in ipairs(NHFarm.order) do
         local kind=NHFarm.crops[id]
         view.crops[#view.crops+1]={id=id,name=lang=="zh" and kind.zh or kind.en,amount=kind.amount,
             duration=kind.frames/60,unlocked=not kind.equipment or view.equipment,stock=state.resources[id] or 0,
-            perMinute=(fieldCounts[id] or 0)*kind.amount*3600/kind.frames+(livestockRates[id] or 0)}
+            plotRate=kind.amount*3600/kind.frames*cropMultiplier,
+            perMinute=(fieldCounts[id] or 0)*kind.amount*3600/kind.frames*cropMultiplier+(livestockRates[id] or 0)}
     end
     for _,row in ipairs(view.produce) do
         local crop=NHFarm.crops[row.id]
-        if crop then row.perMinute=row.perMinute+(fieldCounts[row.id] or 0)*crop.amount*3600/crop.frames end
+        if crop then row.perMinute=row.perMinute+(fieldCounts[row.id] or 0)*crop.amount*3600/crop.frames*cropMultiplier end
     end
     return view
 end

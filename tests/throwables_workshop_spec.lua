@@ -104,23 +104,38 @@ for _,id in ipairs({"medkit","injector"}) do
 end
 assert(s.bankGold==0)
 print("Throwable workshop: seven batch recipes, atomic costs, mixed metal powders, legacy deliveries and partial bundles passed.")
-for _,kind in ipairs({"derringer","flare_gun"}) do
-    local gun=NHGuns.types[kind]
+for _,cost in ipairs({
+    {kind="derringer",powder=10,gold=10,rounds=4},
+    {kind="flare_gun",powder=20,resource="spice",units=10,gold=200,rounds=20},
+    {kind="sedative_launcher",powder=20,resource="herb",units=10,gold=50,rounds=20},
+}) do
+    local kind=cost.kind
     local fresh=load()
     fresh.warehouse={}
     fresh.levels.grenade=1
-    fresh.materials={gunpowder=gun.powder*2}
-    fresh.resources={fiber=4}
-    fresh.bankGold=gun.gold-1
-    assert(not NHStore.startOrder(fresh,kind) and fresh.materials.gunpowder==gun.powder*2)
-    fresh.bankGold=gun.gold*2
-    for i=1,2 do
-        assert(NHStore.startOrder(fresh,kind))
-        assert(NHStore.advanceProduction(fresh,{run=fresh.runSerial,orderId=fresh.order.id,progress=fresh.order.required}))
+    fresh.materials={gunpowder=cost.powder}
+    fresh.resources={}
+    if cost.resource then fresh.resources[cost.resource]=cost.units end
+    fresh.bankGold=cost.gold
+    local function checkShortage(stock,key)
+        stock[key]=stock[key]-1
+        assert(not NHStore.craft(fresh,kind) and not fresh.order and #fresh.warehouse==0,kind)
+        stock[key]=stock[key]+1
+        assert(fresh.materials.gunpowder==cost.powder and fresh.bankGold==cost.gold,kind)
+        if cost.resource then assert(fresh.resources[cost.resource]==cost.units,kind) end
     end
-    local item=fresh.warehouse[1].item
-    assert(#fresh.warehouse==1 and item.kind==kind and item.remaining==gun.capacity and item.count==2)
-    assert(fresh.bankGold==0 and not fresh.materials.gunpowder and (fresh.resources.fiber or 0)==(kind=="derringer" and 4 or 0))
+    checkShortage(fresh.materials,"gunpowder")
+    checkShortage(fresh,"bankGold")
+    if cost.resource then checkShortage(fresh.resources,cost.resource) end
+    for i=1,2 do
+        fresh.materials.gunpowder=cost.powder
+        if cost.resource then fresh.resources[cost.resource]=cost.units end
+        fresh.bankGold=cost.gold
+        assert(NHStore.craft(fresh,kind))
+        assert(not fresh.order and not next(fresh.materials) and not next(fresh.resources) and fresh.bankGold==0)
+        local item=fresh.warehouse[1].item
+        assert(#fresh.warehouse==1 and item.kind==kind and item.remaining==cost.rounds and item.count==i)
+    end
     if kind=="derringer" then
         assert(not NHStore.stackSlot(fresh,"warehouse",{kind=kind,remaining=3}))
     end

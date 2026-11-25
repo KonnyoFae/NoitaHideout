@@ -33,7 +33,8 @@ local function ammunition(kind,icon)
                 if not mag or ComponentGetValue2(mag,"name")~=kind or ComponentGetValue2(mag,"value_bool") then return end
                 mode=modes.guns[kind][ComponentGetValue2(mag,"value_float")] or mode
                 local points=ComponentGetValue2(mag,"value_int")
-                if points<mode.cost then return end
+                local powered=EntityHasTag(owner,"nh_reactor_active") and dofile_once(files.."mana_reactor.lua").active(owner)
+                if not powered and points<mode.cost then return end
                 if mode.semi then
                     local controls=EntityGetFirstComponentIncludingDisabled(owner,"ControlsComponent")
                     local press=controls and tostring(ComponentGetValue2(controls,"mButtonFrameFire"))
@@ -42,7 +43,7 @@ local function ammunition(kind,icon)
                 end
                 local profile=EntityGetFirstComponentIncludingDisabled(gun,"VariableStorageComponent","nh_gun_profile")
                 impact,flight=mods.parse(profile and ComponentGetValue2(profile,"name"))
-                ComponentSetValue2(mag,"value_int",points-mode.cost)
+                if not powered then ComponentSetValue2(mag,"value_int",points-mode.cost) end
                 if mode.pellets then
                     local posX,posY=EntityGetTransform(owner)
                     GamePlaySound(modes.soundBank,modes.sounds[mode.id].."/create",posX,posY)
@@ -73,6 +74,13 @@ table.insert(actions,{id="NH_HUNTING_BOW",name="$nh_hideout_hunting_bow",descrip
 table.insert(actions,{id="NH_BATTLE_STAFF",name="$nh_hideout_battle_staff",description="$nh_hideout_battle_staff_desc",
     sprite="data/ui_gfx/gun_actions/energy_shield.png",type=ACTION_TYPE_UTILITY,spawn_level="0",spawn_probability="0",price=0,mana=0,
     action=function() end})
+local katanas=dofile(files.."katanas.lua")
+for _,kind in ipairs(katanas.order) do
+    local d=katanas.types[kind]
+    table.insert(actions,{id=d.action,name="$nh_hideout_"..kind,description="$nh_hideout_"..kind.."_desc",
+        sprite=d.icon,type=ACTION_TYPE_UTILITY,spawn_level="0",spawn_probability="0",price=0,mana=0,
+        action=function() end})
+end
 
 for _,d in ipairs(mods.order) do
     table.insert(actions,{id=d.action,name=d.name,description=d.name.."_desc",sprite=d.icon,type=ACTION_TYPE_MODIFIER,

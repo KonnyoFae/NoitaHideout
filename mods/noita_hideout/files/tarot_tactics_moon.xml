@@ -1,0 +1,6 @@
+<Entity>
+    <InheritTransformComponent />
+    <GameEffectComponent effect="MANA_REGENERATION" frames="-1" />
+    <GameEffectComponent effect="PROTECTION_FREEZE" frames="-1" />
+    <GameEffectComponent effect="HOVER_BOOST" frames="-1" />
+</Entity>

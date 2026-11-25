@@ -9,9 +9,18 @@ assert(saved.gearRig.item.reserve==110 and saved.warehouse[1].item.reserve==320 
 actions={}
 local mag={name="scatter_revolver",value_int=6}
 local profile={value_string=""}
+local frame,reactorUntil=42,nil
 function GetUpdatedEntityID() return 1 end
 function EntityGetRootEntity() return 1 end
-function GameGetFrameNum() return 42 end
+function GameGetFrameNum() return frame end
+function EntityHasTag(entity,tag)
+    if tag=="nh_reactor_active" then return entity==1 and reactorUntil~=nil end
+    return entity==2 and tag=="nh_firearm"
+end
+function dofile_once(path)
+    assert(path==root.."mana_reactor.lua")
+    return {active=function(player,now) return player==1 and (now or GameGetFrameNum())<reactorUntil end}
+end
 function EntityGetFirstComponentIncludingDisabled(_,name,tag)
     if name=="Inventory2Component" then return {mActiveItem=2} end
     return tag=="nh_magazine" and mag or profile
@@ -78,6 +87,26 @@ for kind,list in pairs(F.modes.guns) do for index,mode in ipairs(list) do
         end
     end
 end end
+reactorUntil=frame+5400
+for kind,list in pairs(F.modes.guns) do
+    for index,mode in ipairs(list) do
+        for _,points in ipairs({0,mode.cost-1,mode.cost+1}) do
+            fire(kind,index,"frost","pierce",points)
+            assert(mag.value_int==points and contacts==(mode.pellets or 1) and c.fire_rate_wait==mode.wait)
+            assert(bullets[1]==F.modes.path(mode,"frost","pierce"))
+            if mode.semi then
+                actions[1].action()
+                assert(contacts==1,"powered gun must still wait for the next press")
+            end
+        end
+    end
+end
+frame=reactorUntil
+fire("marksman_rifle",3,false,false,11)
+assert(#plain==0 and mag.value_int==11,"unexpired tag cannot fund another shot past its deadline")
+fire("marksman_rifle",3,false,false,13)
+assert(#plain==1 and mag.value_int==1)
+reactorUntil=nil
 reflecting=true
 fire("scatter_revolver",1,false,false,1)
 assert(mag.value_int==1 and #plain==1)
@@ -86,15 +115,13 @@ local old={warehouse={{item={kind="marksman_rifle",rounds=5,configured="frost/pi
 F.migrateMagazines(old); F.migrateMagazines(old)
 assert(old.warehouse[1].item.rounds==30 and old.warehouse[1].item.mode==1 and old.warehouse[1].item.configured=="frost/pierce")
 local runtime=dofile(root.."ammo_runtime.lua")
-local frame=10
+frame=10
 local reloadSounds=0
 function EntityGetTransform(entity) assert(entity==1); return 12,34 end
 function GamePlaySound(bank,event,posX,posY)
     assert(bank=="data/audio/Desktop/animals.bank" and event=="animals/shotgun_cock" and posX==12 and posY==34)
     reloadSounds=reloadSounds+1
 end
-function GameGetFrameNum() return frame end
-function EntityHasTag() return true end
 NHFirearms=F
 NHNative={held=function() return 2 end}
 local ability={mana=5}
@@ -134,4 +161,22 @@ update({reload=true}); assert(reloadSounds==3)
 mag.value_int=35
 assert(update({reload=true}).loading==54 and reloadSounds==4)
 frame=frame+54; update(); assert(mag.value_int==36 and reloadSounds==4)
+mag.value_int=0
+assert(update().loading==54)
+reactorUntil=frame+5400
+frame=frame+54
+local previousReserve=state.gearRig.item.reserve
+local function checkFeed()
+    local view=update({reload=true})
+    assert(view.powered and not view.loading and not mag.value_bool and reloadSounds==5)
+    assert(mag.value_int==0 and ability.mana==0 and state.gearRig.item.reserve==previousReserve)
+end
+checkFeed()
+frame=reactorUntil-1
+checkFeed()
+frame=reactorUntil
+assert(not update().powered and update().loading==54)
+frame=frame+54
+update()
+assert(mag.value_int==previousReserve and state.gearRig.item.reserve==0 and reloadSounds==6)
 print("Eight modes: 280 loadouts, projectile damage, payloads, costs, empty fire, selection, partial reload, rollback and migration passed.")

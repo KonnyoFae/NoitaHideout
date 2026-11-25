@@ -43,7 +43,7 @@ local function save(s,p,history)
     local draft=copy(s)
     draft.ewDepositPending=p
     if history then draft.ewDepositHistory=history end
-    local ok,why=NHStore.commit(draft,s.ewDepositPending~=nil)
+    local ok,why=NHStore.commit(draft,s.ewDepositPending~=nil,s)
     if not ok then return nil,why end
     for k,v in pairs(draft) do s[k]=v end
     s.ewDepositPending=p
@@ -291,8 +291,7 @@ diskProof=function(s,p)
     elseif disk.ewDepositReceipt==token then proof="receipt"
     elseif disk.ewDepositPending and stamp(disk.ewDepositPending)==token then proof="open"
     else return end
-    for k in pairs(s) do s[k]=nil end
-    for k,v in pairs(disk) do s[k]=v end
+    NHStore.adoptSnapshot(s,disk)
     return proof
 end
 local function verify(s,p,player,hostDone,why)

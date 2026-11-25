@@ -27,6 +27,11 @@ assert(content:find("\nnh_hideout_locale,en,en,en,en,en,en,en,en,zh,en,en,\n",1,
 local podNotice=assert(content:match("\nnh_hideout_ew_await_pod,([^\n]+)"))
 assert(podNotice:find("data link and 5 supply packs",1,true) and podNotice:find("数据链呼叫增援（5 点补给）",1,true))
 assert(content:match("\nnh_hideout_ew_wait_failed,[^\n]*已保留角色和装备"))
+for _,relic in ipairs(dofile("mods/noita_hideout/files/red_collectibles.lua")) do
+    local description=assert(content:match("\nnh_hideout_"..relic.id.."_desc,([^\n]+)"))
+    if relic.katana then assert(not description:find("物品栏右键",1,true))
+    else assert(description:find("Right-click in inventory",1,true) and description:find("物品栏右键",1,true)) end
+end
 local carryingNotice=assert(content:match("\nnh_hideout_ew_wait_carrying_peer,([^\n]+)"))
 assert(carryingNotice:find("Put down the teammate polymorphed into an item before entering spectator mode.",1,true))
 assert(carryingNotice:find("请先放下已变形成物品的队友，再进入观战。",1,true))
@@ -41,6 +46,30 @@ for _,sample in ipairs({
     assert(NHNative.language()==sample[3])
 end
 local firearms=dofile("mods/noita_hideout/files/firearms.lua")
+local katanas=dofile("mods/noita_hideout/files/katanas.lua")
+for _,kind in ipairs(katanas.order) do
+    local d=katanas.types[kind]
+    local name=assert(content:match("\nnh_hideout_"..kind..",([^\n]+)"))
+    local description=assert(content:match("\nnh_hideout_"..kind.."_desc,([^\n]+)"))
+    assert(name:find(d.zh,1,true) and name:find(d.en,1,true))
+    if d.durability then
+        assert(description:find("仅消耗 1 点耐久",1,true) and description:find("30 秒",1,true) and description:find("2 秒",1,true))
+    else
+        for _,text in ipairs({"固定消耗半格护盾","余额不足半格时无法启动","初始每格 50 点","扣 25 点可维持 5 秒",
+            "每消耗 5 点护盾可维持 1 秒","spend half of one shield cell","at least half a cell to activate it",
+            "initially 50 points","paying 25 points grants 5 seconds","Every 5 shield points spent grants 1 second"}) do
+            assert(description:find(text,1,true),kind.." is missing its localized cell cost: "..text)
+        end
+        assert(not description:find("50% of current shield",1,true) and not description:find("当前剩余护盾",1,true))
+    end
+    assert(not description:find("物品栏右键",1,true))
+    local _,count=content:gsub("\nnh_hideout_"..kind.."_desc,","")
+    assert(count==1,"Katana translation registered more than once")
+end
+for _,entry in ipairs({{"shield_basic",2},{"shield_fire",3},{"shield_electric",3},{"shield_storm",4},{"shield_frost",4}}) do
+    local description=assert(content:match("\nnh_hideout_"..entry[1].."_desc,([^\n]+)"))
+    assert(description:find(entry[2].." 格",1,true) and description:find(entry[2].." cells",1,true))
+end
 for _,kind in ipairs({"scatter_revolver","marksman_rifle"}) do
     local gun=firearms.items[kind]
     local en='"'..gun.noteEn..'"'
@@ -134,6 +163,23 @@ assert(not poll(false))
 NHNative.resetInput()
 assert(not poll(false,nil,false,true) and not controls.mButtonDownThrow) -- Reload mid-press.
 assert(not poll(false) and poll(false,nil,false,true)==123)
+assert(not poll(false))
+NHRedRelics=dofile("mods/noita_hideout/files/red_relics.lua")
+tags[126]={nh_red_relic=true}
+active=126
+assert(not poll(false,nil,true) and controls.mButtonDownFire,"held collectible must retain its Fire binding")
+assert(not poll(false))
+assert(not poll(false,nil,false,true,false,true) and controls.mButtonDownFire and controls.mButtonDownThrow)
+assert(not poll(true) and not poll(true))
+for kind,definition in pairs(NHRedRelics.types) do
+    local target={container="native",kind=kind,entity=126,parent=33,xslot=2,yslot=0,lane="tool",remaining=9}
+    local result=poll(true,target,false,true,false,true)
+    if definition.katana then assert(result==nil)
+    else assert(result==target and not controls.mButtonDownThrow and not controls.mButtonDownFire) end
+    assert(not poll(false,nil,false,true,false,true))
+    if not definition.katana then assert(not controls.mButtonDownThrow and not controls.mButtonDownFire) end
+    assert(not poll(true) and not poll(true))
+end
 print("Native items: owned right clicks, protected left holds, UI hit targets, controller input, reload and translations passed.")
 
 local owner,quick,entity=15,33,124

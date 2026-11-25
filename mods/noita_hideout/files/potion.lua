@@ -17,6 +17,7 @@ local normal_flask_tag = "noita_hideout_standard_flask"
 local unstable = "magic_liquid_unstable_teleportation"
 local stable = "magic_liquid_teleportation"
 local reagent_units = 250
+local itemAI=dofile("mods/noita_hideout/files/item_ai_knowledge.lua")
 
 -- These templates differ from the base flask only by their initial fill.
 -- Distinct material containers retain their template; mimics remain world entities.
@@ -153,6 +154,14 @@ local function native_callback(field, script, variant)
     return initializers[script]
 end
 
+local function carried_break_hook(entity)
+    local player=EntityGetRootEntity(entity)
+    if NHEWItems and NHEWItems.enabled() then return NHEWItems.held(player,entity) end
+    local bag=EntityGetParent(entity)
+    return bag and bag~=0 and player and player~=0 and EntityHasTag(player,"player_unit")
+        and EntityGetName(bag)=="inventory_quick" and EntityGetParent(bag)==player
+end
+
 local function check_script(c, variant, seen, entity)
     local members = assert(ComponentGetMembers(c), "Cannot inspect flask script")
     local hook, path
@@ -168,11 +177,10 @@ local function check_script(c, variant, seen, entity)
         end
     end
     if not hook then return end
-    if hook~="script_source_file" then
-        local carriedWorldHook=hook=="script_death" and NHEWItems and NHEWItems.enabled() and EntityGetRootEntity(entity)~=entity
-            and NHEWItems.held(EntityGetRootEntity(entity),entity)
-        assert(ComponentGetIsEnabled(c) or carriedWorldHook, "Unsupported flask script: "..path.." (disabled)")
-        if not ComponentGetIsEnabled(c) then seen.disabledBreak=true end
+    if hook~="script_source_file" and not ComponentGetIsEnabled(c) then
+        -- Noita can disable the stock break callback on a flask saved in the quick inventory.
+        assert(hook=="script_death" and carried_break_hook(entity), "Unsupported flask script: "..path.." (disabled)")
+        seen.disabledBreak=true
     end
     -- Native fill and pickup scripts run once. A recurring copy of the same
     -- file has different behavior and would silently disappear on restore.
@@ -196,6 +204,8 @@ local function check_state(entity, variant)
         local kind = ComponentGetTypeName(c)
         if NHEWItems and NHEWItems.metadata(c,kind,seen) then
             -- Transient DES data must not be serialized into the flask.
+        elseif kind==itemAI.kind then
+            seen.aiKnowledge=itemAI.capture(c,seen.aiKnowledge)
         elseif kind=="LuaComponent" then
             check_script(c,variant,seen,entity)
         elseif kind=="VariableStorageComponent" then
@@ -214,7 +224,7 @@ local function check_state(entity, variant)
             seen[kind]=true
         end
     end
-    return seen.disabledBreak
+    return seen.disabledBreak,itemAI.forStorage(seen.aiKnowledge,"potion",entity,variant)
 end
 
 local function flask_components(entity)
@@ -314,7 +324,9 @@ function NHPotion.isMaterialContainer(record)
         or (record.variant~=nil and not variants[record.variant]) then return false end
     -- A newer adapter may serialize attachments or additional contents in another table.
     for key,value in pairs(record) do
-        if key~="materials" and type(value)=="table" and next(value) then return false end
+        if key=="aiKnowledge" then
+            if not itemAI.valid(value) then return false end
+        elseif key~="materials" and type(value)=="table" and next(value) then return false end
     end
     for name,n in pairs(record.materials) do
         if type(name)~="string" or name=="" or not whole_units(n) or n<=0 then return false end
@@ -444,10 +456,10 @@ local function capture(entity)
         local cost = ComponentGetValue2(price, "cost")
         assert(type(cost) == "number" and cost <= 0, "This flask still has a shop price")
     end
-    local disabledBreak=check_state(entity,variant)
+    local disabledBreak,aiKnowledge=check_state(entity,variant)
     local inv = c.MaterialInventoryComponent
     return refresh_name({
-        kind = "potion", materials = read_materials(inv), variant=variant, disabledBreak=disabledBreak,
+        kind = "potion", materials = read_materials(inv), variant=variant, disabledBreak=disabledBreak, aiKnowledge=aiKnowledge,
         -- Powder pouches disable native tinting. Sample their contents without that flag.
         color=variant~="powder_stash" and GameGetPotionColorUint(entity) or nil,
         icon=ComponentGetValue2(c.ItemComponent,"ui_sprite"),
@@ -535,6 +547,7 @@ function NHPotion.restore(record, x, y)
             actual[name] = nil
         end
         assert(next(actual) == nil, "Unexpected material in restored flask")
+        itemAI.restore(entity,record.aiKnowledge)
     end)
     if ok then return entity end
     if entity and entity ~= 0 then NHPotion.discard(entity) end

@@ -2,16 +2,16 @@ local M={order={"travel_satchel","travel_pack","loot_case"},types={
     travel_satchel={zh="行囊",en="Satchel",gold=1,tarot=2,card=0,
         chances={food=55,medical=25,tool=20,dose=0},
         medical={"bandage","medkit","field_surgery_kit"},
-        tools={"magic_tube","flare_gun","turret_pack","shield_charger","ammo_pack"}},
+        tools={"magic_tube","flare_gun","turret_pack","shield_charger","ammo_pack","sedative_launcher"}},
     travel_pack={zh="背包",en="Backpack",gold=2,tarot=5,card=2,
         chances={food=0,medical=40,tool=35,dose=25},
         medical={"tactical_medkit","tactical_surgery_kit"},
-        tools={"fire_tube","frost_tube","rocket_turret_pack","improved_shield_charger","improved_ammo_pack"},
+        tools={"fire_tube","frost_tube","rocket_turret_pack","improved_shield_charger","improved_ammo_pack","sedative_launcher"},
         doses={"fire","lightning","frost","healing","quick_heal","haste","poison"}},
     loot_case={zh="保险盒",en="Lockbox",gold=3,tarot=15,card=8,
         chances={food=0,medical=30,tool=35,dose=35},
         medical={"advanced_medkit","advanced_surgery_kit"},
-        tools={"shock_tube","derringer","shield_turret_pack","advanced_shield_charger","advanced_ammo_pack"},
+        tools={"shock_tube","derringer","shield_turret_pack","advanced_shield_charger","advanced_ammo_pack","sedative_launcher"},
         doses={"healing_2","regen_mana","shield","invisible","rage","physical","resist_all"}},
 }}
 local root="mods/noita_hideout/files/items/"
@@ -37,7 +37,7 @@ end
 
 local function tarotFile(roll)
     local tarot=NHTarot or dofile("mods/noita_hideout/files/tarot.lua")
-    return root.."card_"..tarot.order[roll(#tarot.order)]..".xml"
+    return tarot.dropFile(roll)
 end
 
 local function giftBonusFile(bag,roll)

@@ -1,0 +1,7 @@
+<Entity tags="nh_reactor_effect">
+    <InheritTransformComponent only_position="1" />
+    <UIIconComponent name="$nh_hideout_reactor_direct" description="$nh_hideout_mana_reactor_desc"
+        icon_sprite_file="mods/noita_hideout/files/items/mana_reactor_status.png" is_perk="0" display_in_hud="1" display_above_head="0" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/mana_reactor_tick.lua" execute_every_n_frame="1"
+        vm_type="ONE_PER_COMPONENT_INSTANCE" />
+</Entity>

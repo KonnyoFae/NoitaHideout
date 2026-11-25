@@ -5,6 +5,7 @@ R.registerStaff=staff.register
 R.guardMimic=staff.guardMimic
 local targetKey="nh_ammo_gold_target"
 local activeGun,activeRig,heldSince,due
+local rewind
 
 local function goldKey(s)
     local row=s and s.gearRig
@@ -84,6 +85,11 @@ function R.update(s,player,commit,input)
         activeGun,activeRig,heldSince,due=gun,id,nil,nil
     end
     local frame=GameGetFrameNum()
+    local powered=NHFirearms.modes.guns[kind] and EntityHasTag(player,"nh_reactor_active")
+        and dofile_once("mods/noita_hideout/files/mana_reactor.lua").active(player,frame)
+    local canReload=not powered and points<def.magazine and reserve>0
+    -- A pending reload has not spent its reserve until the timer commits.
+    if not canReload then due=nil end
     local function beginReload()
         due=frame+def.loadFrames
         local x,y=EntityGetTransform(player)
@@ -106,11 +112,10 @@ function R.update(s,player,commit,input)
                 menu,heldSince=false,nil
             end
         end
-        if points<def.magazine and reserve>0 and not due and not heldSince and (input.reload or points<(modes[index].minCost or modes[index].cost)) then
+        if canReload and not due and not heldSince and (input.reload or points<(modes[index].minCost or modes[index].cost)) then
             beginReload()
         end
     end
-    if points>=def.magazine or reserve<=0 then due=nil end
     if due and frame>=due then
         due=nil
         local added=0
@@ -125,6 +130,10 @@ function R.update(s,player,commit,input)
         if ok then
             points,reserve=points+added,reserve-added
             ComponentSetValue2(mag,"value_int",points)
+            if EntityHasTag(player,"nh_rewind_armed") then
+                rewind=rewind or dofile("mods/noita_hideout/files/rewind_loadout.lua")
+                rewind.reloaded(s,player,gun,added,points-added)
+            end
         end
     end
     local blocked=due~=nil or heldSince~=nil or not input.enabled
@@ -143,6 +152,6 @@ function R.update(s,player,commit,input)
     end
     if ComponentGetValue2(ability,"mana")~=points then ComponentSetValue2(ability,"mana",points) end
     return {rounds=points,max=def.magazine,reserve=reserve,modes=modes,index=index,menu=menu,hover=hover,
-        loading=due and due-frame,keyName=input.keyName,charge=charge,mimicTarget=mimicTarget},cast
+        loading=due and due-frame,keyName=input.keyName,charge=charge,mimicTarget=mimicTarget,powered=powered},cast
 end
 return R

@@ -1,0 +1,6 @@
+<Entity>
+    <Base file="mods/noita_hideout/files/items/base_floating_item.xml">
+        <ItemComponent uses_remaining="1" />
+    </Base>
+    <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
+</Entity>

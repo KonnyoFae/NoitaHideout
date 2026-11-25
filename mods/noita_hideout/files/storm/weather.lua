@@ -19,22 +19,34 @@ local sound_player, next_audio_sample, exposure
 local drizzle_tag = "cycle_storm_rain_loop"
 local downpour_tag = "cycle_storm_downpour_loop"
 
-local function ensure_rain_loop(player, tag, name)
+local function ensure_rain_loop(entity, tag, name)
     local bank = "mods/noita_hideout/files/storm/audio/cycle_storm_" .. name .. ".bank"
     local event = "cycle_storm/" .. name
-    local loop = EntityGetFirstComponentIncludingDisabled(player, "AudioLoopComponent", tag)
+    local loop = EntityGetFirstComponentIncludingDisabled(entity, "AudioLoopComponent", tag)
     if loop then
         if ComponentGetValue2(loop, "event_name") == event and ComponentGetValue2(loop, "file") == bank then return end
         -- The drizzle tag also identifies the old water loop in existing saves.
-        EntityRemoveComponent(player, loop)
+        EntityRemoveComponent(entity, loop)
     end
-    EntityAddComponent2(player, "AudioLoopComponent", {
+    EntityAddComponent2(entity, "AudioLoopComponent", {
         _tags = tag,
         file = bank,
         event_name = event,
         calculate_material_lowpass = false,
         volume_autofade_speed = 0.1,
     })
+end
+
+local function preload_audio()
+    -- The player may not exist during world initialization. Prime both banks
+    -- at zero intensity and discard the emitter before the player spawns.
+    local emitter = EntityCreateNew("cycle_storm_audio_preload")
+    if not emitter or emitter == 0 then return end
+    ensure_rain_loop(emitter, drizzle_tag, "drizzle")
+    ensure_rain_loop(emitter, downpour_tag, "downpour")
+    GameEntityPlaySoundLoop(emitter, drizzle_tag, 0, 0)
+    GameEntityPlaySoundLoop(emitter, downpour_tag, 0, 0)
+    EntityKill(emitter)
 end
 
 local function advance_seed(value)
@@ -188,4 +200,4 @@ local function update()
     return phase, elapsed, age
 end
 
-return { update = update, phases = phases, frames = cycle_frames, fps = fps }
+return { update = update, preloadAudio = preload_audio, phases = phases, frames = cycle_frames, fps = fps }

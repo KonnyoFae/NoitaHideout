@@ -1,0 +1,6 @@
+<Entity tags="nh_reactor_meltdown">
+    <Base file="data/entities/projectiles/deck/nuke_giga.xml">
+        <ProjectileComponent lifetime="1" lifetime_randomness="0" speed_min="0" speed_max="0" damage="0" />
+        <VelocityComponent gravity_y="0" />
+    </Base>
+</Entity>

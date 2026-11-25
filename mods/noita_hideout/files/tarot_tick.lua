@@ -1,1 +1,1 @@
-dofile("mods/noita_hideout/files/tarot_runtime.lua").tick(GetUpdatedEntityID())
+dofile_once("mods/noita_hideout/files/tarot_runtime.lua").tick(GetUpdatedEntityID())

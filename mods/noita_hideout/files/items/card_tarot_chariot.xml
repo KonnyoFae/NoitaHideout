@@ -1,6 +1,5 @@
-<Entity name="$nh_card_tarot_chariot" tags="noita_hideout_summon_card,nh_companion_tarot_chariot,item_pickup,item_physics,teleportable_NOT">
-    <Base file="mods/noita_hideout/files/items/base.xml">
-        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/card_tarot_chariot.png" />
+<Entity name="$nh_card_tarot_chariot" tags="noita_hideout_summon_card,nh_companion_tarot_chariot,item_pickup,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base_floating_item.xml">
         <SpriteComponent image_file="mods/noita_hideout/files/items/card_tarot_chariot.png" offset_x="8" offset_y="8" />
         <ItemComponent item_name="$nh_card_tarot_chariot" ui_description="$nh_card_tarot_chariot_desc" uses_remaining="40" ui_sprite="mods/noita_hideout/files/items/card_tarot_chariot.png" />
         <UIInfoComponent name="$nh_card_tarot_chariot" />

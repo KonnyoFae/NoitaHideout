@@ -1,11 +1,9 @@
-<Entity name="$nh_hideout_travel_satchel" tags="nh_loot_bag,noita_hideout_travel_satchel,item_pickup,item_physics,teleportable_NOT">
-    <Base file="mods/noita_hideout/files/items/base.xml">
-        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/travel_satchel.png" />
-        <SpriteComponent image_file="mods/noita_hideout/files/items/travel_satchel.png" offset_x="8" offset_y="8" />
-        <ItemComponent item_name="$nh_hideout_travel_satchel" uses_remaining="1" ui_description="$nh_hideout_travel_satchel_desc"
+<Entity name="$nh_hideout_travel_satchel" tags="nh_loot_bag,noita_hideout_travel_satchel,item_pickup,teleportable_NOT">
+    <Base file="mods/noita_hideout/files/items/base_loot_bag.xml">
+        <SpriteComponent image_file="mods/noita_hideout/files/items/travel_satchel.png" />
+        <ItemComponent item_name="$nh_hideout_travel_satchel" ui_description="$nh_hideout_travel_satchel_desc"
             ui_sprite="mods/noita_hideout/files/items/travel_satchel.png" />
         <UIInfoComponent name="$nh_hideout_travel_satchel" />
         <AbilityComponent ui_name="$nh_hideout_travel_satchel" />
     </Base>
-    <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
 </Entity>

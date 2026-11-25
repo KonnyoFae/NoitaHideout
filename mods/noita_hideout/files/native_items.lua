@@ -53,6 +53,8 @@ function NHNative.registerTranslations()
     if not original then return end
     local labels = {
         {"nh_hideout_locale","en","zh"},
+        {"nh_hideout_reactor_critical","Core critical · The next hit causes a meltdown","堆芯临界 · 再次受伤将熔解"},
+        {"nh_hideout_reactor_direct","Core Direct Feed","堆芯直通"},
         {"nh_hideout_ew_await_pod","A living teammate can call reinforcements with a data link and 5 supply packs.","等待存活队友通过数据链呼叫增援（5 点补给）。"},
         {"nh_hideout_ew_no_sponsor","Reinforcement canceled. No online teammate could cover the 5 supply packs. A teammate can call again.","增援已取消：在线队员的补给均不足 5 点。队友补足资源后可以重新呼叫。"},
         {"nh_hideout_ew_redirect_pod","No clear revival space. A living teammate can move into the open and call again to redirect the same pod for free.","死亡地点附近没有可用空间。存活队友可移到空处，再次呼叫以免费改投这一舱。"},
@@ -111,6 +113,12 @@ function NHNative.registerTranslations()
         {"nh_hideout_food_regen","Food regeneration","食物再生"},
         {"nh_hideout_food_regen_desc","Restores 1% of max HP every 4 seconds.","每 4 秒恢复最大生命的 1%。"},
     }
+    for _,def in ipairs(dofile("mods/noita_hideout/files/red_collectibles.lua")) do
+        if not def.katana then
+            labels[#labels+1]={"nh_hideout_"..def.id,def.en,def.zh}
+            labels[#labels+1]={"nh_hideout_"..def.id.."_desc",def.noteEn,def.noteZh}
+        end
+    end
     local companions=NHCompanions
     if not companions then dofile("mods/noita_hideout/files/companions.lua"); companions=NHCompanions end
     local roleDescriptions={
@@ -129,6 +137,12 @@ function NHNative.registerTranslations()
     local firearms=NHFirearms or dofile("mods/noita_hideout/files/firearms.lua")
     for _,kind in ipairs(firearms.order) do
         local d=firearms.items[kind]
+        labels[#labels+1]={"nh_hideout_"..kind,d.en,d.zh}
+        labels[#labels+1]={"nh_hideout_"..kind.."_desc",d.noteEn,d.noteZh}
+    end
+    local katanas=NHKatanas or dofile("mods/noita_hideout/files/katanas.lua")
+    for _,kind in ipairs(katanas.order) do
+        local d=katanas.types[kind]
         labels[#labels+1]={"nh_hideout_"..kind,d.en,d.zh}
         labels[#labels+1]={"nh_hideout_"..kind.."_desc",d.noteEn,d.noteZh}
     end
@@ -315,7 +329,10 @@ function NHNative.prepareRightUse(player,menuOpen,menuTarget)
     local held=NHNative.held(player)
     if held~=last_item then
         last_item=held
-        held_usable=held and NHNative.usableKind(NHNative.kind(held) or NHTransfers.item_kind(held))
+        -- Collectibles use their bound Fire action in hand; only the menu
+        -- claims a right-click on them.
+        held_usable=held and not EntityHasTag(held,"nh_red_relic")
+            and NHNative.usableKind(NHNative.kind(held) or NHTransfers.item_kind(held))
     end
     local leftMouse=InputIsMouseButtonDown(1)
     local rightMouse=InputIsMouseButtonDown(2)

@@ -1,12 +1,16 @@
 <Entity name="$nh_hideout_flare_gun" tags="nh_loaded_gun,noita_hideout_flare_gun,nh_pheromone_launcher,item_pickup,item_physics,teleportable_NOT">
     <Base file="mods/noita_hideout/files/items/base.xml">
-        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/flare_gun_world.png" />
-        <SpriteComponent image_file="mods/noita_hideout/files/items/flare_gun_world.png" offset_x="3" offset_y="6" />
-        <ItemComponent item_name="$nh_hideout_flare_gun" uses_remaining="4" ui_description="$nh_hideout_flare_gun_desc"
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/flare_gun_shape.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/flare_gun_sprite.xml" rect_animation="default"
+            has_special_scale="1" special_scale_x="0.25" special_scale_y="0.25" />
+        <ItemComponent item_name="$nh_hideout_flare_gun" uses_remaining="20" ui_description="$nh_hideout_flare_gun_desc"
             ui_sprite="mods/noita_hideout/files/items/flare_gun.png" />
         <UIInfoComponent name="$nh_hideout_flare_gun" />
         <AbilityComponent ui_name="$nh_hideout_flare_gun" />
     </Base>
-    <HotspotComponent _tags="shoot_pos" offset.x="13" offset.y="-3.5" />
+    <SpriteComponent _tags="enabled_in_world,nh_support_ground_art" image_file="mods/noita_hideout/files/items/flare_gun_art.png"
+        offset_x="16" offset_y="16" has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" z_index="-1" />
+    <LuaComponent _enabled="0" _tags="enabled_in_hand,nh_equipment_mirror" script_source_file="mods/noita_hideout/files/equipment_sprite_mirror.lua" execute_every_n_frame="1" />
+    <HotspotComponent _tags="shoot_pos" offset.x="6.25" offset.y="-2.5" />
     <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
 </Entity>

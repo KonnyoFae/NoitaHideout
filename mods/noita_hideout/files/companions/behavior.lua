@@ -3,8 +3,8 @@
 local root="mods/noita_hideout/files/"
 dofile_once(root.."companions.lua")
 dofile_once(root.."affinity.lua")
+local ew=NHEW or dofile(root.."ew.lua")
 local interval=6
-local durationFrames=15*60*60
 
 local combat=dofile(root.."companions/combat.lua")
 
@@ -82,13 +82,14 @@ function NHCompanions.update(pet)
     local id=ComponentGetValue2(clock,"value_string")
     local spec=NHCompanions.species[id]
     local age=ComponentGetValue2(clock,"value_int")+interval
-    if age>durationFrames then NHCompanions.clearSupport(player); EntityKill(pet); return end
+    if age>NHCompanions.durationFrames then NHCompanions.clearSupport(player); EntityKill(pet); return end
     if not EntityHasTag(pet,"nh_companion_roles") then
         NHCompanions.clearSupport(player)
         EntityAddTag(pet,"nh_companion_roles")
     end
     ComponentSetValue2(clock,"value_int",age)
-    local bonus=NHCompanions.bonuses[NHAffinity.tier(NHAffinity.follow(id,interval))]
+    local points=ew.localBody(player) and NHAffinity.follow(id,interval) or NHAffinity.livePoints(id)
+    local bonus=NHCompanions.bonuses[NHAffinity.tier(points)]
     local x,y=EntityGetTransform(player)
     local px,py,_,scaleX,scaleY=EntityGetTransform(pet)
     local toPlayer=x-px

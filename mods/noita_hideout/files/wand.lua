@@ -6,6 +6,8 @@ local broom = items .. "wand_varpuluuta.xml"
 local broom_script = "data/scripts/gun/procedural/wand_varpuluuta.lua"
 local source_marker = "noita_hideout_wand_template"
 local transfer_marker = "noita_hideout_transfer_id"
+local unseen=dofile("mods/noita_hideout/files/unseen_hitbox.lua")
+local itemAI=dofile("mods/noita_hideout/files/item_ai_knowledge.lua")
 local templates = { [broom] = true }
 local bases = {}
 for _, suffix in ipairs({"", "_rng", "_rng_daily"}) do
@@ -107,7 +109,8 @@ end
 local function wand_tags(entity)
     local tags = {}
     for tag in (EntityGetTags(entity) or ""):gmatch("[^,]+") do
-        if tag ~= "noita_hideout_transfer_item" and not (NHEWItems and NHEWItems.runtimeTag(entity,tag)) then tags[tag] = true end
+        if tag ~= "noita_hideout_transfer_item" and tag ~= "nh_rewind_equipment"
+            and not (NHEWItems and NHEWItems.runtimeTag(entity,tag)) then tags[tag] = true end
     end
     return tags
 end
@@ -205,6 +208,44 @@ local wand_callbacks = {
     script_item_picked_up = "data/scripts/particles/wand_pickup.lua",
     script_material_area_checker_success = "data/scripts/animals/wand_charm.lua",
 }
+local shop_pickup = "data/scripts/items/shop_effect.lua"
+local function add_shop_pickup(entity)
+    return assert(EntityAddComponent2(entity, "LuaComponent", {script_item_picked_up = shop_pickup}),
+        "Could not restore the shop pickup effect")
+end
+
+local function shop_settings(c)
+    local settings={}
+    for key,raw in pairs(assert(ComponentGetMembers(c))) do
+        -- The native pickup effect has no persistent state of its own.
+        -- Execution counters belong to the previous physical entity.
+        if not key:match("^m[A-Z]") and not key:match("^_") then
+            local value=get(c,key)
+            if value==nil then value=raw end
+            settings[key]=value
+        end
+    end
+    return settings
+end
+
+local stock_shop_settings
+local function wand_shop_component(c,previous)
+    assert(not previous,"Duplicate wand shop pickup effect.")
+    assert((ComponentGetTags(c) or "")=="","Unsupported wand script: "..shop_pickup.." (tags)")
+    if not stock_shop_settings then
+        -- Read this engine's native defaults, including its VM mode, once.
+        local probe=EntityCreateNew()
+        assert(probe and probe~=0,"Could not verify the shop pickup effect.")
+        local ok,settings=pcall(function() return shop_settings(add_shop_pickup(probe)) end)
+        EntityKill(probe)
+        assert(ok,settings)
+        stock_shop_settings=settings
+    end
+    for key,value in pairs(shop_settings(c)) do
+        assert(value==stock_shop_settings[key],"Unsupported wand script: "..shop_pickup.." ("..key..")")
+    end
+    return c
+end
 
 local function check_script(c, path)
     local found = false
@@ -218,6 +259,7 @@ local function check_script(c, path)
                         "Wand is still generating: " .. file)
                 else
                     local valid = wand_callbacks[key] == file or (key == "script_source_file" and path == broom and file == broom_script)
+                        or (key=="script_throw_item" and file=="mods/noita_hideout/files/rewind_throw.lua" and ComponentHasTag(c,"nh_rewind_throw"))
                     assert(valid, "Unsupported wand script: " .. file .. " (" .. key .. ")")
                 end
             end
@@ -227,19 +269,27 @@ local function check_script(c, path)
 end
 
 local function check_root(entity, path)
-    local editor
+    local editor,backups,hasHelper,shop
     local seen={}
     for _, c in ipairs(EntityGetAllComponents(entity)) do
         local t = ComponentGetTypeName(c)
         if NHEWItems and NHEWItems.metadata(c,t,seen) then
             -- EW rebuilds its transport bookkeeping after a native throw.
+        elseif t==itemAI.kind then
+            seen.aiKnowledge=itemAI.capture(c,seen.aiKnowledge)
         elseif t == "LuaComponent" then
-            check_script(c, path)
+            if get(c,"script_item_picked_up")==shop_pickup then shop=wand_shop_component(c,shop)
+            elseif unseen.restoreScript(c) then hasHelper=true else check_script(c, path) end
         elseif t == "ItemCostComponent" then
             assert(get(c, "cost") == 0, "Cannot store a wand with an outstanding shop price")
         elseif t == "VariableStorageComponent" then
             local name = get(c, "name")
-            if name:match("^spell_lab_shugged_edit_panel") or name:match("^%$spell_lab_shugged_operation_") then
+            if name==unseen.backup then
+                backups=backups or {}
+                backups[#backups+1]=c
+            elseif name=="nh_rewind_equipment" and ComponentHasTag(c,"nh_rewind_equipment") then
+                -- A deposited wand leaves its owner's watch. Never serialize this temporary marker.
+            elseif name:match("^spell_lab_shugged_edit_panel") or name:match("^%$spell_lab_shugged_operation_") then
                 local values = fields(c, {"name", "value_bool", "value_float", "value_int", "value_string"})
                 values._tags = ComponentGetTags(c) or ""
                 editor = editor or {}
@@ -251,16 +301,11 @@ local function check_root(entity, path)
             assert(root_types[t], "Unsupported wand component: " .. t)
         end
     end
-    return editor
+    unseen.check(entity,true,backups,hasHelper)
+    return editor,shop and ComponentGetIsEnabled(shop),itemAI.forStorage(seen.aiKnowledge,"wand",entity,path)
 end
 
-local stock_pickups = {}
-local shop_pickup = "data/scripts/items/shop_effect.lua"
-
-local function add_shop_pickup(entity)
-    return assert(EntityAddComponent2(entity, "LuaComponent", {script_item_picked_up = shop_pickup}),
-        "Could not restore the shop pickup effect")
-end
+local stock_pickups,stock_card_templates = {},{}
 
 local function card_pickup(c, id)
     local file = get(c, "script_item_picked_up") or ""
@@ -279,21 +324,23 @@ local function card_pickup(c, id)
     return file, settings
 end
 
-local function card_scripts(entity)
+local function card_scripts(entity,capturing)
     local all=EntityGetComponentIncludingDisabled(entity,"LuaComponent") or {}
-    if not (NHEWItems and NHEWItems.enabled()) then return all end
-    local scripts={}
+    local ew=NHEWItems and NHEWItems.enabled()
+    if not (capturing or ew) then return all end
+    local scripts,hasHelper={},false
     for _,c in ipairs(all) do
-        if not NHEWItems.metadata(c,"LuaComponent") then scripts[#scripts+1]=c end
+        if capturing and unseen.restoreScript(c) then hasHelper=true
+        elseif not (ew and NHEWItems.metadata(c,"LuaComponent")) then scripts[#scripts+1]=c end
     end
-    return scripts
+    return scripts,hasHelper
 end
 
 local function default_pickups(id, x, y)
     if stock_pickups[id] then return stock_pickups[id] end
     local probe = CreateItemActionEntity(id, x, y)
     assert(probe and probe ~= 0, "Unavailable spell: " .. id)
-    local ok, profile = pcall(function()
+    local ok, profile, stockTemplate = pcall(function()
         local result = {}
         for _, c in ipairs(card_scripts(probe)) do
             local file, settings = card_pickup(c, id)
@@ -305,17 +352,29 @@ local function default_pickups(id, x, y)
             local file, settings = card_pickup(add_shop_pickup(probe), id)
             result[file] = settings
         end
-        return result
+        return result,unseen.factoryCard(probe)
     end)
     EntityKill(probe)
     if not ok then error(profile) end
     stock_pickups[id] = profile
+    stock_card_templates[id] = stockTemplate
     return profile
 end
 
-local function pickup_states(entity, id)
+local function pickup_states(entity, id, backups)
     local states
-    for _, c in ipairs(card_scripts(entity)) do
+    local scripts,hasHelper=card_scripts(entity,true)
+    if unseen.check(entity,false,backups,hasHelper) then
+        -- A reloaded inventory card can inherit the player's virtual XML
+        -- filename. Check what this action actually creates on withdrawal.
+        local path=(EntityGetFilename(entity) or ""):gsub("\\","/"):lower()
+        local inline=path=="??sav/player.xml" or path=="data/entities/player.xml" or path=="data/entities/player_base.xml" or supported(path)
+        default_pickups(id,EntityGetTransform(entity))
+        local template=stock_card_templates[id]
+        assert(template and (path==template or (inline and EntityHasTag(entity,"card_action"))),
+            "Could not verify the original hitbox after Unseen.")
+    end
+    for _, c in ipairs(scripts) do
         local file, settings = card_pickup(c, id)
         local expected = default_pickups(id, EntityGetTransform(entity))[file]
         assert(expected, "Nonstandard spell pickup callback: " .. id .. " " .. file)
@@ -336,10 +395,14 @@ local function capture_card(entity, action)
     local id = get(action, "action_id")
     assert(type(id) == "string" and id ~= "", "Spell has no action ID")
     assert(not (EntityGetAllChildren(entity) or {})[1], "Unsupported spell attachment: " .. id)
-    local stack,seen=nil,{}
+    local stack,backups
+    local seen={}
     for _, var in ipairs(EntityGetComponentIncludingDisabled(entity,"VariableStorageComponent") or {}) do
         local name = get(var,"name")
-        if name == "stackable_spells_count" then
+        if name==unseen.backup then
+            backups=backups or {}
+            backups[#backups+1]=var
+        elseif name == "stackable_spells_count" then
             stack = get(var,"value_int")
             assert(stack >= 1 and stack == math.floor(stack), "Invalid spell stack")
         else assert(name == transfer_marker or (NHEWItems and NHEWItems.metadata(var,"VariableStorageComponent",seen)),
@@ -351,14 +414,14 @@ local function capture_card(entity, action)
     if NHEWItems and NHEWItems.enabled() then
         data.permanently_attached=NHEWItems.originalPermanent(entity,data.permanently_attached)
     end
-    return {id = id, stack = stack, x = x, y = y, item = data, pickups = pickup_states(entity, id)}
+    return {id = id, stack = stack, x = x, y = y, item = data, pickups = pickup_states(entity, id, backups)}
 end
 
 local function capture(entity)
     local ability, item = required(entity, "AbilityComponent"), required(entity, "ItemComponent")
     assert(get(ability, "use_gun_script"), "Hold a wand")
     local path = source(entity, ability, item)
-    local editor = check_root(entity, path)
+    local editor,shopPickup,aiKnowledge = check_root(entity, path)
     local sprite = required(entity, "SpriteComponent", "item")
     local hotspot = required(entity, "HotspotComponent", "shoot_pos")
     local tip_x, tip_y = get(hotspot, "offset")
@@ -388,7 +451,8 @@ local function capture(entity)
     local name = get(item, "always_use_item_name_in_ui") and get(item, "item_name") or get(ability, "ui_name")
     -- Native generation can tint the ground light purple on a rare wand.
     local light=path:match("^data/entities/items/wand_level_0[123]%.xml$") and first(entity,"LightComponent")
-    return {kind = "wand", name = name, template = path, editor = editor, cards = cards, cleaner = cleaner, tags = wand_tags(entity),
+    return {kind = "wand", name = name, template = path, editor = editor, shopPickup = shopPickup, aiKnowledge=aiKnowledge,
+        cards = cards, cleaner = cleaner, tags = wand_tags(entity),
         light=light and fields(light,{"r","g","b"}) or nil,
         entity_name = EntityGetName(entity), ability = fields(ability, ability_fields),
         item = fields(item, item_fields), sprite = canonical_sprite(fields(sprite, sprite_fields)), tip = {tip_x, tip_y},
@@ -525,6 +589,19 @@ local function verify_values(stored, actual, path)
     for k in pairs(actual) do assert(stored[k] ~= nil, "Unexpected wand field: " .. path .. "." .. k) end
 end
 
+local function restore_wand_shop(entity,enabled)
+    local existing
+    for _,c in ipairs(EntityGetComponentIncludingDisabled(entity,"LuaComponent") or {}) do
+        if get(c,"script_item_picked_up")==shop_pickup then existing=wand_shop_component(c,existing) end
+    end
+    if enabled~=nil then
+        assert(type(enabled)=="boolean","Invalid wand shop pickup state.")
+        EntitySetComponentIsEnabled(entity,existing or add_shop_pickup(entity),enabled)
+    elseif existing then
+        EntityRemoveComponent(entity,existing)
+    end
+end
+
 function NHWand.restore(data, x, y)
     if data.discovery then
         local preset=NHDragonLoot.wandItem(data.discovery)
@@ -576,6 +653,7 @@ function NHWand.restore(data, x, y)
             local c = assert(EntityAddComponent2(entity, "VariableStorageComponent", record.values))
             EntitySetComponentIsEnabled(entity, c, record.enabled)
         end
+        restore_wand_shop(entity,data.shopPickup)
         for _, card in ipairs(data.cards) do add_card(entity, card, x, y, true) end
         if marked_source(entity) ~= data.template then
             assert(EntityAddComponent2(entity, "VariableStorageComponent",
@@ -583,8 +661,11 @@ function NHWand.restore(data, x, y)
         end
         -- Some setters report engine errors without raising a Lua error.
         -- Re-read the actual clone before the transfer retires its stash entry.
+        itemAI.restore(entity,data.aiKnowledge)
         local actual=capture(entity)
         if not data.light then actual.light=nil end -- Older records omit the native ground light.
+        -- AI fields and tags were verified on the entity above, accounting for implicit defaults.
+        actual.aiKnowledge=data.aiKnowledge
         verify_values(data,actual,"wand")
     end)
 end

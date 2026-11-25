@@ -10,6 +10,16 @@ function NHAffinity.incomeBasisPoints(points)
     return math.floor(math.max(0,math.min(points,NHAffinity.maxPoints)-1000)/10)
 end
 
+-- Fixed produce and private card rolls have different curves. Keep the
+-- displayed and accrued rates in the same integer basis points.
+function NHAffinity.productionBasisPoints(points)
+    points=math.max(0,math.min(NHAffinity.maxPoints,points))
+    if points<=100 then return math.floor(points) end
+    if points<=400 then return 100+math.floor((points-100)*200/300) end
+    if points<=1000 then return 300+math.floor((points-400)*200/600) end
+    return 500+math.floor((points-1000)*500/9000)
+end
+
 function NHAffinity.tier(points)
     for i=#NHAffinity.thresholds,2,-1 do
         if points>=NHAffinity.thresholds[i] then return i-1 end
@@ -70,6 +80,16 @@ function NHAffinity.points(state,id)
     local total=saved(state,id)
     if GlobalsGetValue(prefix.."run","")==run(state) then total=math.max(total,worldFrames(id)) end
     return math.floor(total/NHAffinity.framesPerPoint)
+end
+
+function NHAffinity.productionReading(state,id)
+    local earned=worldFrames(id)
+    local frames=math.max(saved(state,id),earned)
+    local points=math.floor(frames/NHAffinity.framesPerPoint)
+    -- The companion script awards six frames at a time. Poll once the next
+    -- point can possibly change, including while an older world catches up.
+    local delay=math.max(1,(points+1)*NHAffinity.framesPerPoint-earned-5)
+    return points,points==NHAffinity.maxPoints and math.huge or delay
 end
 
 function NHAffinity.changed(state)

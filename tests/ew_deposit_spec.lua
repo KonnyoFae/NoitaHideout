@@ -90,6 +90,10 @@ function NHStore.commit(d)
     d.revision=d.revision+1;disk=copy(d);return true
 end
 function NHStore.load() if not failRead then return copy(disk) end end
+function NHStore.adoptSnapshot(target, snapshot)
+    for key in pairs(target) do target[key]=nil end
+    for key,value in pairs(snapshot) do target[key]=value end
+end
 NHTransfers={}
 function NHTransfers.item_kind(item) return item.kind or "wand" end
 NHShields={supply=function(kind) return kind=="charger" end}
@@ -276,6 +280,8 @@ do
     assert(begin(oldItem))
     local oldTx=s.ewDepositPending.tx
     s.ewDepositPending.reserved=nil -- .27 stored the full capture without headroom
+    s.levels.farmland=1
+    s.farm={time=1800,passive=true,plots={[1]={token=1,crop="grain",readyAt=10800}}}
     local issued={}
     s.ewExpeditions={oldWorld={transit={run=1,issued=issued,retired={}}}}
     s.warehouse={{id=1,slot=1,item={kind="wand",name="fixture"}}}
@@ -307,6 +313,14 @@ do
     assert(NHStore.commit(s));D.reset();s=assert(NHStore.load())
     assert(#encode(s)==cap-20 and not s.ewDepositPending.reserved)
     local oldDisk=copy(settings)
+    -- An active farm from before minute settlements can require more than
+    -- 20 free bytes to upgrade. Its failed payout must still permit unlocking
+    -- the original item, and the old clock must remain available for retry.
+    local production=assert(NHStore.load())
+    assert(NHFarm.sync(production,3600) and production.resources.grain==2)
+    assert(not NHStore.commit(production))
+    local original=assert(NHStore.load())
+    assert(#encode(original)==cap-20 and original.farm.time==1800 and not original.resources.grain)
     assert(D.cancel(s,oldTx) and not s.ewDepositPending.record)
     local squeezed=assert(NHStore.load())
     fit(squeezed,cap-12)
@@ -325,6 +339,11 @@ do
     assert(not NHEWItems.lockInfo(oldItem) and not s.ewDepositPending and history.outcome(s.ewDepositHistory,world,owner,oldTx)=="cancelled")
     tick();assert(oldItem.alive and calls==polls and s.total==0)
     online=true
+    local resumed=assert(NHStore.load())
+    fit(resumed,cap-2000)
+    assert(NHFarm.sync(resumed,3600) and NHStore.commit(resumed))
+    s=assert(NHStore.load())
+    assert(s.resources.grain==2 and not NHFarm.sync(s,3600))
 
     -- An admitted request protects its closing space against unrelated writes
     -- even after the owning expedition is parked. A refused request never locks.

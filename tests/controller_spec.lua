@@ -22,6 +22,7 @@ end
 function HasFlagPersistent(k) return flags[k] == true end
 function AddFlagPersistent(k) flags[k] = true end
 function GlobalsGetValue(k,d) return world[k] or d end
+function GameSetPostFxParameter() end
 function GlobalsSetValue(k,v) world[k] = v end
 function GameGetFrameNum() return frame end
 function SessionNumbersGetValue() return "0" end
@@ -33,6 +34,11 @@ function CellFactory_GetType() return -1 end
 function ModTextFileGetContent() return nil end
 function GamePrint() end
 function GamePlaySound() end
+local rain_preload_calls=0
+function GameEntityPlaySoundLoop(id,tag,intensity)
+    assert(id~=player and intensity==0 and EntityGetFirstComponentIncludingDisabled(id,"AudioLoopComponent",tag))
+    rain_preload_calls=rain_preload_calls+1
+end
 function ProceduralRandomi(_,_,lo) return lo end
 function MagicNumbersGetValue(k) return k:sub(-1) == "X" and "227" or "-85" end
 function EntityGetTransform(id)
@@ -76,6 +82,12 @@ function EntityGetIsAlive(id) return entities[id] ~= nil end
 function EntityGetParent(id) return entities[id].parent end
 function EntityRemoveFromParent(id) entities[id].parent=0 end
 function EntityGetName(id) return entities[id].name or "" end
+function EntityGetFilename(id) return entities[id].file or "" end
+function EntityGetTags(id)
+    local list={}
+    for tag in pairs(entities[id].tags) do list[#list+1]=tag end
+    return table.concat(list,",")
+end
 function EntityGetRootEntity(id)
     if EntityGetParent(id) == 0 then return id end
     return EntityGetRootEntity(EntityGetParent(id))
@@ -217,18 +229,22 @@ local function boot()
         model=m
         if opened_click then dispatch(unpack(opened_click)) end
     end
+    local previous=rain_preload_calls
     OnWorldInitialized()
+    assert(rain_preload_calls==previous+2)
     OnPlayerSpawned(player)
+    assert(rain_preload_calls==previous+2)
 end
 local function tick(key,action,arg,button)
     frame=frame+1
     keys=key and {[key]=true} or {}
-    local left=button=="left" or button=="both"
+    local left=button=="left" or button=="both" or button=="unbound_click"
+    local fire=button=="bound_fire" or (left and button~="unbound_click")
     local right=button=="right" or button=="both"
-    if left and not left_mouse then controls.mButtonFrameFire=frame end
+    if fire and not (left_mouse or controls.mButtonDownFire) then controls.mButtonFrameFire=frame end
     if right and not right_mouse then controls.mButtonFrameThrow=frame end
     left_mouse,right_mouse=left,right
-    controls.mButtonDownFire,controls.mButtonDownLeftClick=left,left
+    controls.mButtonDownFire,controls.mButtonDownLeftClick=fire,left
     controls.mButtonDownThrow,controls.mButtonDownRightClick=right,right
     model=nil
     opened_click=action and {action,arg}
@@ -585,6 +601,8 @@ for _,recipe in ipairs(NHStore.recipes) do
         assert(entry.icon=="mods/noita_hideout/files/items/staff_icon.png" and recipe.item.rounds==120)
     elseif recipe.id=="hunting_bow" then
         assert(entry.icon=="mods/noita_hideout/files/items/hunting_bow_icon.png" and recipe.item.rounds==60 and recipe.item.mode==1)
+    elseif recipe.item and NHKatanas.types[recipe.item.kind] then
+        assert(entry.icon==NHKatanas.types[recipe.item.kind].icon and NHKatanas.valid(recipe.item))
     elseif recipe.category=="weapons" or (recipe.category=="medical" and recipe.item.kind~="dose") then
         assert(entry.icon=="mods/noita_hideout/files/items/"..recipe.item.kind..".png",recipe.id)
     end
@@ -1642,8 +1660,11 @@ local function testFarmController()
     tick(nil,"farm_plant",sow)
     view=tick()
     assert(view.farm.plots[1].crop=="grain" and state().farm.plots[1].readyAt==nextAt)
-    view=advance(view.farm.plots[1].remaining*60)
-    assert(state().resources.grain==6 and state().farm.plots[1].readyAt==nextAt+NHFarm.crops.grain.frames)
+    local switchedAt=state().farm.time
+    view=advance(3*3600)
+    local minuteEnd=math.floor(NHFarm.observe(state(),frame)/3600)*3600
+    assert(state().resources.grain==math.floor((minuteEnd-switchedAt)*2/3600))
+    assert(state().farm.plots[1].readyAt==nextAt+NHFarm.crops.grain.frames)
     assert(view.farm.crops[1].stock==6 and not state().materials.fiber)
     assert(has_project(view.recipes,"bread").ready,"the open workshop must see a passive deposit immediately")
     local bandage=has_project(view.recipes,"bandage")
@@ -1684,13 +1705,55 @@ local function testFarmController()
     local second=tick().farm.plots[2]
     tick(nil,"farm_plant",{plot=2,token=second.token,crop="grain"})
     local twoFields=tick().farm
-    assert(has_project(twoFields.crops,"grain").perMinute==4 and has_project(twoFields.crops,"fiber").perMinute==0)
+    assert(has_project(twoFields.crops,"grain").perMinute==4.08 and has_project(twoFields.crops,"fiber").perMinute==0)
     tick(nil,"farm_plant",{plot=2,token=twoFields.plots[2].token,crop="fiber"})
     local switched=tick().farm
-    assert(has_project(switched.crops,"grain").perMinute==2 and has_project(switched.crops,"fiber").perMinute==3)
+    assert(has_project(switched.crops,"grain").perMinute==2.04 and has_project(switched.crops,"fiber").perMinute==3.06)
 end
 testFarmController()
 print("Controller: passive field deposits, retry, crop switching, live workshop stock and crafting passed.")
+
+do
+    settings,flags={},{}
+    new_world()
+    local seeded=state()
+    seeded.bankGold=100
+    seeded.levels.farmland=1
+    assert(NHFarm.plant(seeded,{plot=1,token=0,crop="grain"},0))
+    assert(NHStore.commit(seeded))
+    boot()
+    local wallet=EntityAddComponent2(player,"WalletComponent",{money=0})
+    local commit=NHStore.commit
+    local attempts,limit=0,"Prototype profile exceeds 1 MiB"
+    NHStore.commit=function(draft,...)
+        if limit and draft.farm.time>=3600 then
+            attempts=attempts+1
+            return false,limit
+        end
+        return commit(draft,...)
+    end
+    inventory_open=true
+    assert(advance(3600).mode=="case" and attempts==1 and not state().resources.grain)
+    assert(advance(3600).mode=="case" and attempts==1)
+    OnPausedChanged(true,false)
+    assert(attempts==1 and state().farm.time==0)
+    tick(nil,"bank_transfer",{direction="withdraw",amount="all"})
+    assert(wallet.money==100 and state().bankGold==0 and attempts==1)
+    limit=nil
+    tick()
+    assert(state().resources.grain==4)
+
+    limit="Hideout profile needs room to finish its deposit (1 MiB)"
+    advance(3600)
+    assert(attempts==2 and state().resources.grain==4)
+    local external=state()
+    external.bankGold=1
+    assert(commit(external))
+    limit=nil
+    advance(60-frame%60)
+    assert(state().resources.grain==6 and state().bankGold==1)
+    NHStore.commit=commit
+end
 
 do
     settings,flags={},{}
@@ -1815,15 +1878,18 @@ local function testSpecialLivestock()
     inventory_open=false
     entities[player].x=400
     advance(firstTreasure-1-NHFarm.observe(state(),frame))
-    assert(state().bankGold==0 and state().resources.sugar==20 and state().resources.spice==8)
-    tick()
+    assert(state().bankGold==149 and state().resources.sugar==21 and state().resources.spice==8)
+    assert(not state().dragonLoot)
+    local settlement=math.ceil(firstTreasure/3600)*3600
+    advance(settlement-NHFarm.observe(state(),frame))
     s=state()
-    assert(s.bankGold==150 and #s.warehouse+NHDragonLoot.pendingCount(s)>=1)
-    assert(s.farm.herds.dragon_egg.adults==1 and s.farm.herds.dragon_egg.progress==0)
+    local gold=math.floor((settlement-firstTreasure+NHLivestock.species.dragon_egg.period)*30/3600)
+    assert(s.bankGold==gold and #s.warehouse+NHDragonLoot.pendingCount(s)>=1)
+    assert(s.farm.herds.dragon_egg.adults==1 and s.farm.herds.dragon_egg.progress==settlement-firstTreasure)
     local treasureSeed=s.dragonLoot.seed
     boot()
     tick()
-    assert(state().bankGold==150 and state().dragonLoot.seed==treasureSeed)
+    assert(state().bankGold==gold and state().dragonLoot.seed==treasureSeed)
 end
 testSpecialLivestock()
 
@@ -1854,10 +1920,11 @@ local function testGelPoolProduction()
     inventory_open=false
     entities[player].x=400
     advance(first-NHFarm.observe(s,frame)-1)
-    assert(not state().resources.herb and not state().resources.spice)
-    tick()
+    assert(state().resources.herb==3 and not state().resources.spice)
+    local settlement=math.ceil(first/3600)*3600
+    advance(settlement-NHFarm.observe(s,frame))
     s=state()
-    assert(s.resources.herb==4 and s.resources.fiber==6 and s.resources.spice==1)
+    assert(s.resources.herb==4 and s.resources.fiber==7 and s.resources.spice==1)
     local dose,card
     for _,row in ipairs(s.warehouse) do
         if row.item.kind=="dose" then dose=row end
@@ -1868,7 +1935,7 @@ local function testGelPoolProduction()
     entities[player].x=227
     inventory_open=true
     tick()
-    assert(state().resources.spice==1 and state().farm.herds.gel_pool.progress==0)
+    assert(state().resources.spice==1 and state().farm.herds.gel_pool.progress==settlement-first)
     local pouch=starter()
     tick(nil,"open_container",{pouchId=pouch.id,safeSlot=pouch.slot,container="safe"})
     tick(nil,"pack_dose",{pouchId=pouch.id,container="warehouse",safeSlot=dose.slot,targetCell=4})
@@ -1925,9 +1992,9 @@ do
     entities[player].x=400
     inventory_open=false
     advance(first-NHFarm.observe(state(),frame)-1)
-    assert(not state().resources.herb)
+    assert(state().resources.herb==3 and state().resources.fiber==5)
     tick()
-    assert(state().resources.herb==4 and state().resources.fiber==6)
+    assert(state().resources.herb==3 and state().resources.fiber==5,"between settlements only the rare work phase advances")
     boot()
     advance(120*60)
     assert(state().resources.herb==8 and state().resources.fiber==12)
@@ -2122,7 +2189,7 @@ local function testCompanionAffinity()
     settings,flags={},{}
     new_world()
     for _=1,59 do NHAffinity.follow("dryad",6) end
-    advance(360-frame%360)
+    advance(3600-frame%3600)
     assert(state().affinity.dryad==354)
     assert(NHAffinity.follow("dryad",6)==10)
     NHAffinity.follow("griffin",6)
@@ -2261,12 +2328,6 @@ local function testSurgeryFromWorkshop()
         local c=EntityGetFirstComponentIncludingDisabled(id,kind,tag)
         if c and not c.disabled then return c end
     end
-    function EntityGetTags(id)
-        local list={}
-        for tag in pairs(entities[id].tags) do list[#list+1]=tag end
-        return table.concat(list,",")
-    end
-    function EntityGetFilename(id) return entities[id].file or "" end
     function ComponentGetTags(c) return c._tags or "" end
     function ComponentGetIsEnabled(c) return not c.disabled end
     function GameGetGameEffectCount() return 0 end
@@ -3799,14 +3860,132 @@ end
 print("Mimic controller: native timer, hit release and untouched inventory passed.")
 
 do
+    new_world()
+    local profile=state()
+    profile.gearLink={id=profile.nextItemId,item={kind="remote_terminal",remaining=2}}
+    profile.nextItemId=profile.nextItemId+1
+    assert(NHStore.commit(profile))
+    boot()
+    local bell=EntityLoad("mods/noita_hideout/files/items/salvage_bell.xml",227,-85)
+    EntityAddTag(bell,"nh_red_relic")
+    GamePickUpInventoryItem(player,bell)
+    held=bell
+    local item=EntityGetFirstComponentIncludingDisabled(bell,"ItemComponent")
+    item.uses_remaining=90
+    local animate,activate,enabled=GamePlayAnimation,NHSalvageBell.activate,controls.enabled
+    GamePlayAnimation=function() end
+    NHSalvageBell.activate=function(p,pay) assert(p==player); return pay() end
+    controls.enabled=true
+    tick()
+    tick(nil,nil,nil,"unbound_click")
+    assert(item.uses_remaining==90)
+    tick(nil,nil,nil,"bound_fire")
+    tick(nil,nil,nil,"bound_fire")
+    assert(item.uses_remaining==89,"holding mapped fire activated a second time")
+    tick()
+    inventory_open=true
+    tick(nil,nil,nil,"bound_fire")
+    inventory_open=false
+    tick(nil,nil,nil,"bound_fire")
+    assert(item.uses_remaining==89,"holding through inventory close activated the bell")
+    tick()
+    tick(224,nil,nil,"bound_fire")
+    assert(not controls.mButtonDownFire,"support command menu did not capture input")
+    tick(nil,nil,nil,"bound_fire")
+    assert(item.uses_remaining==89,"closing support commands replayed the held fire")
+    tick()
+    tick(nil,nil,nil,"left")
+    assert(item.uses_remaining==88,"default bound mouse fire stopped working")
+    tick()
+    -- Changing slots during a held action cannot start a new activation and
+    -- a non-mouse binding must not trigger other items' existing fire path.
+    local other=EntityLoad("mods/noita_hideout/files/items/heavy_mg.xml",227,-85)
+    GamePickUpInventoryItem(player,other)
+    held=other
+    local fireHeld=NHProducts.fireHeld
+    NHProducts.fireHeld=function() error("rebound fire entered the launcher path") end
+    tick(nil,nil,nil,"bound_fire")
+    held=bell
+    tick(nil,nil,nil,"bound_fire")
+    assert(item.uses_remaining==88)
+    NHProducts.fireHeld=fireHeld
+    -- Activating a different quick slot preserves the selected item and charges once.
+    tick()
+    held=other
+    entities[other].comps.ItemComponent.slotX=1
+    entities[other].comps.ItemComponent.uses_remaining=12
+    inventory_open=true
+    local source
+    for _,entry in ipairs(tick().native_slots) do if entry.entity==bell then source=entry end end
+    assert(source and source.remaining==88)
+    source.container="native"
+    tick(nil,"use_inventory",source)
+    assert(item.uses_remaining==87 and held==other and EntityGetParent(bell)==quick)
+    tick(nil,"use_inventory",source)
+    assert(item.uses_remaining==87,"stale quick-slot click spent twice")
+    inventory_open=false
+    controls.enabled,GamePlayAnimation,NHSalvageBell.activate=enabled,animate,activate
+    tick()
+end
+
+do
+    settings,flags={},{}
+    new_world()
+    local profile=state()
+    for _,container in ipairs({"safe","warehouse"}) do
+        profile[container]={{slot=1,id=profile.nextItemId,item={kind="salvage_bell",remaining=1}}}
+        profile.nextItemId=profile.nextItemId+1
+    end
+    assert(NHStore.commit(profile))
+    boot()
+    inventory_open=true
+    tick()
+    local previous,notify,activations,lastMessage=NHSalvageBell.activate,NHUI.notify,0,nil
+    NHUI.notify=function(message) lastMessage=message end
+    NHSalvageBell.activate=function(p,pay)
+        assert(p==player)
+        if not pay() then return false end
+        activations=activations+1
+        return true
+    end
+    for _,container in ipairs({"safe","warehouse"}) do
+        local row=state()[container][1]
+        local ref={container=container,kind=row.item.kind,slot=row.slot,storedId=row.id,remaining=1}
+        local before=activations
+        fail_commit=true
+        tick(nil,"use_inventory",ref)
+        fail_commit=false
+        assert(activations==before and state()[container][1].item.remaining==1,"failed commit granted effect or spent charge")
+        assert(lastMessage and lastMessage:find("Settings readback failed",1,true),"lost the storage error")
+        advance(61)
+        tick(nil,"use_inventory",ref)
+        local used=state()[container][1]
+        assert(used.id==row.id and used.item.remaining==0 and activations==before+1,container)
+        tick(nil,"use_inventory",ref)
+        ref.remaining=0
+        tick(nil,"use_inventory",ref)
+        assert(state()[container][1].id==row.id and activations==before+1,"exhausted relic reused or deleted")
+    end
+    assert(#GameGetAllInventoryItems(player)==0,"using stored relics materialized an item")
+    boot()
+    assert(state().safe[1].item.remaining==0 and state().warehouse[1].item.remaining==0)
+    NHSalvageBell.activate,NHUI.notify=previous,notify
+end
+print("Relic controller: non-held activation, selected slot, stored payment, stale clicks and persisted zero durability passed.")
+
+do
     local path = "data/entities/misc/healthbar_dummy.xml"
     local template = '<Entity><LifetimeComponent lifetime="1" />' ..
         '<DamageModelComponent hp="0" wait_for_kill_flag_on_death="1" other_mod="keep">' ..
         '<damage_multipliers fire="0" /></DamageModelComponent><BossHealthBarComponent in_world="1" /></Entity>'
     local enabled, xml, reads, writes = false, nil, 0, 0
     function ModIsEnabled(id) assert(id == "new_enemies"); return enabled end
-    function ModDoesFileExist(file) assert(enabled and file == path); return xml ~= nil end
-    function ModTextFileGetContent(file) assert(file == path); reads = reads + 1; return xml end
+    function ModDoesFileExist(file) return enabled and file == path and xml ~= nil end
+    function ModTextFileGetContent(file)
+        if file ~= path then return nil end
+        reads = reads + 1
+        return xml
+    end
     function ModTextFileSetContent(file, value) assert(file == path); writes = writes + 1; xml = value end
     OnModPostInit()
     enabled = true

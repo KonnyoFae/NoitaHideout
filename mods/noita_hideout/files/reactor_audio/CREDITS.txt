@@ -1,0 +1,6 @@
+Magic Reactor shield warning
+
+Adapted from “National Alert Signal, Rémalard (61)” by Joseph Sardin.
+Source and CC0 license: https://bigsoundbank.com/national-alert-signal-remalard-61-s3257.html
+
+The bank uses Noita's modding example for spatial sound and effects-bus routing.

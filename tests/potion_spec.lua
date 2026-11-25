@@ -11,9 +11,10 @@ end
 NHPotion.readTemplates()
 local ids = {water = 2, slime = 6, magic_liquid_unstable_teleportation = 8, magic_liquid_teleportation = 9}
 local next_id, last, entities = 1, nil, {}
+local itemAI=dofile("tests/item_ai_fixture.lua")
 local kinds = {"MaterialInventoryComponent", "MaterialSuckerComponent", "PotionComponent",
     "DamageModelComponent", "ItemComponent", "LuaComponent", "ExplodeOnDamageComponent",
-    "VariableStorageComponent", "GameEffectComponent"}
+    "VariableStorageComponent", "GameEffectComponent", "ItemAIKnowledgeComponent","AIKnowledgeComponent"}
 local missing_on_add
 
 function EntityLoad(path)
@@ -45,11 +46,20 @@ local function comp(id)
 end
 function ComponentGetValue2(id, f) return comp(id)[f] end
 function ComponentSetValue2(id, f, v) comp(id)[f] = v end
-function ComponentGetMembers(id) return comp(id) end
+function ComponentGetMembers(id)
+    local values=comp(id)
+    if ComponentGetTypeName(id)~="ItemAIKnowledgeComponent" then return values end
+    local fields={}
+    for k,v in pairs(values) do
+        if k~="id" and k~="_tags" and k~="disabled" then fields[k]=v end
+    end
+    return fields
+end
 function ComponentGetTypeName(id) return kinds[id % 100] end
 function ComponentHasTag(id,tag) return comp(id)._tags==tag end
 function ComponentGetTags(id) return comp(id)._tags end
 function ComponentGetIsEnabled(id) return not comp(id).disabled end
+function EntitySetComponentIsEnabled(_,id,enabled) comp(id).disabled=not enabled end
 function EntityGetAllComponents(e)
     local result = {}
     for _, c in pairs(entities[e].components) do result[#result+1] = c.id end
@@ -163,9 +173,13 @@ do
     dofile("mods/noita_hideout/files/transfers.lua")
     local player, held = EntityLoad("data/entities/player.xml"), nil
     entities[player].components = {}
+    EntityAddTag(player,"player_unit")
     function EntityGetIsAlive(e) return entities[e] and not entities[e].killed end
     function EntityGetParent(e) return entities[e].parent or 0 end
-    function EntityGetRootEntity(e) return entities[e].parent or e end
+    function EntityGetRootEntity(e)
+        while entities[e].parent do e=entities[e].parent end
+        return e
+    end
     function GameGetAllInventoryItems() return {held} end
     function EntityGetTransform() return 0, 0 end
     function GameGetFrameNum() return 42 end
@@ -202,8 +216,10 @@ do
     for _,path in ipairs({"data/entities/items/pickup/potion_water.xml","??sav/player.xml",
         "data/entities/items/pickup/jar.xml","data/entities/items/pickup/powder_stash.xml"}) do
         local e = bottle(path)
+        itemAI.add(e,false)
         entities[e].components.LuaComponent.script_source_file = script
         refused("script",script)
+        itemAI.check(e,false)
         assert(entities[e].components.LuaComponent.script_source_file==script)
     end
     local e = bottle("data/entities/items/pickup/potion_empty.xml")
@@ -227,13 +243,49 @@ do
     entities[e].components.VariableStorageComponent.value_string="quest_stage"
     refused("state","potion_material")
     e = bottle("data/entities/items/pickup/potion.xml")
+    itemAI.add(e,true)
     EntityAddComponent2(e,"GameEffectComponent",{effect="CUSTOM"})
     refused("component","GameEffectComponent")
+    e = bottle("data/entities/items/pickup/potion.xml")
+    EntityAddComponent2(e,"AIKnowledgeComponent",{})
+    refused("component","AIKnowledgeComponent")
+    e = bottle("data/entities/items/pickup/potion.xml")
+    local ai=itemAI.add(e,true)
+    ComponentSetValue2(ai,"future_ai_state",7)
+    refused("field","future_ai_state")
+    ComponentSetValue2(ai,"future_ai_state",nil)
+    for field in pairs(ComponentGetMembers(ai)) do
+        ComponentSetValue2(ai,field,field=="ranged_min_distance" and 0 or field=="is_safe")
+    end
+    ComponentSetValue2(ai,"_tags","")
+    local defaultRecord=assert(NHPotion.capture(e))
+    local plainAI=assert(NHPotion.restore(defaultRecord,0,0))
+    local restoredAI=assert(EntityGetFirstComponentIncludingDisabled(plainAI,"ItemAIKnowledgeComponent"))
+    assert(ComponentGetIsEnabled(restoredAI) and ComponentGetValue2(restoredAI,"is_safe")==true)
+    assert(ComponentGetValue2(restoredAI,"is_known")==false and ComponentGetValue2(restoredAI,"ranged_min_distance")==0)
+    defaultRecord.aiKnowledge.is_safe,defaultRecord.aiKnowledge.enabled=true,true
+    defaultRecord.aiKnowledge.tags="test_ai_profile"
+    assert(NHPotion.isMaterialContainer(defaultRecord))
+    local factory,templateAI,templateFields=EntityLoad
+    function EntityLoad(path)
+        local shell=factory(path)
+        templateAI=itemAI.add(shell,false)
+        templateFields=comp(templateAI)
+        ComponentSetValue2(templateAI,"_tags","template_a,template_b")
+        return shell
+    end
+    local copy=assert(NHPotion.restore(defaultRecord,0,0))
+    EntityLoad=factory
+    local copyAI=assert(EntityGetFirstComponentIncludingDisabled(copy,"ItemAIKnowledgeComponent"))
+    -- This mock derives IDs from entity and type, so check the component object as well.
+    assert(copyAI==templateAI and comp(copyAI)==templateFields and ComponentGetIsEnabled(copyAI))
+    assert(ComponentGetTags(copyAI)=="test_ai_profile" and not ComponentGetValue2(copyAI,"is_known"))
     e = bottle("data/entities/items/pickup/potion.xml")
     EntityAddTag(e,"example_quest_item")
     refused("tag","example_quest_item")
 
     e = bottle("data/entities/items/pickup/potion_water.xml")
+    itemAI.add(e,false)
     AddMaterialInventoryMaterial(e,"slime",17)
     entities[e].components.MaterialSuckerComponent.barrel_size=1500
     entities[e].components.MaterialInventoryComponent.do_reactions=0
@@ -241,42 +293,130 @@ do
     EntityAddTag(e,"extra_potion_capacity")
     assert(NHTransfers.deposit(state,player,"warehouse",e))
     assert(not EntityGetIsAlive(e) and #state.warehouse==1)
+    state=assert(NHStore.load())
+    local stored=state.warehouse[1].item
+    assert(NHPotion.isMaterialContainer(stored) and NHStore.salvageYield(stored,"store_contents")==1)
     local ok, restored = NHTransfers.withdraw(state,player,1,"warehouse")
     assert(ok and restored~=e and EntityGetIsAlive(restored) and #state.warehouse==0)
     local record = assert(NHPotion.capture(restored))
     assert(record.materials.water==683 and record.materials.slime==17 and record.capacity==1500)
     assert(record.reactions==0 and record.hp==0.25 and record.extra_capacity)
+    itemAI.check(restored,false)
+    record.aiKnowledge.future_ai_state=7
+    assert(not NHPotion.isMaterialContainer(record) and not NHStore.salvageYield(record,"store_contents"))
+    assert(not NHPotion.restore(record,0,0) and entities[last].killed)
     print("Warehouse refused modified flasks intact and round-tripped a native mixed flask including its transfer receipt.")
 
-    -- A held native flask can have its stock glass-break callback disabled
-    -- even without EW. Preserve that state explicitly when importing an EW flask.
-    dofile("mods/noita_hideout/files/ew_items.lua")
-    NHEW={enabled=function() return true end,ready=function() return true end,issuer=function() return "A" end,
-        localBody=function(id) return id==player end}
     local quick=EntityLoad("inventory_quick")
-    entities[quick].name,entities[quick].parent="inventory_quick",player
+    entities[quick].components,entities[quick].name,entities[quick].parent={},"inventory_quick",player
+    do
+        local stock=bottle("data/entities/items/pickup/potion_water.xml")
+        entities[stock].parent=nil
+        local marker=itemAI.addStock(stock,"potion",true)
+        assert(assert(NHPotion.capture(stock)).aiKnowledge==nil)
+        itemAI.checkStock(stock,marker,"potion",true)
+
+        ComponentSetValue2(marker,"_tags","quest_profile")
+        assert(assert(NHPotion.capture(stock)).aiKnowledge.tags=="quest_profile")
+        ComponentSetValue2(marker,"_tags","")
+        ComponentSetValue2(marker,"is_known",true)
+        assert(assert(NHPotion.capture(stock)).aiKnowledge.is_known)
+        ComponentSetValue2(marker,"is_known",false)
+
+        EntitySetComponentIsEnabled(stock,marker,false)
+        local ground=assert(NHPotion.capture(stock))
+        assert(ground.aiKnowledge.enabled==false and ground.aiKnowledge.is_consumed)
+        local explicit=assert(NHPotion.restore(ground,0,0))
+        itemAI.checkStock(explicit,EntityGetFirstComponentIncludingDisabled(explicit,"ItemAIKnowledgeComponent"),"potion",false)
+        entities[stock].parent=quick
+        assert(assert(NHPotion.capture(stock)).aiKnowledge==nil)
+        itemAI.checkStock(stock,marker,"potion",false)
+
+        assert(NHTransfers.deposit(state,player,"warehouse",stock))
+        state=assert(NHStore.load())
+        local entry=state.warehouse[1].item
+        assert(entry.aiKnowledge==nil and entry.materials.water==683)
+        local ok,copy=NHTransfers.withdraw(state,player,1,"warehouse")
+        assert(ok and assert(NHPotion.capture(copy)).materials.water==683)
+        assert(not EntityGetFirstComponentIncludingDisabled(copy,"ItemAIKnowledgeComponent"))
+
+        -- 0.42.41 stored this literal even for a stock NPC assessment.
+        entry.aiKnowledge={is_consumed=true}
+        local old=assert(NHPotion.restore(entry,0,0))
+        itemAI.checkStock(old,EntityGetFirstComponentIncludingDisabled(old,"ItemAIKnowledgeComponent"),"potion",true)
+        assert(entry.aiKnowledge.is_consumed and assert(NHPotion.capture(old)).aiKnowledge==nil)
+
+        local jar=bottle("data/entities/items/pickup/jar.xml")
+        local jarAI=itemAI.addStock(jar,"potion",true)
+        assert(assert(NHPotion.capture(jar)).aiKnowledge.is_consumed)
+        itemAI.checkStock(jar,jarAI,"potion",true)
+        local wrong=bottle("data/entities/items/pickup/potion.xml")
+        itemAI.addStock(wrong,"wand",true)
+        assert(assert(NHPotion.capture(wrong)).aiKnowledge.is_ranged_weapon)
+
+        -- The mock normally stores one component per type. Expose a second
+        -- stock component so even a first component omitted from the record counts.
+        local all=EntityGetAllComponents
+        function EntityGetAllComponents(id)
+            local list=all(id)
+            if id==old then list[#list+1]=jarAI end
+            return list
+        end
+        local captured,reason=NHPotion.capture(old)
+        EntityGetAllComponents=all
+        assert(not captured and reason:find("Duplicate",1,true) and EntityGetIsAlive(old))
+    end
+    local breakPath="data/scripts/items/potion_glass_break.lua"
     local function setBreak(id)
         local lua=entities[id].components.LuaComponent
         lua.script_item_picked_up,lua.remove_after_executed=nil,false
-        lua.script_death="data/scripts/items/potion_glass_break.lua"
+        lua.script_death=breakPath
     end
-    local flask=bottle("data/entities/items/pickup/potion_empty.xml")
-    entities[flask].parent=quick
-    function EntityGetRootEntity(id) return id==flask and player or entities[id].parent or id end
-    setBreak(flask)
-    entities[flask].components.LuaComponent.disabled=true
-    EntityAddComponent2(flask,"VariableStorageComponent",{name="ew_gid_lid",value_string="18446744073709551604",
-        value_int=24,value_bool=false,value_float=0})
-    local ewRecord=assert(NHPotion.capture(flask))
-    assert(ewRecord.disabledBreak and ewRecord.materials.water==683)
     local oldLoad=EntityLoad
     function EntityLoad(path,...)
         local id=oldLoad(path,...)
         setBreak(id)
         return id
     end
-    function EntitySetComponentIsEnabled(_,c,enabled) comp(c).disabled=not enabled end
+    -- A saved solo quick-slot flask can have its stock world break hook disabled.
+    local solo=bottle("data/entities/items/pickup/potion_water.xml")
+    local hook=entities[solo].components.LuaComponent
+    hook.disabled=true
+    itemAI.add(solo,true)
+    entities[solo].parent=nil
+    local accepted,why=NHPotion.capture(solo)
+    assert(not accepted and why:find("disabled",1,true) and EntityGetIsAlive(solo))
+    entities[solo].parent=quick
+    hook.script_death="mods/example/quest_break.lua"
+    accepted,why=NHTransfers.deposit(state,player,"warehouse",solo)
+    assert(not accepted and why:find(hook.script_death,1,true) and EntityGetRootEntity(solo)==player and EntityGetIsAlive(solo))
+    hook.script_death=breakPath
+    assert(NHTransfers.deposit(state,player,"warehouse",solo))
+    state=assert(NHStore.load())
+    assert(state.warehouse[1].item.disabledBreak and state.warehouse[1].item.materials.water==683)
+    local withdrawn,copy=NHTransfers.withdraw(state,player,1,"warehouse")
+    assert(withdrawn and EntityGetIsAlive(copy))
+    assert(entities[copy].components.LuaComponent.script_death==breakPath and entities[copy].components.LuaComponent.disabled)
+    itemAI.check(copy,true)
+
+    -- EW carries the same world hook alongside its DES identity.
+    dofile("mods/noita_hideout/files/ew_items.lua")
+    NHEW={enabled=function() return true end,ready=function() return true end,issuer=function() return "A" end,
+        localBody=function(id) return id==player end}
+    local flask=bottle("data/entities/items/pickup/potion_empty.xml")
+    entities[flask].parent=quick
+    entities[flask].components.LuaComponent.disabled=true
+    EntityAddComponent2(flask,"VariableStorageComponent",{name="ew_gid_lid",value_string="18446744073709551604",
+        value_int=24,value_bool=false,value_float=0})
+    local ewStock=itemAI.addStock(flask,"potion",false)
+    assert(assert(NHPotion.capture(flask)).aiKnowledge==nil)
+    itemAI.checkStock(flask,ewStock,"potion",false)
+    EntityRemoveComponent(flask,ewStock)
+    itemAI.add(flask,true)
+    local ewRecord=assert(NHPotion.capture(flask))
+    assert(ewRecord.disabledBreak and ewRecord.materials.water==683)
     local roundTrip=assert(NHPotion.restore(ewRecord,0,0))
+    itemAI.check(roundTrip,true)
     assert(entities[roundTrip].components.LuaComponent.disabled)
     assert(entities[roundTrip].components.MaterialInventoryComponent.count_per_material_type[3]==683)
     assert(not entities[roundTrip].components.VariableStorageComponent)

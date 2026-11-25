@@ -1,0 +1,11 @@
+<Entity name="$nh_hideout_dragon_king" tags="wand,nh_katana,noita_hideout_katana,noita_hideout_dragon_king,teleportable_NOT">
+    <Base file="data/entities/base_item.xml">
+        <ItemComponent item_name="$nh_hideout_dragon_king" ui_description="$nh_hideout_dragon_king_desc" ui_sprite="mods/noita_hideout/files/items/dragon_king_icon.png" preferred_inventory="QUICK" always_use_item_name_in_ui="1" is_consumable="0" is_stackable="0" uses_remaining="90" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/dragon_king_sprite.xml" has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" z_index="-1.5" />
+    </Base>
+    <LuaComponent _tags="enabled_in_hand,enabled_in_world" script_source_file="mods/noita_hideout/files/katana_visual_tick.lua" execute_every_n_frame="1" />
+    <AbilityComponent use_gun_script="1" click_to_use="0" ui_name="$nh_hideout_dragon_king" sprite_file="mods/noita_hideout/files/items/dragon_king_sprite.xml" mana="0" mana_max="0" mana_charge_speed="0" rotate_in_hand="1" throw_as_item="0">
+        <gun_config shuffle_deck_when_empty="0" deck_capacity="0" actions_per_round="1" reload_time="0" />
+    </AbilityComponent>
+    <HotspotComponent _tags="shoot_pos" offset.x="0" offset.y="0" />
+</Entity>

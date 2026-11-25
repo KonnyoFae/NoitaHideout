@@ -1,0 +1,8 @@
+<Entity name="Katana stasis field" tags="nh_katana_field">
+    <SpriteComponent _tags="nh_katana_boundary" image_file="data/particles/area_indicator_064_blue.png"
+        offset_x="32" offset_y="32" alpha="0.45" emissive="1" z_index="-2"
+        has_special_scale="1" special_scale_x="5" special_scale_y="5" />
+    <VariableStorageComponent _tags="nh_katana_field_clock" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/katana_field_tick.lua" execute_every_n_frame="1"
+        vm_type="ONE_PER_COMPONENT_INSTANCE" />
+</Entity>

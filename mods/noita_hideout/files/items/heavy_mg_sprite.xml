@@ -1,0 +1,4 @@
+<Sprite filename="mods/noita_hideout/files/items/heavy_mg_anim.png" offset_x="2" offset_y="8" default_animation="default">
+    <RectAnimation name="default" pos_x="0" pos_y="0" frame_width="24" frame_height="24" frame_count="1" frames_per_row="1" frame_wait="1" loop="1" />
+    <RectAnimation name="fire" pos_x="0" pos_y="0" frame_width="24" frame_height="24" frame_count="3" frames_per_row="3" frame_wait="0.1" loop="1" />
+</Sprite>

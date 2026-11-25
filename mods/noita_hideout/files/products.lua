@@ -1,6 +1,8 @@
 -- Physical workshop products use the same capture/restore journal as ordinary equipment.
 NHProducts={icons={}}
 local items="mods/noita_hideout/files/items/"
+local supportGround=dofile("mods/noita_hideout/files/support_ground.lua")
+NHProducts.repairNearbySupportWeapons=supportGround.near
 local healing_items=NHMedkits.types
 local function item_uses(entity,product)
     local item=EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent")
@@ -195,14 +197,14 @@ local function eat(player,food,pay)
     return true
 end
 
-function NHProducts.aim(player,x,y)
+function NHProducts.aim(player,x,y,preferMouse)
     local controls=EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")
     if not controls then return end
     if not x then x,y=EntityGetTransform(player) end
     local dx,dy=ComponentGetValue2(controls,"mAimingVectorNormalized")
     -- A mouse click aims at the world cursor, even when a gamepad is connected.
     local cursor=false
-    if InputIsMouseButtonDown(1) or InputIsMouseButtonDown(2) or not GameGetIsGamepadConnected() then
+    if preferMouse or InputIsMouseButtonDown(1) or InputIsMouseButtonDown(2) or not GameGetIsGamepadConnected() then
         local mx,my=DEBUG_GetMouseWorld()
         if type(mx)=="number" and type(my)=="number" then dx,dy,cursor=mx-x,my-y,true end
     end
@@ -215,35 +217,54 @@ end
 -- Old physical items can still carry the previous sprite pivot or no muzzle.
 -- Refresh both when taking a gun in hand, including guns loaded from a save.
 local tubeMount={6,7,10,-4.5}
+local pistolMount={0,0,6.25,-2.5,heldScale=0.25}
 local mounts={
-    derringer={4,7,12,-2}, flare_gun={3,6,13,-3.5},
+    derringer={4,7,12,-2}, flare_gun=pistolMount, sedative_launcher=pistolMount,
     magic_tube=tubeMount, fire_tube=tubeMount, frost_tube=tubeMount, shock_tube=tubeMount,
-    heavy_mg={2,6,10,-2}, auto_grenade={2,7,10,-2}, missile_launcher={4,7,7,-3},
+    -- Animated weapons carry their grip pivot in their sprite XML.
+    heavy_mg={0,0,11,1.5}, auto_grenade={2,7,10,-2}, missile_launcher={4,7,7,-3},
     heavy_plasma={3,7,9,-4}, railgun={4,9,11,-3}, bfg={4,10,11,-3},
 }
-local mounted,currentMount
+local mounted,currentMount,scaledSprite
 local function refreshMount(weapon)
     for kind,mount in pairs(mounts) do
         if EntityHasTag(weapon,"noita_hideout_"..kind) then
             local sprite=EntityGetFirstComponentIncludingDisabled(weapon,"SpriteComponent","enabled_in_hand")
+            local gun=NHGuns.types[kind]
+            local original=gun.heldSprite or gun.displaySprite
             if sprite then
                 local suffix=(kind=="railgun" or kind=="bfg") and ".png" or "_world.png"
-                ComponentSetValue2(sprite,"image_file",items..kind..suffix)
-                ComponentSetValue2(sprite,"offset_x",mount[1])
-                ComponentSetValue2(sprite,"offset_y",mount[2])
+                local scale=original and (mount.heldScale or 0.5) or 1
+                ComponentSetValue2(sprite,"image_file",original or items..kind..suffix)
+                ComponentSetValue2(sprite,"offset_x",mount[1]/scale)
+                ComponentSetValue2(sprite,"offset_y",mount[2]/scale)
+                if gun.heldSprite then
+                    ComponentSetValue2(sprite,"rect_animation","default")
+                    ComponentSetValue2(sprite,"next_rect_animation","default")
+                end
+                if original then
+                    supportGround.repair(weapon,kind)
+                    ComponentSetValue2(sprite,"has_special_scale",true)
+                    ComponentSetValue2(sprite,"special_scale_x",scale)
+                    ComponentSetValue2(sprite,"special_scale_y",scale)
+                    if not EntityGetFirstComponentIncludingDisabled(weapon,"LuaComponent","nh_equipment_mirror") then
+                        EntityAddComponent2(weapon,"LuaComponent",{_tags="enabled_in_hand,nh_equipment_mirror",
+                            script_source_file="mods/noita_hideout/files/equipment_sprite_mirror.lua",execute_every_n_frame=1})
+                    end
+                end
                 EntityRefreshSprite(weapon,sprite)
             end
             local hotspot=EntityGetFirstComponentIncludingDisabled(weapon,"HotspotComponent","shoot_pos")
                 or EntityAddComponent2(weapon,"HotspotComponent",{_tags="shoot_pos"})
             ComponentSetValue2(hotspot,"offset",mount[3],mount[4])
-            return mount
+            return mount,original and sprite
         end
     end
 end
 
 function NHProducts.poseSupportGun(player,weapon)
     if not weapon or not (EntityHasTag(weapon,"nh_support_weapon") or EntityHasTag(weapon,"nh_loaded_gun")) then mounted=nil; return end
-    if weapon~=mounted then currentMount=refreshMount(weapon); mounted=weapon end
+    if weapon~=mounted then currentMount,scaledSprite=refreshMount(weapon); mounted=weapon end
     if not currentMount then return end
     local arm=(EntityGetAllChildren(player,"player_arm_r") or {})[1]
     local x,y
@@ -253,6 +274,12 @@ function NHProducts.poseSupportGun(player,weapon)
     if not dx then return end
     local flip=dx<0 and -1 or 1
     EntityApplyTransform(weapon,x,y,math.atan2(dy,dx),1,flip)
+    -- Special scale overrides the entity's flip. Apply the current aim
+    -- immediately, including when firing on the same frame as a turn.
+    if scaledSprite then
+        local scaleY=ComponentGetValue2(scaledSprite,"special_scale_y")
+        if scaleY*flip<0 then ComponentSetValue2(scaledSprite,"special_scale_y",-scaleY) end
+    end
     -- Use the very pose applied to the sprite this frame for the launch point.
     local forward,side=currentMount[3],currentMount[4]*flip
     return dx,dy,x+dx*forward-dy*side,y+dy*forward+dx*side,distance
@@ -306,6 +333,9 @@ local function throw(player,definition,pay,aim,weapon)
     -- the vanilla shoot_projectile helper after the engine registers the shot.
     local vx,vy=dx*definition.speed,dy*definition.speed
     GameShootProjectile(player,x,y,x+vx,y+vy,projectile)
+    if definition.heldSprite and scaledSprite and EntityGetIsAlive(weapon) then
+        NHGuns.animateShot(player,weapon,scaledSprite,definition.fireFrames)
+    end
     if tipX then
         local px,py,angle,sx,sy=EntityGetTransform(projectile)
         if px~=x or py~=y then EntityApplyTransform(projectile,x,y,angle,sx,sy) end
@@ -345,8 +375,7 @@ function NHProducts.fireHeld(player)
             local rounds=NHGuns.physicalRounds(kind,entity,item)
             if not NHStore.validBandageCount(rounds) then return end
             return throw(player,gun,function()
-                if rounds==1 then GameKillInventoryItem(player,entity)
-                else ComponentSetValue2(item,"uses_remaining",rounds-1) end
+                NHGuns.consumeRound(player,entity,item,rounds)
                 return true
             end,nil,entity)
         end

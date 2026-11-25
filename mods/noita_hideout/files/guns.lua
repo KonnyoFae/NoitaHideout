@@ -4,10 +4,14 @@ local G={
         projectile=root.."projectiles/patrol_drone.xml",
         noteZh="左键向准星位置派出一架无人机，自主盘旋警戒，发现敌人后冲向目标自爆。预装4发。",
         noteEn="Click to send a drone to the reticle. It circles the area and dives into a nearby enemy to detonate. Four launches."},
-    flare_gun={zh="费洛蒙发射器",en="Pheromone launcher",capacity=4,speed=360,powder=5,gold=5,seconds=5,
-        projectile=root.."projectiles/pheromone_round.xml",
-        noteZh="左键发射一枚费洛蒙弹，命中后溅出大量费洛蒙，短暂魅惑附近敌人。预装4发。",
-        noteEn="Click to fire a capsule. It splashes pheromone on impact and briefly charms nearby enemies. Four shots."}
+    flare_gun={zh="智能费洛蒙手枪",en="Smart pheromone pistol",capacity=20,speed=300,powder=20,resources={spice=10},gold=200,seconds=5,
+        projectile=root.."projectiles/smart_pheromone.xml",
+        noteZh="20 发智能费洛蒙弹。附着 15 秒，脱落后再魅惑 60 秒。受伤时魅惑仍然有效。",
+        noteEn="Twenty homing pheromone darts. Each sticks for 15 seconds, then charms for another 60 seconds. The charm persists through damage."},
+    sedative_launcher={zh="智能麻醉枪",en="Smart tranquilizer gun",capacity=20,speed=300,powder=20,resources={herb=10},gold=50,seconds=5,
+        projectile=root.."projectiles/sedative_dart.xml",
+        noteZh="20 发无伤追踪麻醉弹。附着期间持续麻醉 15 秒，脱落后最多再睡 300 秒，此时受伤会醒。",
+        noteEn="Twenty harmless homing darts. Each sedates for 15 seconds while attached, then for up to 300 more seconds. Damage wakes the target after the dart falls off."},
 }
 local function tube(zh,en,effectZh,effectEn)
     return {zh=zh,en=en,isTube=true,capacity=6,speed=280,seconds=10,
@@ -23,6 +27,7 @@ local function supportGun(zh,en,capacity,speed,interval,charge,file,flash,noteZh
 end
 G.heavy_mg=supportGun("重机枪","Heavy machine gun",320,1080,5,nil,root.."projectiles/support_mg.xml","mg",
     "按住左键发射高速曳光弹，预装320发","Hold for sustained tracer fire. 320 rounds.")
+G.heavy_mg.heldSprite=root.."items/heavy_mg_sprite.xml"
 G.auto_grenade=supportGun("连发榴弹发射器","Automatic grenade launcher",36,660,15,nil,root.."projectiles/support_grenade.xml","grenade",
     "按住左键连射低弧线碰炸榴弹，预装36发","Hold to fire low-arc impact grenades. 36 rounds.")
 G.missile_launcher=supportGun("导弹发射器","Missile launcher",12,290,nil,nil,root.."projectiles/support_missile.xml","missile",
@@ -33,9 +38,21 @@ G.heavy_plasma=supportGun("重等离子炮","Heavy plasma cannon",24,430,14,nil,
     "按住左键连射等离子弹，命中点向八个方向射出短等离子切割束，预装24发","Hold to fire plasma bolts. Each impact sends eight short plasma cutters outwards. 24 rounds.")
 G.bfg=supportGun("BFG","BFG",4,145,nil,nil,root.."projectiles/support_bfg.xml","bfg",
     "光球吞噬地形，吸附敌人并持续电击，向周围释放五属性绿电。冲击波扩张后收回球心，引发核爆。预装4发","The terrain-eating orb latches on and electrocutes its target. Green arcs and both shockwave passes deal five damage types. The returning wave triggers a nuclear blast. Four shots.")
+-- The native quick slot has its own 16px icon. Draw the original texels
+-- directly in the world and in custom inventory slots.
+for _,kind in ipairs({"heavy_mg","auto_grenade","missile_launcher","heavy_plasma"}) do
+    G[kind].displaySprite=root.."items/"..kind.."_art.png"
+end
+for _,kind in ipairs({"flare_gun","sedative_launcher"}) do
+    G[kind].displaySprite=root.."items/"..kind.."_art.png"
+    G[kind].heldSprite=root.."items/"..kind.."_sprite.xml"
+    G[kind].groundPivot=16
+    G[kind].fireFrames=6
+end
 for kind,gun in pairs(G) do gun.projectile=gun.projectile or root.."projectiles/"..kind..".xml" end
 local M={types=G}
--- Each old flare was an unused, single-shot pistol. Keep one full new pistol per old one.
+-- The original one-shot signal guns were exchanged for four rounds each.
+-- Later ammo capacity changes preserve that exchange and the physical charge count.
 function M.convertFlares(count)
     if not NHStore.validBandageCount(count) then return end
     -- An engine item has one signed 32-bit charge counter, even for very large legacy stacks.
@@ -52,9 +69,42 @@ function M.physicalRounds(kind,entity,item)
     end
     return n
 end
+
+local rewind
+function M.consumeRound(player,entity,item,rounds)
+    if rounds==1 then
+        GameKillInventoryItem(player,entity)
+        return
+    end
+    if EntityHasTag(entity,"nh_rewind_equipment") then
+        rewind=rewind or dofile(root.."rewind_loadout.lua")
+        rewind.spentRound(player,entity)
+    end
+    ComponentSetValue2(item,"uses_remaining",rounds-1)
+end
 -- A hold belongs to the item that received the initial press. UI capture or
 -- switching items cancels the charge and cannot start an automatic burst.
 local triggerItem,nextShot
+local firingOwner,firingItem,fireEnds
+local function setAnimation(item,sprite,name)
+    if ComponentGetValue2(sprite,"rect_animation")==name then return end
+    ComponentSetValue2(sprite,"rect_animation",name)
+    ComponentSetValue2(sprite,"next_rect_animation",name)
+    EntityRefreshSprite(item,sprite)
+end
+local function finishBurst()
+    if EntityGetIsAlive(firingItem) then
+        local sprite=EntityGetFirstComponentIncludingDisabled(firingItem,"SpriteComponent","enabled_in_hand")
+        if sprite then setAnimation(firingItem,sprite,"default") end
+    end
+    firingOwner,firingItem,fireEnds=nil,nil,nil
+end
+function M.animateShot(player,item,sprite,frames)
+    if firingItem and firingItem~=item then finishBurst() end
+    setAnimation(item,sprite,"fire")
+    -- Each confirmed round renews the animation. The heavy MG loops three frames at 10 fps.
+    firingOwner,firingItem,fireEnds=player,item,GameGetFrameNum()+(frames or 18)
+end
 -- Brief sparks converge around the held weapon. No effect entity survives a cancelled charge.
 local function chargeSparks(item,remaining)
     if remaining%4~=0 then return end
@@ -68,6 +118,8 @@ local function chargeSparks(item,remaining)
     end
 end
 function M.trigger(item,edge,frame)
+    if firingItem and (frame>=fireEnds or not EntityGetIsAlive(firingOwner)
+        or (item or NHNative.held(firingOwner))~=firingItem) then finishBurst() end
     if edge then triggerItem,nextShot=item,frame
     elseif not item or item~=triggerItem then triggerItem=nil end
     if not item or item~=triggerItem then return end
@@ -93,7 +145,7 @@ end
 function M.recipe(kind,id,inputs,resources,count,zh,en)
     local g=G[kind]
     return {id=id or kind,zh=zh or g.zh,en=en or g.en,category="weapons",facility="grenade",durationFrames=g.seconds*60,
-        count=count or 1,goldCost=g.gold,inputs=inputs or {{name="gunpowder",amount=g.powder}},resources=resources or (kind=="flare_gun" and {fiber=2} or nil),
+        count=count or 1,goldCost=g.gold,inputs=inputs or {{name="gunpowder",amount=g.powder}},resources=resources or g.resources,
         item={kind=kind,name="$nh_hideout_"..kind,icon=root.."items/"..kind..".png",remaining=g.capacity,count=count or 1},
         noteZh=g.noteZh,noteEn=g.noteEn}
 end
@@ -107,6 +159,12 @@ function M.rounds(item)
 end
 function M.unpack(item,rounds)
     local capacity=G[item.kind].capacity
+    if rounds==0 then
+        -- A watch may keep the physical item for the rest of its window.
+        -- The inventory tooltip should show this single empty shell.
+        item.count,item.remaining=1,0
+        return
+    end
     item.count=math.ceil(rounds/capacity)
     item.remaining=(rounds-1)%capacity+1
 end

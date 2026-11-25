@@ -63,84 +63,88 @@ commit()
 NHFarm.resetClock()
 assert(NHFarm.observe(s,1299)==300)
 NHFarm.suspendClock()
-assert(NHFarm.observe(s,1500)==300 and NHFarm.observe(s,1800)==600 and NHFarm.due(s,600))
+assert(NHFarm.observe(s,1500)==300 and NHFarm.observe(s,1800)==600 and not NHFarm.due(s,600))
 assert(NHFarm.plant(s,request(2,"active_herb"),600))
 assert(s.farm.time==600 and s.farm.plots[2].readyAt==18600)
-local switch=request(1,"sugar")
-assert(NHFarm.observe(s,8300)==7100)
-assert(NHFarm.plant(s,switch,7100) and s.farm.plots[1].readyAt==7200)
-assert(not NHFarm.plant(s,switch,7110) and not NHFarm.plant(s,request(1,"sugar"),7110))
-assert(NHFarm.observe(s,8400)==7200 and NHFarm.due(s,7200))
-s.resources.sugar=NHStore.maxResourceAmount-3
-local changed,produced=NHFarm.sync(s,7200)
-assert(changed and not produced and not NHFarm.due(s,7200))
-assert(NHFarm.view(s,"zh",7200).plots[1].blocked)
-assert(not s.resources.fiber and not s.summons)
-assert(NHFarm.plant(s,request(1,"fiber"),7250))
-assert(s.farm.pending.sugar==1 and s.farm.plots[1].readyAt==16200)
-assert(cropRates(7250).sugar==0 and cropRates(7250).fiber==3)
-assert(not NHFarm.plant(s,sow,7250))
-
--- Death checkpoints elapsed gameplay, leaving each field's deadline intact.
-assert(NHFarm.sync(s,8000) and NHStore.endRun(s,s.runSerial))
-commit()
-NHStore.newRun(s)
-assert(NHFarm.observe(s,100)==8000)
-assert(NHFarm.observe(s,10700)==18600 and NHFarm.sync(s,18600))
-assert(s.farm.plots[1].crop=="fiber" and s.farm.plots[1].readyAt==23400)
-assert(s.farm.plots[2].crop=="active_herb" and s.farm.plots[2].readyAt==36600)
-assert(s.resources.fiber==6 and s.resources.active_herb==3 and not s.materials.fiber)
-assert(not NHFarm.sync(s,18600) and not NHFarm.due(s,18600))
--- Freeing room delivers the old sugar batch once, including its card roll.
-s.resources.sugar=nil
-s.summons.farm=31
+s.summons={farm=31,pending={}}
+local first=3600
+assert(not NHFarm.due(s,first-1) and NHFarm.due(s,first))
+assert(NHFarm.sync(s,first) and s.resources.fiber==3 and s.summons.farm==31)
+assert(not s.resources.active_herb and not NHFarm.sync(s,first))
+-- Fill the fiber ledger. The earned balance and the independently due card
+-- survive a failed write and enter the committed profile exactly once.
+s.resources.fiber=NHStore.maxResourceAmount
 commit()
 local stale=assert(NHStore.load())
-assert(NHFarm.due(s,18600))
-local ok,stock,awards=NHFarm.sync(s,18600)
-assert(ok and stock and awards[1]=="dryad" and not s.farm.pending and s.resources.sugar==4)
+local function settleFull(draft)
+    local changed,_,awards=NHFarm.sync(draft,7200)
+    assert(changed and #awards==1 and awards[1]=="dryad")
+    assert(draft.resources.fiber==NHStore.maxResourceAmount)
+end
+settleFull(s)
 failHead=true
 assert(not NHStore.commit(s))
 failHead=false
 s=assert(NHStore.load())
-assert(s.farm.pending.sugar==1 and not s.resources.sugar and s.summons.farm==31)
-assert(NHFarm.sync(s,18600) and NHStore.commit(s))
-assert(NHFarm.sync(stale,18600) and not NHStore.commit(stale))
-s=assert(NHStore.load())
-assert(s.resources.sugar==4 and not NHFarm.sync(s,18600))
--- Restoring an earlier world of the same run replays its clock without
--- doubling payment for the already committed span.
-globals.noita_hideout_farm_clock=s.profile.."/"..s.runSerial.."/18000"
+assert(s.summons.farm==31 and #s.warehouse==0)
+settleFull(s)
+commit()
+settleFull(stale)
+assert(not NHStore.commit(stale))
+assert(s.summons.farm~=31 and #s.warehouse==1)
+assert(NHFarm.view(s,"zh",7200).plots[1].blocked and not NHFarm.due(s,7200))
+s.resources.fiber=NHStore.maxResourceAmount-3
+assert(NHFarm.due(s,7200) and NHFarm.sync(s,7200) and not NHFarm.sync(s,7200))
+assert(s.resources.fiber==NHStore.maxResourceAmount and #s.warehouse==1)
+
+-- Preserve already worked fiber on a switch; sugar starts earning at the switch.
+s.resources.fiber=nil
+local switch=request(1,"sugar")
+assert(NHFarm.plant(s,switch,9000) and not NHFarm.plant(s,switch,9001))
+assert(not NHFarm.plant(s,request(1,"sugar"),9001))
+assert(NHFarm.sync(s,10800) and s.resources.fiber==1 and not s.resources.sugar)
+local sugarRate=cropRates(10800).sugar
+assert(math.abs(sugarRate-1.6*1.06)<1e-9)
+assert(NHFarm.sync(s,11500) and NHStore.endRun(s,s.runSerial))
+commit()
+NHStore.newRun(s)
+assert(NHFarm.observe(s,100)==11500)
+assert(NHFarm.observe(s,10200)==21600 and NHFarm.sync(s,21600))
+assert(s.resources.sugar==5 and s.resources.active_herb==3 and not s.materials.sugar)
+assert(not NHFarm.sync(s,21600) and not NHFarm.due(s,21600))
+globals.noita_hideout_farm_clock=s.profile.."/"..s.runSerial.."/21000"
 NHFarm.resetClock()
-assert(NHFarm.observe(s,0)==18600 and NHFarm.observe(s,600)==18600)
-assert(not NHFarm.due(s,18600) and NHFarm.observe(s,601)==18601)
-assert(NHFarm.sync(s,30600) and s.resources.fiber==18 and s.resources.active_herb==3)
-assert(NHFarm.plant(s,request(1,"grain"),30600) and s.farm.plots[1].readyAt==37800)
+assert(NHFarm.observe(s,0)==21600 and NHFarm.observe(s,600)==21600)
+assert(not NHFarm.due(s,21600) and NHFarm.observe(s,601)==21601)
 
 s.materials.soil,s.materials.water=1050,700
 assert(build("farmland") and build("farmland") and #NHFarm.view(s,"en",s.farm.time).plots==4)
 assert(not build("farmland") and not s.materials.soil and not s.materials.water)
-assert(NHFarm.plant(s,request(3,"grain"),s.farm.time))
-local rates=cropRates(s.farm.time)
-assert(rates.grain==4 and rates.active_herb==0.6 and rates.fiber==0 and rates.herb==0)
+assert(NHFarm.plant(s,request(1,"grain"),21600))
+assert(NHFarm.plant(s,request(3,"grain"),21600))
+local rates=cropRates(21600)
+assert(math.abs(rates.grain-4.4)<1e-9 and math.abs(rates.active_herb-0.66)<1e-9 and rates.fiber==0)
 local deadline=s.farm.plots[3].readyAt
-assert(NHFarm.plant(s,request(3,"herb"),s.farm.time) and s.farm.plots[3].readyAt==deadline)
-rates=cropRates(s.farm.time)
-assert(rates.grain==2 and math.abs(rates.herb-4/3)<1e-9)
+assert(NHFarm.plant(s,request(3,"herb"),21600) and s.farm.plots[3].readyAt==deadline)
+rates=cropRates(21600)
+assert(math.abs(rates.grain-2.2)<1e-9 and math.abs(rates.herb-4.4/3)<1e-9)
 assert(not s.farm.plots[4])
 
--- Write a pre-farm shaped payload with the real snapshot serializer.
--- Old manual fields that sat ripe for many cycles held only one earned crop.
-s.farm.passive=nil
-s.farm.plots[1].readyAt=7200
-commit()
-assert(s.farm.passive and s.farm.plots[1].readyAt==30600 and not s.resources.grain)
-assert(NHFarm.sync(s,30600) and s.resources.grain==6)
+-- Serialize a pre-passive snapshot: a long-overdue manual field held one harvest.
+s.farm={time=21600,plots={[1]={token=1,crop="grain",readyAt=7200}}}
 local validateFarm=NHFarm.validate
+NHFarm.validate=function() end
+assert(NHStore.commit(s))
+NHFarm.validate=validateFarm
+s=assert(NHStore.load())
+assert(s.farm.passive and not s.resources.grain)
+assert(NHFarm.sync(s,21600) and s.resources.grain==6)
+commit()
+assert(not NHFarm.sync(s,21600) and s.resources.grain==6)
 s.farm,s.levels.farmland,s.levels.agri_equipment=nil,nil,nil
 NHFarm.validate=function() end
 assert(NHStore.commit(s))
 NHFarm.validate=validateFarm
 s=assert(NHStore.load())
-assert(s.farm.time==0 and not next(s.farm.plots) and s.resources.fiber==18)
-print("Farming: passive income, switching before maturity and with a full store, legacy schedules and atomic card rewards passed.")
+assert(s.farm.time==0 and not next(s.farm.plots) and s.resources.grain==6)
+print("Farming: minute balances, crop switching, reloads, full stock, manual-save adoption and atomic card rewards passed.")

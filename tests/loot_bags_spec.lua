@@ -33,8 +33,13 @@ end
 NHFarm.sync(state,119*60)
 assert(quantity("travel_satchel")==0)
 NHFarm.sync(state,120*60)
-assert(quantity("travel_satchel")==1 and quantity("travel_pack")==1 and quantity("loot_case")==0)
+assert(quantity("travel_satchel")==0 and quantity("travel_pack")==0 and quantity("loot_case")==0)
 NHFarm.sync(state,300*60)
+assert(math.abs(NHFarm.income.petFraction(state,"travel_pack")-4/30)<1e-9)
+-- Simulate an old release with four earned pairs and one case awaiting delivery.
+state.farm.minuteIncome={remainder={},open={},owed={dog=4,cat=1},
+    openRare={counts={},private={}},rare={counts={},private={}}}
+assert(NHFarm.sync(state,300*60))
 assert(quantity("travel_satchel")==4 and quantity("travel_pack")==4 and quantity("loot_case")==1)
 assert(NHStore.commit(state))
 state=assert(NHStore.load())
@@ -46,11 +51,12 @@ while true do
     table.insert(state.warehouse,{slot=slot,id=state.nextItemId,item={kind="bandage"}})
     state.nextItemId=state.nextItemId+1
 end
+state.farm.minuteIncome.owed.dog=1
 NHFarm.sync(state,360*60)
-assert(quantity("travel_satchel")==4 and state.farm.herds.dog.owed==1)
+assert(quantity("travel_satchel")==4 and not NHFarm.due(state,360*60))
 table.remove(state.warehouse)
 NHFarm.sync(state,360*60)
-assert(quantity("travel_satchel")==5 and quantity("travel_pack")==1 and state.farm.herds.dog.owed==0)
+assert(quantity("travel_satchel")==5 and quantity("travel_pack")==1 and not NHFarm.sync(state,360*60))
 local use=dofile(root.."inventory_use.lua")
 local slot,index=NHStore.stackSlot(state,"warehouse",{kind="travel_satchel"})
 local row=state.warehouse[index]
@@ -95,6 +101,7 @@ local covered={}
 local expected={{55,25,20,0,2,0},{0,40,35,25,5,2},{0,30,35,35,15,8}}
 for level,kind in ipairs(NHLootBags.order) do
     local tier=NHLootBags.types[kind]
+    local sedativeIndex
     local p=expected[level]
     assert(tier.gold==level and tier.tarot==p[5] and tier.card==p[6])
     local low=0
@@ -106,7 +113,12 @@ for level,kind in ipairs(NHLootBags.order) do
                 local id=group=="food" and entry.id or entry
                 local file=group=="dose" and assert(NHInjectors.types[id]).filename or id
                 local f=assert(io.open(root.."items/"..file..".xml","r")); f:close()
-                assert(not covered[file],"supply in multiple grade pools: "..file)
+                if file=="sedative_launcher" then
+                    assert(group=="tool" and not sedativeIndex,"duplicate or misplaced sedative launcher in "..kind)
+                    sedativeIndex=i
+                else
+                    assert(not covered[file],"supply in multiple grade pools: "..file)
+                end
                 covered[file]=true
                 for _,at in ipairs({low+1,low+p[col]}) do
                     local seq={at,i,100}
@@ -125,6 +137,17 @@ for level,kind in ipairs(NHLootBags.order) do
         low=low+p[col]
     end
     assert(low==100)
+    assert(sedativeIndex,"sedative launcher missing from "..kind)
+    for _,container in ipairs({kind,NHLootBags.packKinds[level]}) do
+        local rolls={tier.chances.food+tier.chances.medical+1,sedativeIndex,100}
+        if tier.card>0 then rolls[#rolls+1]=100 end
+        local stack={kind=container,count=2}
+        local draft={runSerial=1,closedThrough=0,warehouse={{id=1,slot=1,item=stack}}}
+        local clicked={container="warehouse",slot=1,storedId=1,kind=container,count=2}
+        assert(openWith(container,rolls,function() return use.spend(draft,1,clicked) end))
+        assert(stack.count==1 and #created==level+1+(container==kind and 0 or 2))
+        assert(created[#created]==root.."items/sedative_launcher.xml" and alive[#created])
+    end
     for i=1,100 do
         local seq={1,1,i}
         local tarot=i<=tier.tarot
@@ -134,11 +157,15 @@ for level,kind in ipairs(NHLootBags.order) do
         if companion then seq[#seq+1]=#NHCompanions.order end
         assert(openWith(kind,seq))
         local count=level+1
-        if tarot then count=count+1; assert(created[count]==root.."items/card_tarot_tower.xml") end
+        if tarot then count=count+1; assert(created[count]==root.."items/card_tarot_devil.xml") end
         if companion then count=count+1; assert(created[count]==root.."items/card_cat.xml") end
         assert(#created==count)
     end
 end
+local gunFile=assert(io.open(root.."items/sedative_launcher.xml","r"))
+local gunXml=gunFile:read("*a")
+gunFile:close()
+assert(gunXml:match('<ItemComponent%s+[^>]-uses_remaining="(%d+)"')=="20")
 for _,id in ipairs(NHInjectors.order) do assert(covered[NHInjectors.types[id].filename]) end
 for _,set in ipairs({NHMedkits.order,NHSurgeryKits.order,NHTurrets.order,NHShields.chargerOrder,
         {"ammo_pack","improved_ammo_pack","advanced_ammo_pack","flare_gun","derringer","magic_tube","fire_tube","frost_tube","shock_tube"}}) do
@@ -157,7 +184,22 @@ for level,odds in ipairs(giftOdds) do
         assert(paid==1 and #created==2 and created[1]==root.."items/"..NHLootBags.packKinds[level]..".xml")
         if i<=odds[1] then assert(created[2]==root.."items/"..NHFoods[#NHFoods].id..".xml")
         elseif i<=100-odds[3] then assert(created[2]=="data/entities/items/pickup/sun/sunstone.xml")
-        else assert(created[2]==root.."items/card_tarot_tower.xml") end
+        else assert(created[2]==root.."items/card_tarot_devil.xml") end
+    end
+end
+-- Every released card must be selectable through each physical container.
+-- Pick a main supply and suppress the separate companion roll so the last
+-- entity is always the tarot reward.
+for level,bag in ipairs(NHLootBags.order) do
+    for index,species in ipairs(NHTarot.order) do
+        local path=root.."items/card_"..species..".xml"
+        local rolls={1,1,1,index}
+        if NHLootBags.types[bag].card>0 then rolls[#rolls+1]=100 end
+        for _,kind in ipairs({bag,NHLootBags.packKinds[level]}) do
+            assert(openWith(kind,rolls) and created[#created]==path,kind.." missing "..species)
+        end
+        local gift="gift_box_"..level
+        assert(openWith(gift,{100,index}) and created[2]==path,gift.." missing "..species)
     end
 end
 created,alive,roll={},{},61
@@ -193,61 +235,8 @@ end
 created,alive,roll={},{},1
 assert(NHLootBags.open(1,"travel_satchel",function() return use.spend(state,1,ref) end))
 assert(quantity("travel_satchel")==4 and not use.peek(state,1,ref))
-local tags,health,stack,chanceRoll,rolls
-function EntityHasTag(_,tag) return tags[tag] end
-function EntityAddTag(_,tag) tags[tag]=true end
-function GetUpdatedEntityID() return 99 end
-function EntityGetFirstComponentIncludingDisabled(id,kind)
-    if kind=="ItemComponent" then assert(created[id]); return 43 end
-    assert(id==99 and kind=="DamageModelComponent")
-    if health then return 42 end
-end
-function ComponentGetValue2(model,field)
-    assert(model==42 and field=="max_hp")
-    return health
-end
-function ComponentSetValue2(item,field,value)
-    assert(item==43 and field=="uses_remaining" and value>1)
-    stack=value
-end
-function ProceduralRandomi(_,_,lo,hi)
-    assert(lo==1 and hi==2000)
-    rolls=rolls+1
-    return chanceRoll
-end
-dofile(root.."enemy_loot.lua")
-local function checkDrop(displayHP,draw,kind,count,needsRoll,decoy)
-    created,tags,stack,rolls={},{nh_decoy=decoy},1,0
-    health,chanceRoll=displayHP and displayHP/25,draw
-    tags.player_unit=true
-    death(1,"",1,true)
-    tags.player_unit=nil
-    death(1,"",1,false)
-    assert(#created==0 and rolls==0)
-    death(1,"",0,true)
-    death(1,"",0,true)
-    assert(rolls==(needsRoll and 1 or 0))
-    if count==0 then assert(#created==0); return end
-    assert(#created==1 and created[1]==root.."items/"..kind..".xml" and stack==count)
-end
-checkDrop(0,nil,nil,0,false)
-checkDrop(false,nil,"travel_satchel",1,false)
-checkDrop(10,1000,"travel_satchel",1,true)
-checkDrop(10,1001,nil,0,true)
-checkDrop(20,nil,"travel_satchel",1,false)
-checkDrop(40,nil,"travel_satchel",2,false)
-checkDrop(49.9,990,"travel_satchel",3,true)
-checkDrop(50,1000,"travel_pack",3,true)
-checkDrop(50,1001,"travel_pack",2,true)
-checkDrop(100,nil,"travel_pack",5,false,true)
-checkDrop(199.9,1991,"travel_pack",9,true)
-checkDrop(200,nil,"loot_case",10,false)
-checkDrop(512.5,1250,"loot_case",26,true)
-checkDrop(512.5,1251,"loot_case",25,true)
-checkDrop(1e11,nil,"loot_case",2147483647,false)
-ProceduralRandomi=chooseLast
 NHNative,NHDoses=native,doses
-print("Tiered death drops, graded supplies, independent card rolls and payout rollback passed.")
+print("Graded supplies, independent card rolls and payout rollback passed.")
 
 -- Old storage records and prepaid orders used different charge encodings.
 settings,flags={},{}

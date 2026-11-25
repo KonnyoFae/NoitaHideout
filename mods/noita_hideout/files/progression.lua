@@ -22,7 +22,7 @@ define("medical","workshop","医疗工位","Medical station",1,{{"water",250},{"
 define("injector","workshop","针剂工位","Injector station",1,{{"water",250},{"oil",100}},
     {effect={"制造针剂","Craft injectors"}})
 define("grenade","workshop","武器工位","Weapon station",1,{{"gunpowder",150},{"oil",100}},
-    {effect={"制造六种战术发射器","Craft six tactical launchers"}})
+    {effect={"制造七种战术发射器","Craft seven tactical launchers"}})
 define("salvage","workshop","拆解台","Salvage bench",1,{{"sand",250},{"oil",100}},
     {effect={"回收碎片、提取精华和合成法术","Recover scrap, extract essences and craft spells"}})
 local function supportStation(id,zh,en,essence,tiers)
@@ -196,18 +196,23 @@ local function description(s,entry,offset,lang)
     end
     if entry.id=="safe" then return (NHStore.safeCapacity(s)+offset)..(zh and " 格" or " slots") end
     local level=NHStore.level(s,entry.id)+offset
-    if entry.id=="farmland" then return level..(zh and " 块田地" or (level==1 and " field" or " fields")) end
+    local efficiency=""
+    if entry.section=="production" and level>0 then
+        local percent=NHFarm.levelBasisPoints(entry.id,level)/100
+        if percent>0 then efficiency=string.format(zh and " · 产量 +%g%%" or " · yield +%g%%",percent) end
+    end
+    if entry.id=="farmland" then return level..(zh and " 块田地" or (level==1 and " field" or " fields"))..efficiency end
     if entry.housing then
         local text=entry.housing[zh and 1 or 2].." "..NHLivestock.capacityAtLevel(level)
         if entry.id=="gel_pool" and offset==1 and level==1 then
             text=text..(zh and "，附带 1 只成熟凝胶" or " (includes 1 adult gel)")
         end
-        return text
+        return text..efficiency
     end
     if entry.id=="perk_slots" then return (1+level)..(zh and " 个遗物插槽" or " relic sockets") end
     if level==0 then return zh and "未解锁" or "Locked" end
     if entry.tiers then return entry.tiers[level][zh and 1 or 2] end
-    return entry.effect[zh and 1 or 2]
+    return entry.effect[zh and 1 or 2]..efficiency
 end
 
 function NHStore.progressMenu(s,lang)
@@ -253,6 +258,7 @@ function NHStore.buyUpgrade(s,request,now)
         local ok,reason=NHStore.spendEmptyContainers(s,payment.shells)
         if not ok then return false,reason end
     end
+    if entry.section=="production" then NHFarm.sync(s,now or s.farm.time) end
     NHStore.deductStock(s.materials,payment.materials)
     NHStore.deductStock(s.resources,payment.resources)
     s.levels[entry.id]=level+1

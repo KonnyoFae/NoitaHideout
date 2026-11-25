@@ -39,9 +39,7 @@ local function player_died(force_native)]=],1)
     local timer="if not ctx.proxy_opt.no_notplayer and not ctx.proxy_opt.perma_death and notplayer_active and hp_new <= 0 then"
     if text then text=replace(text,timer,timer:gsub(" then$"," and not nh_waiting.isAnchor(player_ent) then"),1) end
     if not text then return end
-    -- The polymorph module and local_health's delayed retry both enter
-    -- on_poly_death. Check at this common entry and before local_health
-    -- samples HP (including the first frame after loading a downed save).
+    -- Check for a pending pod before local_health samples the waiting body.
     local update="    local hp, max_hp = util.get_ent_health(player_ent)"
     text=replace(text,update,[=[    local hp, max_hp = util.get_ent_health(player_ent)
     if notplayer_active and hp <= 0 and ctx.cap.health.nh_reinforce_hold

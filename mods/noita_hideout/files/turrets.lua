@@ -1,5 +1,5 @@
 local root="mods/noita_hideout/files/"
-local T={order={"turret_pack","rocket_turret_pack","shield_turret_pack"},types={}}
+local T={stackLimit=16,order={"turret_pack","rocket_turret_pack","shield_turret_pack"},types={}}
 -- Keep the released item and recipe IDs so existing stacks and orders become decoys.
 local defs={
     {"turret_pack","诱饵气球","Decoy balloon",nil,"固定在部署位置，吸引附近敌人的火力。","Stays at the deployment point and draws nearby enemies' fire."},
@@ -11,7 +11,13 @@ for _,row in ipairs(defs) do
     T.types[kind]={zh=zh,en=en,essence=essence,icon=root.."items/"..kind..".png",
         noteZh=noteZh.." 手持左键在附近地面部署一个。",noteEn=noteEn.." Left-click to deploy one on nearby ground."}
 end
-function T.validCount(n) return type(n)=="number" and n>=1 and n<=4 and n==math.floor(n) end
+function T.validCount(n) return type(n)=="number" and n>=1 and n<=T.stackLimit and n==math.floor(n) end
+function T.slotLimit(kind,slot,output)
+    if output and output.slot==slot and output.item and output.item.kind==kind then
+        return T.stackLimit-(output.item.count or 1)
+    end
+    return T.stackLimit
+end
 function T.recipe(kind)
     local d=T.types[kind]
     local resources={arcane_scrap=1}

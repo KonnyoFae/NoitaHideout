@@ -1,0 +1,37 @@
+<Entity tags="nh_duster_field">
+    <InheritTransformComponent only_position="1" />
+    <LifetimeComponent lifetime="3600" />
+    <VariableStorageComponent _tags="nh_duster_until" value_int="0" />
+    <!-- Sweep loose cells into the same material buffer used by vanilla flasks.
+         The radial emitter consumes its contents and the field spills any remainder. -->
+    <MaterialInventoryComponent drop_as_item="0" do_reactions="0" />
+    <MaterialSuckerComponent material_type="0" suck_static_materials="0" barrel_size="100" num_cells_sucked_per_frame="24"
+        randomized_position.min_x="-63" randomized_position.max_x="63" randomized_position.min_y="-63" randomized_position.max_y="63" />
+    <MaterialSuckerComponent material_type="1" suck_static_materials="0" barrel_size="100" num_cells_sucked_per_frame="24"
+        randomized_position.min_x="-63" randomized_position.max_x="63" randomized_position.min_y="-63" randomized_position.max_y="63" />
+    <MaterialSuckerComponent material_type="2" suck_static_materials="0" barrel_size="100" num_cells_sucked_per_frame="12"
+        randomized_position.min_x="-63" randomized_position.max_x="63" randomized_position.min_y="-63" randomized_position.max_y="63" />
+    <!-- The three overlapping, origin-centred rectangles stay inside radius 90.
+         Native MaterialSucker sampling requires a positive random bound on each axis. -->
+    <MaterialSuckerComponent material_type="0" suck_static_materials="0" barrel_size="100" num_cells_sucked_per_frame="12"
+        randomized_position.min_x="-83" randomized_position.max_x="83" randomized_position.min_y="-32" randomized_position.max_y="32" />
+    <MaterialSuckerComponent material_type="1" suck_static_materials="0" barrel_size="100" num_cells_sucked_per_frame="12"
+        randomized_position.min_x="-83" randomized_position.max_x="83" randomized_position.min_y="-32" randomized_position.max_y="32" />
+    <MaterialSuckerComponent material_type="2" suck_static_materials="0" barrel_size="100" num_cells_sucked_per_frame="6"
+        randomized_position.min_x="-83" randomized_position.max_x="83" randomized_position.min_y="-32" randomized_position.max_y="32" />
+    <MaterialSuckerComponent material_type="0" suck_static_materials="0" barrel_size="100" num_cells_sucked_per_frame="12"
+        randomized_position.min_x="-32" randomized_position.max_x="32" randomized_position.min_y="-83" randomized_position.max_y="83" />
+    <MaterialSuckerComponent material_type="1" suck_static_materials="0" barrel_size="100" num_cells_sucked_per_frame="12"
+        randomized_position.min_x="-32" randomized_position.max_x="32" randomized_position.min_y="-83" randomized_position.max_y="83" />
+    <MaterialSuckerComponent material_type="2" suck_static_materials="0" barrel_size="100" num_cells_sucked_per_frame="6"
+        randomized_position.min_x="-32" randomized_position.max_x="32" randomized_position.min_y="-83" randomized_position.max_y="83" />
+    <ParticleEmitterComponent emitted_material_name="air" use_material_inventory="1" emit_real_particles="1" emit_only_if_there_is_space="1"
+        area_circle_radius.min="84" area_circle_radius.max="89" velocity_always_away_from_center="110" gravity.y="100"
+        count_min="64" count_max="64" emission_interval_min_frames="1" emission_interval_max_frames="1" />
+    <ParticleEmitterComponent emitted_material_name="spark_white" create_real_particles="0" emit_cosmetic_particles="1"
+        area_circle_radius.min="87" area_circle_radius.max="90" count_min="2" count_max="2"
+        lifetime_min="0.35" lifetime_max="0.5" gravity.y="0" velocity_always_away_from_center="7"
+        emission_interval_min_frames="4" emission_interval_max_frames="4" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/duster_tick.lua" execute_every_n_frame="3" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/duster_spill.lua" execute_every_n_frame="-1" execute_on_removed="1" />
+</Entity>

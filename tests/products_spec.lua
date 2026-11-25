@@ -6,8 +6,8 @@ local mouse_x,mouse_y,pad,inventory_open=100,20,false,false
 local last_shot,failed_path,omit_component
 local shiftDuringRegistration=false
 local controls={mAimingVectorNormalized={0,-1}}
-local right_mouse=false
-function InputIsMouseButtonDown(button) return button==2 and right_mouse end
+local left_mouse,right_mouse=false,false
+function InputIsMouseButtonDown(button) return button==1 and left_mouse or button==2 and right_mouse end
 local health={hp=1,max_hp=1}
 entities[player]={x=10,y=20,ControlsComponent=controls,DamageModelComponent=health,GenomeDataComponent={herd_id=7}}
 NHNative={held=function() return selected end}
@@ -52,7 +52,7 @@ function GameKillInventoryItem(owner,entity)
 end
 function EntityHasTag(id,tag)
     local e=entities[id]
-    return e.tag==tag or (tag=="nh_support_weapon" and e.supportWeapon) or (tag=="nh_loaded_gun" and e.loadedGun)
+    return e.tag==tag or (e.extraTags and e.extraTags[tag]) or (tag=="nh_support_weapon" and e.supportWeapon) or (tag=="nh_loaded_gun" and e.loadedGun)
         or (tag=="nh_pheromone_launcher" and e.pheromone)
 end
 function EntityGetTransform(id) return entities[id].x,entities[id].y end
@@ -81,6 +81,7 @@ function ComponentGetValue2(c,key)
     return value
 end
 function ComponentSetValue2(c,key,a,b) c[key]=b and {a,b} or a end
+function EntityRefreshSprite(id,sprite) assert(entities[id].SpriteComponent==sprite) end
 function GameIsInventoryOpen() return inventory_open end
 function GameGetIsGamepadConnected() return pad end
 function DEBUG_GetMouseWorld() return mouse_x,mouse_y end
@@ -92,6 +93,31 @@ function GameShootProjectile(owner,x,y,target_x,target_y,entity)
 end
 dofile("mods/noita_hideout/files/store.lua")
 dofile("mods/noita_hideout/files/products.lua")
+-- Releasing a mouse-owned charge must still aim at its cursor with a gamepad
+-- plugged in. The optional ownership hint belongs only to that call: ordinary
+-- controller aiming must continue to use the native stick vector afterward.
+do
+    local oldMouseX,oldMouseY,oldPad=mouse_x,mouse_y,pad
+    local oldAim=controls.mAimingVectorNormalized
+    pad=true;mouse_x,mouse_y=110,20
+    controls.mAimingVectorNormalized={0,-1}
+    left_mouse=true
+    local dx,dy,distance=NHProducts.aim(player,10,20)
+    assert(dx==1 and dy==0 and distance==100,"held physical mouse input must override a connected gamepad")
+    left_mouse=false
+    dx,dy,distance=NHProducts.aim(player,10,20,true)
+    assert(dx==1 and dy==0 and distance==100,"mouse-owned release switched to the idle gamepad vector")
+    dx,dy,distance=NHProducts.aim(player,10,20)
+    assert(dx==0 and dy==-1 and distance==nil,"mouse preference leaked into an unrelated controller action")
+    dx,dy,distance=NHProducts.aim(player,10,20,false)
+    assert(dx==0 and dy==-1 and distance==nil,"unmarked input must keep the gamepad aim")
+    right_mouse=true
+    dx,dy,distance=NHProducts.aim(player,10,20)
+    assert(dx==1 and dy==0 and distance==100,"physical alternate mouse aim changed")
+    left_mouse,right_mouse=false,false
+    mouse_x,mouse_y,pad=oldMouseX,oldMouseY,oldPad
+    controls.mAimingVectorNormalized=oldAim
+end
 NHSurgery=dofile("mods/noita_hideout/files/surgery.lua")
 local frame=0
 function GameGetFrameNum() return frame end
@@ -412,23 +438,24 @@ function GameCreateCosmeticParticle(material)
     assert(material=="spark_blue")
     chargeParticles=chargeParticles+1
 end
-for _,kind in ipairs({"derringer","flare_gun"}) do
+for kind,capacity in pairs({derringer=4,flare_gun=20,sedative_launcher=20}) do
     local gun=adapters[kind].adapter
-    selected=assert(gun.restore({kind=kind,remaining=4,count=2},0,0))
+    selected=assert(gun.restore({kind=kind,remaining=capacity,count=2},0,0))
     inventory_open=true
     assert(not NHProducts.fireHeld(player))
     inventory_open=false
-    for n=8,1,-1 do
+    for n=2*capacity,1,-1 do
         local record=gun.capture(selected)
-        assert(NHGuns.rounds(record)==n and record.remaining==(n-1)%4+1)
-        if n==7 then
+        assert(NHGuns.rounds(record)==n and record.remaining==(n-1)%capacity+1)
+        if n==2*capacity-1 then
             EntityKill(selected)
             selected=assert(gun.restore(record,0,0))
-            assert(gun.capture(selected).remaining==3)
+            assert(gun.capture(selected).remaining==capacity-1)
         end
         assert(NHProducts.fireHeld(player))
+        assert(entities[last_shot.id].path==NHGuns.types[kind].projectile)
     end
-    assert(not selected and not gun.restore({kind=kind,remaining=5},0,0))
+    assert(not selected and not gun.restore({kind=kind,remaining=capacity+1},0,0))
 end
 mouse_x,mouse_y,pad=114,18,false
 for _,kind in ipairs({"magic_tube","fire_tube","frost_tube","shock_tube"}) do
@@ -456,6 +483,22 @@ for kind,capacity in pairs({heavy_mg=320,auto_grenade=36,missile_launcher=12,rai
     entities[selected].supportWeapon=true
     mouse_x,mouse_y,pad=114,18,false
     entities[arm].x,entities[arm].y=14,18
+    local original=NHGuns.types[kind].displaySprite
+    if original then
+        -- Physical guns from an older save keep their baked sprite until wielded.
+        local sprite={image_file="mods/noita_hideout/files/items/"..kind.."_world.png"}
+        entities[selected].SpriteComponent=sprite
+        NHProducts.poseSupportGun(player,selected)
+        assert(sprite.image_file==(NHGuns.types[kind].heldSprite or original) and sprite.has_special_scale and sprite.special_scale_x==0.5)
+        assert(sprite.special_scale_y==0.5 and adapter.capture(selected).remaining==capacity)
+        local mirror=assert(entities[selected].LuaComponent)
+        mouse_x=-86
+        NHProducts.poseSupportGun(player,selected)
+        assert(sprite.special_scale_y==-0.5)
+        mouse_x=114
+        NHProducts.poseSupportGun(player,selected)
+        assert(sprite.special_scale_y==0.5 and mirror==entities[selected].LuaComponent)
+    end
     local function trigger(edge,frame)
         if NHGuns.trigger(selected,edge,frame) then return NHProducts.fireHeld(player) end
     end
@@ -501,4 +544,114 @@ for kind,capacity in pairs({heavy_mg=320,auto_grenade=36,missile_launcher=12,rai
         assert(px==last_shot.x and py==last_shot.y and entities[new_id].x==px and entities[new_id].y==py)
     end
     shiftDuringRegistration=false
+end
+
+do
+    local mg=NHGuns.types.heavy_mg
+    local adapter=adapters.heavy_mg.adapter
+    local function machineGun(sprite)
+        local id=assert(adapter.restore({kind="heavy_mg",remaining=20},0,0))
+        entities[id].SpriteComponent=sprite
+        return id
+    end
+    local sprite={image_file=mg.displaySprite,offset_x=4,offset_y=12}
+    local gun=machineGun(sprite)
+    selected=gun
+    NHProducts.poseSupportGun(player,gun)
+    assert(sprite.image_file==mg.heldSprite and sprite.offset_x==0 and sprite.offset_y==0)
+    assert(sprite.rect_animation=="default" and sprite.next_rect_animation=="default")
+    local refresh=EntityRefreshSprite
+    local changes=0
+    function EntityRefreshSprite(id,comp)
+        if comp==sprite then changes=changes+1 end
+        refresh(id,comp)
+    end
+    local function tick(t,down,edge)
+        frame=t
+        if NHGuns.trigger(down and selected or nil,edge,frame) then return NHProducts.fireHeld(player) end
+        NHProducts.poseSupportGun(player,selected)
+    end
+    failed_path=mg.projectile
+    assert(not tick(1,true,true) and sprite.rect_animation=="default" and changes==0)
+    failed_path=nil
+    tick(2,false,false)
+    assert(tick(3,true,true) and sprite.rect_animation=="fire" and sprite.next_rect_animation=="fire")
+    for t=4,23 do
+        assert((tick(t,true,false)==true)==((t-3)%5==0))
+    end
+    assert(changes==1 and adapter.capture(gun).remaining==15)
+    for t=24,40 do tick(t,false,false) end
+    assert(sprite.rect_animation=="fire" and changes==1)
+    tick(41,false,false)
+    assert(sprite.rect_animation=="default" and changes==2)
+
+    -- Dropping or switching during the burst clears the old item's animation.
+    assert(tick(42,true,true))
+    selected=nil
+    tick(43,false,false)
+    assert(sprite.rect_animation=="default")
+    selected=gun
+    tick(44,false,false)
+    assert(sprite.rect_animation=="default" and adapter.capture(gun).remaining==14)
+    assert(tick(45,true,true))
+    local loaded={image_file=mg.heldSprite,rect_animation="fire",next_rect_animation="fire"}
+    selected=machineGun(loaded)
+    tick(46,true,false)
+    assert(sprite.rect_animation=="default" and loaded.rect_animation=="default" and loaded.next_rect_animation=="default")
+    assert(adapter.capture(selected).remaining==20)
+    EntityKill(gun)
+    EntityKill(selected)
+    selected=nil
+    EntityRefreshSprite=refresh
+end
+
+for _,kind in ipairs({"sedative_launcher","flare_gun"}) do
+    local gun=NHGuns.types[kind]
+    local adapter=adapters[kind].adapter
+    selected=assert(adapter.restore({kind=kind,remaining=3},0,0))
+    -- A physical pistol saved at the previous size is recalibrated when equipped.
+    local sprite={image_file=gun.heldSprite,has_special_scale=true,special_scale_x=0.5,special_scale_y=-0.5}
+    entities[selected].SpriteComponent=sprite
+    entities[selected].HotspotComponent={offset={12.5,-5}}
+    entities[arm].x,entities[arm].y=14,18
+    mouse_x,mouse_y=114,18
+    NHProducts.poseSupportGun(player,selected)
+    assert(sprite.image_file==gun.heldSprite and sprite.rect_animation=="default")
+    assert(sprite.special_scale_x==0.25 and sprite.special_scale_y==0.25)
+    local ox,oy=unpack(entities[selected].HotspotComponent.offset)
+    assert(ox==6.25 and oy==-2.5 and adapter.capture(selected).remaining==3)
+    frame=100
+    assert(NHGuns.trigger(selected,true,frame) and NHProducts.fireHeld(player))
+    assert(sprite.rect_animation=="fire" and last_shot.x==20.25 and last_shot.y==15.5)
+    NHGuns.trigger(nil,false,105)
+    assert(sprite.rect_animation=="fire")
+    NHGuns.trigger(nil,false,106)
+    assert(sprite.rect_animation=="default")
+    mouse_x=-86
+    assert(NHProducts.fireHeld(player) and sprite.special_scale_x==0.25 and sprite.special_scale_y==-0.25)
+    assert(last_shot.x==7.75 and last_shot.y==15.5 and adapter.capture(selected).remaining==1)
+    mouse_x,mouse_y=14,118
+    local _,_,tipX,tipY=NHProducts.poseSupportGun(player,selected)
+    assert(sprite.special_scale_y==0.25 and tipX==16.5 and tipY==24.25)
+    NHGuns.trigger(nil,false,112)
+    EntityKill(selected)
+    selected=nil
+end
+
+-- A watched disposable is also consumed on its final successful shot.
+-- Failed projectile allocation still spends nothing.
+do
+    local adapter=adapters.heavy_mg.adapter
+    selected=assert(adapter.restore({kind="heavy_mg",remaining=1},0,0))
+    local id=selected
+    local gun=entities[id]
+    gun.owner=player
+    gun.extraTags={nh_rewind_equipment=true}
+    gun.VariableStorageComponent={name="nh_rewind_equipment",value_string="solo/1/2/3|1|heavy_mg|-1|1",value_int=0,value_bool=true}
+    entities[player].extraTags={nh_rewind_armed=true}
+    entities[player].VariableStorageComponent={name="1/2/3"}
+    failed_path=NHGuns.types.heavy_mg.projectile
+    assert(not NHProducts.fireHeld(player) and gun.VariableStorageComponent.value_int==0 and gun.ItemComponent.uses_remaining==1)
+    failed_path=nil
+    assert(NHProducts.fireHeld(player) and not selected and not EntityGetIsAlive(id))
 end

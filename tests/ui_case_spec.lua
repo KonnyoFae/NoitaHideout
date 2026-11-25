@@ -129,6 +129,10 @@ do
     m.lang,a.menu,a.hover="zh",true,2
     render(m)
     assert(drawn["> 马格南 · 3 <"] and drawn["霰弹 · 6"] and drawn["松开确认"])
+    a.loading,a.powered,a.rounds=nil,true,0
+    render(m)
+    assert(drawn["霰弹  0/36  ·  堆芯供弹"] and drawn["[B] 模式  备弹 162"] and drawn["> 马格南 <"])
+    a.powered=false
     a.menu,a.modes,a.index=false,NHFirearms.staffModes,3
     a.mimicTarget={x=90,y=65,status="ready",form="test.xml"};render(m)
     assert(drawn["可拟态"] and noticeText["可拟态"].x<90 and noticeText["可拟态"].y<65)
@@ -137,6 +141,66 @@ do
     a.mimicTarget=nil;render(m);assert(not drawn["Unsupported form"])
     render({mimicFrames=61,lang="zh"});assert(drawn["拟态剩余 2 秒"])
     render({mimicFrames=1,lang="en"});assert(drawn["Mimic: 1s"])
+end
+-- Katana HUD distinguishes automatic and release-triggered attacks, the two
+-- field costs, and a retained zero-durability relic without exposing UI use.
+do
+    local m={open=false,near=false,lang="zh",katana={kind="hf_blade"}}
+    render(m)
+    assert(drawn["左键快斩 / 蓄满松开重击"] and drawn["长按右键扣半格，每 5 点维持 1 秒"])
+    m.katana={kind="hf_murasama"};render(m)
+    assert(drawn["左键快斩 / 蓄满自动冲刺（5 备弹）"])
+    m.katana={kind="dragon_king",remaining=90};render(m)
+    assert(drawn["龙王 · 耐久 90/90"] and drawn["左键快斩 / 蓄力时停后松开冲刺"])
+    assert(drawn["长按右键：1 耐久，斩夺 30 秒"])
+    m.katana.stasis=90;render(m)
+    assert(drawn["时停 1.5 秒 · 松开冲刺"])
+    m.katana.stasis=nil;m.katana.plunder=1200;render(m)
+    assert(drawn["斩夺 20.0 秒"] and drawn["自由移动 · 按住左键连斩 · 右键退出"])
+    m.katana.plunder=nil;m.katana.remaining=0;render(m)
+    assert(drawn["龙王 · 耐久 0/90"] and drawn["右键斩夺不可用 · 左键免费"])
+    m.katana.preparing=true;render(m)
+    assert(drawn["耐久耗尽 · 左键技能仍可用"])
+    m.lang="en";m.katana={kind="dragon_king",remaining=1,preparing=true};render(m)
+    assert(drawn["Dragon King · Durability 1/90"] and drawn["Preparing · 1 durability / 30s"])
+    m.katana={kind="hf_blade",preparing=true};render(m)
+    assert(drawn["Preparing · half a shield cell"] and drawn["Hold RMB · half a cell · 1s per 5 points"])
+    m.katana={kind="hf_murasama",plunder=180};render(m)
+    assert(drawn["30% movement · hold LMB slashes · RMB exits"])
+    for _,kind in ipairs({"hf_blade","hf_murasama"}) do
+        for _,lang in ipairs({"zh","en"}) do
+            m.lang=lang;m.katana={kind=kind};render(m)
+            assert(drawn[lang=="zh" and "长按右键扣半格，每 5 点维持 1 秒" or "Hold RMB · half a cell · 1s per 5 points"])
+            m.katana.preparing=true;render(m)
+            assert(drawn[lang=="zh" and "斩夺蓄势 · 半格护盾" or "Preparing · half a shield cell"])
+            assert(not drawn["斩夺蓄势 · 当前护盾的一半"] and not drawn["Preparing · half current shield"])
+        end
+    end
+    for _,kind in ipairs(NHKatanas.order) do
+        local d=NHKatanas.types[kind]
+        m.katana={kind=kind,remaining=d.durability}
+        render(m)
+        local idle
+        for text,entry in pairs(noticeText) do if entry.y==73 and drawn[text] then idle=text end end
+        assert(idle)
+        for _,heldFrames in ipairs({0,1,5}) do
+            m.katana.charge=heldFrames/d.chargeFrames
+            render(m)
+            assert(drawn[idle],"quick click flashed the weapon HUD charge label")
+            assert(not drawn[("Charging %d%%"):format(math.floor(m.katana.charge*100))])
+        end
+        m.katana.charge=6/d.chargeFrames;render(m)
+        assert(drawn[("Charging %d%%"):format(math.floor(m.katana.charge*100))],"a deliberate hold lost charge feedback")
+        m.katana.charge=nil;render(m)
+        assert(drawn[idle],"quick-slash release did not restore its stable hint")
+        m.katana.preparing=true;m.katana.charge=5/NHKatanas.zandatsu.chargeFrames;render(m)
+        assert(drawn[idle],"short alternate tap flashed Blade Mode preparation")
+        m.katana.charge=6/NHKatanas.zandatsu.chargeFrames;render(m)
+        assert(drawn[d.durability and "Preparing · 1 durability / 30s" or "Preparing · half a shield cell"])
+    end
+    for _,entry in pairs(noticeText) do
+        if entry.y==62 or entry.y==73 or entry.y==84 then assert(entry.x>=0,"Weapon HUD overflowed the viewport") end
+    end
 end
 -- Inspect through the same wheel input a player uses. Hidden controls are
 -- intentionally absent from the widget tree until the viewport reaches them.
@@ -195,6 +259,12 @@ do
     assert(shieldImages[5711].x+shieldImages[5711].w==innerRight and shieldImages[5712].x==innerRight-40)
     assert(shieldImages[5711].y==21 and shieldImages[5711].h==4 and shieldImages[5711].a==0.82)
     assert(shieldText.value=="[50]+[50]" and shieldText.x+GuiGetTextDimensions(nil,shieldText.value)==innerRight and shieldText.y+9<=shieldImages[5711].y-3)
+    -- Match the displayed points used by shield-funded skills even when a
+    -- companion mod changes the native health display multiplier.
+    hudSettings.GUI_HP_MULTIPLIER=10
+    overlay(2,1.5,0,4)
+    assert(shieldText.value=="[20]+[10]" and shieldImages[5712].w==10)
+    hudSettings.GUI_HP_MULTIPLIER=25
     overlay(2,2,0,40)
     assert(shieldImages[5702].x==innerRight-40 and shieldText.value=="[500]+[500]")
     overlay(3,3,0,40)
@@ -1232,6 +1302,60 @@ do
     checkGrid("zh",false)
     width,height,model.lang=sw,sh,"en"
 end
+do
+    local prior,unlock=model.warehouse.collection,model.salvage_enabled
+    local sw,sh,lang=width,height,model.lang
+    model.salvage_enabled=false
+    for _,sample in ipairs({
+        {kind="salvage_bell",width=640,height=360,lang="en",name="Salvage Bell",tarot="Moon",companion="Cat maiden"},
+        {kind="rewind_watch",width=320,height=180,lang="zh",name="倒流表",tarot="隐者",companion="树精"},
+        {kind="stasis_hourglass",width=320,height=180,lang="zh",name="静滞沙漏",tarot="高塔",companion="凝胶少女"},
+        {kind="dustless_duster",width=640,height=360,lang="en",name="Dustless Duster",tarot="Chariot",companion="Griffin maiden"},
+        {kind="mana_reactor",width=320,height=180,lang="zh",name="魔力堆芯",tarot="太阳",companion="龙娘"},
+    }) do
+        width,height,model.lang=sample.width,sample.height,sample.lang
+        model.warehouse.collection={{id=321,kind=sample.kind,name=sample.name,remaining=37}}
+        render(model,83)
+        render(model)
+        local tile=tiles[1004]
+        pointer={x=tile.x+1,y=tile.y+1}
+        render(model)
+        assert(drawn["37/90"] and drawn[sample.lang=="en" and "Durability 37 / 90" or "剩余耐久 37 / 90"])
+        assert(drawn[sample.lang=="en" and "Shift + right-click to preview dismantling" or "Shift + 右键预览拆解"])
+        model.rightUse=assert(NHUI.useTarget())
+        local action,source=render(model)
+        assert(action=="use_inventory" and source.container=="warehouse" and source.storedId==321 and source.remaining==37)
+        model.warehouse.collection[1].remaining=0
+        render(model)
+        assert(drawn["0/90"] and drawn[sample.lang=="en" and "Exhausted. Dismantles for full value." or "已耗尽，仍可全额分解"])
+        pointer.right=true
+        shift=225
+        local preview=assert(NHUI.useTarget())
+        assert(preview.preview and preview.remaining==0 and preview.storedId==321)
+        model.rightUse=preview
+        shift=nil
+        assert(not render(model),"a released modifier must not turn a pending preview into activation")
+        shift=225
+        model.rightUse=assert(NHUI.useTarget())
+        render(model)
+        pointer.right=false
+        shift=nil
+        render(model)
+        for _,key in ipairs({"supply_logistics","strike_logistics","reinforcement_logistics","intel_logistics"}) do
+            assert(see(model,NHStore.alchemyResources[key][sample.lang]) and drawn["+2400"])
+        end
+        for _,name in ipairs({sample.tarot,sample.companion}) do assert(see(model,name) and drawn["+4"]) end
+        reveal(model,261)
+        reveal(model,260)
+        pointer={x=buttons[260].x+1,y=buttons[260].y+1,right=true}
+        assert(not NHUI.useTarget() and not render(model),"right click in preview must not activate or dismantle a collectible")
+        pointer.right=false
+        local cmd,req=render(model,260)
+        assert(cmd=="salvage" and req.mode=="collectible" and req.kind==sample.kind and req.id==321 and req.slot==1)
+    end
+    model.warehouse.collection,model.salvage_enabled=prior,unlock
+    width,height,model.lang=sw,sh,lang
+end
 model.warehouse.containers[2]={kind="potion",id=162,name="Empty flask",salvage_yield=1,salvage_name="Container scrap",salvage_stock=7}
 render(model,77)
 render(model)
@@ -1307,6 +1431,29 @@ end
 local function assert_perk_move(actual,request,command,container,storageSlot,perkSlot,id)
     assert(actual==command and request.container==container and request.storageSlot==storageSlot
         and request.perkSlot==perkSlot and request.entity==id)
+end
+do
+    local source,target=model.secure_loot[2],model.warehouse.supplies[3]
+    for _,kind in ipairs(NHTurrets.order) do
+        model.secure_loot[2]={id=201,kind=kind,count=4}
+        model.warehouse.supplies[3]={id=202,kind=kind,count=12}
+        render(model)
+        local action,req=drag_tiles(2,8)
+        assert(action=="move_food" and req.entity==201 and req.safeSlot==3)
+        model.secure_loot[2].count=5
+        render(model)
+        assert(not drag_tiles(2,8),"drag past the decoy stack limit")
+        model.workshopOutput={slot=3,item={kind=kind,count=4}}
+        model.secure_loot[2].count=1
+        render(model)
+        assert(not drag_tiles(2,8),"drag into reserved decoy space")
+        model.warehouse.supplies[3].count=11
+        render(model)
+        assert(drag_tiles(2,8)=="move_food","one unreserved decoy space")
+        model.workshopOutput=nil
+    end
+    model.secure_loot[2],model.warehouse.supplies[3]=source,target
+    render(model)
 end
 -- Three case slots, two perk slots, then the warehouse.
 action,param=drag_tiles(2,5)
@@ -1396,32 +1543,32 @@ local function testFarmPanel(lang)
     render(model)
     assert(buttons[436] and panels[210].y>=0 and buttons[436].y<height)
     assert(not render(model,436),"locked farm equipment prevents selecting an advanced crop")
-    local lockedTip=lang=="zh" and "激活草药  +3 / 5:00   库存 0   需要农业设备"
-        or "Stimulating herbs  +3 / 5:00   In storage 0   Needs farming equipment"
+    local lockedTip=lang=="zh" and "激活草药  0.6/分（单块田）   库存 0   需要农业设备"
+        or "Stimulating herbs  0.6/min per plot   In storage 0   Needs farming equipment"
     assert(tips[lockedTip])
     local action,request=render(model,431)
     assert(action=="farm_plant" and request.plot==1 and request.crop=="fiber" and request.token==0)
     assert(NHFarm.plant(stock,request,0))
     model.farm=NHFarm.view(stock,lang,60)
     render(model)
-    assert(drawn["1:59"] and green_button(431) and not render(model,431),"clicking the planted crop is a no-op")
+    assert(drawn["0:59"] and green_button(431) and not render(model,431),"clicking the planted crop is a no-op")
     action,request=render(model,432)
     assert(action=="farm_plant" and request.plot==1 and request.crop=="herb" and request.token==1)
     assert(NHFarm.plant(stock,request,60))
     model.farm=NHFarm.view(stock,lang,60)
     render(model)
-    assert(drawn["1:59"] and green_button(432) and not green_button(431))
+    assert(drawn["0:59"] and green_button(432) and not green_button(431))
     assert(NHFarm.sync(stock,7200))
     model.farm=NHFarm.view(stock,lang,7200)
     render(model)
-    assert(not buttons[415] and drawn["3:00"] and green_button(432) and reveal(model,436).y<height)
+    assert(not buttons[415] and drawn["1:00"] and green_button(432) and reveal(model,436).y<height)
     model.farm.plots[1].blocked=true
     render(model)
     local full=lang=="zh" and "农产库存已满" or "Crop storage full"
     assert(see(model,full))
     render(model,411)
-    checkStockColumns(lang,"4","1.33")
-    assert(drawn["13"] and drawn["4"] and drawn["0"] and not buttons[415])
+    checkStockColumns(lang,"2","1.33")
+    assert(drawn["13"] and drawn["2"] and drawn["0"] and not buttons[415])
     for _,crop in ipairs(model.farm.crops) do assert(drawn[crop.name] or tips[crop.name]) end
     stock.resources.fiber=12345
     model.farm=NHFarm.view(stock,lang,7200)
@@ -1484,7 +1631,7 @@ local function testLivestockPanel(lang)
     reveal(model,444)
     render(model,444)
     render(model)
-    assert(see(model,"120") and see(model,"3:00") and see(model,"2:00") and see(model,"2 / 1"))
+    assert(see(model,"120") and see(model,"3:00") and see(model,"2:00") and see(model,model.farm.pens[1].rateValue))
     assert(panels[210].y>=0 and reveal(model,258).y<height)
     local action,request=render(model,258)
     assert(action=="shop_buy" and request.id=="chick" and request.pen==first)
@@ -1494,7 +1641,7 @@ local function testLivestockPanel(lang)
     render(model,223)
     render(model,451)
     render(model)
-    assert(drawn["0 / 1"] and drawn["1 / 2"] and drawn["3:00"] and drawn["5:00"] and reveal(model,444))
+    assert(drawn["0 / 1"] and drawn["1 / 2"] and drawn["3:00"] and reveal(model,444))
     model.farm=NHFarm.view(stock,lang,180*60)
     render(model)
     assert(see(model,"1 / 0") and see(model,"2:00") and reveal(model,444))
@@ -1536,7 +1683,7 @@ local function testSpecialPens(lang)
         render(model,450+i)
         render(model)
         assert(see(model,"3%") and (i==1 or see(model,"5%") and see(model,"10%")))
-        assert(see(model,i==1 and "5 / 2" or "150 / 1"))
+        assert(see(model,model.farm.pens[i].rateValue))
         reveal(model,444)
         render(model,444)
         render(model)
@@ -1552,7 +1699,7 @@ local function testSpecialPens(lang)
     render(model,452)
     render(model)
     local pending=lang=="zh" and "已找到，待入库" or "Found, awaiting space"
-    assert(see(model,pending) and see(model,"3") and see(model,"8:00") and see(model,"13:00") and reveal(model,444))
+    assert(see(model,pending) and see(model,"3") and see(model,"8:00") and reveal(model,444))
 end
 testSpecialPens("zh")
 testSpecialPens("en")
@@ -1582,7 +1729,7 @@ local function testGelPool(lang)
     local card=zh and "凝胶少女卡" or "Gel maiden card"
     assert(see(model,bonus) and tips[bonus]:find(zh and "消耗品库" or "supplies",1,true))
     assert(see(model,card) and tips[card]:find(zh and "独立" or "separately",1,true))
-    assert(see(model,"4 / 6") and see(model,"4:00") and see(model,"30%") and see(model,"3%") and see(model,"1 / 2") and reveal(model,444))
+    assert(see(model,model.farm.pens[1].rateValue) and see(model,"4:00") and see(model,"30%") and see(model,"3%") and see(model,"1 / 2") and reveal(model,444))
     model.farm.gelPending,model.farm.gelSpicePending=3,2
     render(model)
     local meds=zh and "待入库激活剂" or "Injectors awaiting space"
@@ -1591,7 +1738,7 @@ local function testGelPool(lang)
     wheelAt(model,7102,4,8)
     local anchor=buttons[223].y
     assert(not buttons[444] and not panels[20000])
-    local cycle=zh and "当前产出间隔" or "Current cycle"
+    local cycle="4:00"
     local y=assert(noticeText[cycle]).y
     wheelAt(model,7102,5)
     assert(math.abs(y-noticeText[cycle].y-39*buttons[223].scale)<0.01)
@@ -2112,6 +2259,19 @@ local function testRightUse()
         local bagUse=use()
         assert(bagUse.container=="native" and bagUse.entity==41 and bagUse.kind==kind and bagUse.count==3)
     end
+    for kind,definition in pairs(NHRedRelics.types) do
+        m.native_slots[1].kind,m.native_slots[1].count,m.native_slots[1].remaining=kind,nil,8
+        render(m)
+        if definition.katana then assert(not NHUI.useTarget(),"Carried relic katana must use its weapon controller")
+        else
+            local ref=use()
+            assert(ref.container=="native" and ref.entity==41 and ref.kind==kind and ref.remaining==8)
+            m.rightUse=ref
+            m.native_slots[1].remaining=7
+            assert(not render(m),"changed physical durability must invalidate the prepared click")
+        end
+    end
+    m.native_slots[1].remaining=nil
     m.native_slots[1].kind,m.native_slots[1].count="medkit",nil
     pointer={x=21,y=22}; assert(not NHUI.useTarget(),"wands keep native handling")
     local oldSlot={x=tiles[1001].x+1,y=tiles[1001].y+1}
@@ -2135,6 +2295,21 @@ local function testRightUse()
     m.secure_loot[1].count=6
     assert(not render(m),"changed stack rejected")
     assert(use().count==6 and not render(m))
+    local bandages=m.secure_loot[1]
+    for kind,definition in pairs(NHRedRelics.types) do
+        m.secure_loot[1]={kind=kind,id=101,remaining=1}
+        render(m)
+        assert(drawn["1/90"] and drawn["Durability 1 / 90"])
+        if definition.katana then assert(not NHUI.useTarget(),"Stored relic katana cannot spend durability from inventory")
+        else
+            local ref=use()
+            assert(ref.container=="safe" and ref.storedId==101 and ref.remaining==1)
+            m.rightUse=ref
+        end
+        m.secure_loot[1].remaining=0
+        assert(not render(m) and drawn["0/90"],"exhausted collectible must keep zero durability")
+    end
+    m.secure_loot[1]=bandages;render(m)
     over(1002);assert(use().kind=="card_wallet")
     over(1001);pointer.down,pointer.pressed=true,true
     render(m);assert(not NHUI.useTarget(),"left drag owns the slot")
@@ -2266,6 +2441,29 @@ for _,size in ipairs({{640,360},{320,180}}) do
     end
 end
 print("UI: four-column containers fit both screen sizes, preserve perk clearance and dispatch the last cell of every tier.")
+
+-- Shield tiers expose their separate cells and point value in either locale.
+do
+    local priorWidth,priorHeight=width,height
+    for _,size in ipairs({{320,180},{640,360}}) do
+        width,height=size[1],size[2]
+        for _,entry in ipairs({{"shield_basic",2},{"shield_fire",3},{"shield_electric",3},{"shield_storm",4},{"shield_frost",4}}) do
+            local kind,cells=entry[1],entry[2]
+            for _,lang in ipairs({"zh","en"}) do
+                pointer={x=0,y=0};render({open=false})
+                local m={open=true,mode="case",lang=lang,near=false,status="",revision=1,capacity=2,
+                    secure_loot={},native_slots={},gear={shield={id=50,kind=kind,charge=cells*NHShields.cell}}}
+                NHUI.showTransfer("gear",kind,1);render(m)
+                local tile=assert(tiles[1001]);pointer={x=tile.x+2,y=tile.y+2};render(m)
+                local def=NHShields.types[kind]
+                assert(drawn[lang=="zh" and def.zh or def.en])
+                assert(drawn[(lang=="zh" and "盾量 %.2f / %d 格" or "Charge %.2f / %d cells"):format(cells,cells)])
+                assert(drawn[lang=="zh" and "每格为最大生命的 50%（初始 50 点）" or "Each cell holds 50% max HP (initially 50 points)"])
+            end
+        end
+    end
+    pointer={x=0,y=0};render({open=false});width,height=priorWidth,priorHeight
+end
 
 do
     local m={open=true,mode="case",lang="en",near=false,status="",revision=1,capacity=2,
@@ -2592,4 +2790,36 @@ do
     assert(not render(m,5811) and noticeText["请腾出一个栏位取回物品"] and not buttons[5811])
     m.ewDeposit=nil
     assert(not render(m,5811) and not panels[5810])
+end
+
+-- Both older warehouse records and the native inventory keep the compact
+-- icon path. The hideout draws the original artwork within the same footprint.
+do
+    local dir="mods/noita_hideout/files/items/"
+    local art=dir.."heavy_mg_art.png"
+    local rail=dir.."railgun.png"
+    local m={open=true,mode="case",lang="en",near=false,capacity=2,native_slots={},revision=1,
+        secure_loot={{id=1,kind="heavy_mg",icon=dir.."heavy_mg.png"},{id=2,kind="railgun",icon=rail}}}
+    local dimensions,drawImage=GuiGetImageDimensions,GuiImage
+    local tileSize,scales=20,{}
+    function GuiGetImageDimensions(gui,image)
+        if image==art then return 24,24 end
+        if image==rail then return 16,16 end
+        if image=="data/ui_gfx/inventory/quick_inventory_box.png" then return tileSize,tileSize end
+        return dimensions(gui,image)
+    end
+    function GuiImage(gui,id,x,y,image,alpha,zoom,...)
+        if id==2001 or id==2002 then scales[image]=zoom end
+        return drawImage(gui,id,x,y,image,alpha,zoom,...)
+    end
+    pointer={x=0,y=0}
+    render({open=false})
+    for _,size in ipairs({20,15}) do
+        tileSize,scales=size,{}
+        render(m)
+        local width=math.min(16,size-3)*tiles[1001].scale
+        assert(math.abs(assert(scales[art])*24-width)<0.001)
+        assert(math.abs(assert(scales[rail])*16-width)<0.001)
+    end
+    GuiGetImageDimensions,GuiImage=dimensions,drawImage
 end

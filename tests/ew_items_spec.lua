@@ -56,7 +56,10 @@ end
 function EntityGetName(id) return id==quick and "inventory_quick" or "" end
 function EntityGetRootEntity(id) return entities[id].held and player or id end
 function EntityGetAllChildren(id) return id==player and {quick} or GameGetAllInventoryItems(player) end
-function EntityHasTag(id,tag) return entities[id] and (entities[id].tags[tag] or entities[id].kind==tag) or false end
+function EntityHasTag(id,tag)
+    if id==player then return tag=="player_unit" end
+    return entities[id] and (entities[id].tags[tag] or entities[id].kind==tag) or false
+end
 function EntityAddTag(id,tag) entities[id].tags[tag]=true end
 function EntityGetFirstComponentIncludingDisabled(id,kind,tag)
     local e=entities[id]
@@ -95,7 +98,7 @@ NHWand={capture=function(id) return entities[id].wand or {kind="wand",name=entit
     restore=function() return spawn(false) end}
 NHSpell={capture=function() return {kind="spell",id="LIGHT_BULLET"} end}
 NHPotion={isFlask=function(id) return entities[id].kind=="potion" end,
-    capture=function(id) return {kind="potion",variant="potion",materials={water=entities[id].water or 300}} end,
+    capture=function(id) return {kind="potion",variant=entities[id].variant,materials={water=entities[id].water or 300}} end,
     dockSlot=function(record) return record.kind=="potion" and 1 end,
     discard=function(e,p) return GameKillInventoryItem(p,e) end}
 NHStore.commit=function(s)
@@ -187,6 +190,28 @@ assert(NHTransfers.deposit(host,player,"docks",flask,1));entities[flask].water=2
 assert(not deliver() and #host.docks==0 and entities[flask].alive)
 assert(NHTransfers.deposit(host,player,"docks",flask,1) and deliver())
 assert(host.docks[1].item.materials.water==299 and not entities[flask].alive)
+do
+    -- An escrow saved by 0.42.41 still contains the native NPC assessment.
+    local profile=state()
+    local item=spawn(true,"205",nil,"potion")
+    local function legacyFlask(knowledge)
+        assert(NHTransfers.deposit(profile,player,"docks",item,1))
+        pending.record.aiKnowledge=knowledge
+        return pending.record
+    end
+    legacyFlask({is_consumed=true,never_use=true})
+    assert(not deliver() and entities[item].alive and not profile.docks[1])
+    entities[item].variant="powder_stash"
+    legacyFlask({is_consumed=true})
+    assert(not deliver() and entities[item].alive and not profile.docks[1])
+    entities[item].variant=nil
+    legacyFlask({is_consumed=true})
+    entities[item].water=275
+    assert(not deliver() and entities[item].alive and not profile.docks[1])
+    local original=legacyFlask({is_consumed=true,enabled=false})
+    assert(deliver() and original.aiKnowledge.enabled==false and not entities[item].alive)
+    assert(not profile.docks[1].item.aiKnowledge and profile.docks[1].item.materials.water==275)
+end
 host.safeCapacity=8
 local spell=spawn(true,"201",nil,"spell")
 assert(NHTransfers.deposit(host,player,"safe",spell,2) and deliver() and host.safe[1].item.id=="LIGHT_BULLET")
@@ -259,7 +284,7 @@ assert(not entities[pouch].alive and host.pouches[pouchId].slot==6 and host.pouc
 local wandState=state()
 local wand=spawn(true,"300",nil,"wand")
 local function snapshot(mana,wait,card,rate)
-    return {kind="wand",ability={mana=mana,mana_max=120,mana_charge_speed=rate or 30,mReloadFramesLeft=wait,
+    return {kind="wand",template="data/entities/items/wand_level_01.xml",ability={mana=mana,mana_max=120,mana_charge_speed=rate or 30,mReloadFramesLeft=wait,
         stat_times_player_has_shot=5},cards={{id=card or "LIGHT_BULLET"}},cast_wait=wait,reload_wait=wait}
 end
 local function chargeGate(before,after)
@@ -273,9 +298,12 @@ assert(not chargeGate(snapshot(40,20),snapshot(100,0)) and entities[wand].alive)
 assert(not chargeGate(snapshot(40,20),snapshot(50,22)) and entities[wand].alive)
 assert(not chargeGate(snapshot(40,20),snapshot(50,0,"BOMB")) and entities[wand].alive)
 assert(not chargeGate(snapshot(40,20,nil,-30),snapshot(39,0,nil,-30)) and entities[wand].alive)
-assert(chargeGate(snapshot(40,20),snapshot(55,0)))
+local legacyWand=snapshot(40,20)
+legacyWand.aiKnowledge={is_ranged_weapon=true,is_weapon=true}
+assert(not chargeGate(legacyWand,snapshot(55,0,"BOMB")) and entities[wand].alive)
+assert(chargeGate(legacyWand,snapshot(55,0)) and legacyWand.aiKnowledge.is_weapon)
 assert(wandState.warehouse[1].item.ability.mana==55 and wandState.warehouse[1].item.cast_wait==0
-    and wandState.warehouse[1].item.ability.mReloadFramesLeft==0)
+    and wandState.warehouse[1].item.ability.mReloadFramesLeft==0 and not wandState.warehouse[1].item.aiKnowledge)
 -- A previously opened container popup holds an entity reference. Moving
 -- that same entity into the escrow must revoke access to its personal row.
 local openWallet=spawn(true,nil,"ew/Host/r/1/1/90/90/70/3","card_wallet")

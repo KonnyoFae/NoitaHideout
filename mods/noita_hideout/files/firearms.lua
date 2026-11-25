@@ -162,7 +162,7 @@ function F.valid(item)
 end
 function F.lane(kind)
     if kind=="spell" then return "spell" end
-    if kind=="wand" or (F.items[kind] and F.items[kind].magazine) then return "wand" end
+    if kind=="wand" or (F.items[kind] and F.items[kind].magazine) or (NHKatanas and NHKatanas.types[kind]) then return "wand" end
     return "tool"
 end
 function F.nativeLane(kind,entity)

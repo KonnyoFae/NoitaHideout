@@ -24,7 +24,7 @@ local function checkRates(now,eggs,milk,meat)
     local produce=NHFarm.view(s,"zh",now).produce
     assert(#produce==3)
     for _,row in ipairs(produce) do
-        assert(math.abs(row.perMinute-expected[row.id])<1e-9)
+        assert(math.abs(row.perMinute-1.10*expected[row.id])<1e-9)
         assert(row.stock==(s.resources[row.id] or 0))
     end
 end
@@ -54,14 +54,14 @@ assert(not view(hen.growth-1)[1].grown and view(hen.growth)[1].grown)
 checkRates(hen.growth-1,0,0,0)
 checkRates(hen.growth,1,0,0.5)
 assert(view(hen.growth)[1].remaining==hen.period/60)
-assert(NHFarm.observe(s,first+69)==first-1 and NHFarm.sync(s,first-1) and not s.resources.egg and rewards==0)
+assert(NHFarm.observe(s,first+69)==first-1 and NHFarm.sync(s,first-1) and s.resources.egg==1 and rewards==0)
 NHFarm.resetClock()
 assert(NHFarm.observe(s,first+69)==first-1)
 at=NHFarm.observe(s,first+70)
 assert(at==first and NHFarm.due(s,at) and not view(at)[2].grown)
 s.resources.meat=NHStore.maxResourceAmount
 local changed,produced=NHFarm.sync(s,at)
-assert(changed and not produced and not s.resources.egg and s.farm.herds.chick.owed==1 and rewards==0)
+assert(changed and produced and s.resources.egg==2 and rewards==1)
 assert(view(at)[1].blocked and not NHFarm.due(s,at))
 checkRates(at,1,0,0.5)
 s.resources.meat=nil
@@ -76,9 +76,11 @@ local stale=assert(NHStore.load())
 assert(NHFarm.sync(s,at) and NHStore.commit(s))
 assert(NHFarm.sync(stale,at) and not NHStore.commit(stale))
 s=assert(NHStore.load())
-local hens=1+math.floor((at-first)/hen.period)
-assert(s.resources.milk==12 and s.resources.meat==hens+12 and view(at)[2].nextAt==at+cow.period)
-assert(s.resources.egg==hens*2 and view(at)[1].nextAt==first+hens*hen.period)
+local lastPaid=at-at%3600
+local henMinutes=(lastPaid-hen.growth)/3600
+local cowMinutes=(lastPaid-300-cow.growth)/3600
+assert(s.resources.milk==math.floor(cowMinutes*2/3*1.10) and s.resources.meat==math.floor((henMinutes/2+cowMinutes*2/3)*1.10) and view(at)[2].nextAt==at+cow.period)
+assert(s.resources.egg==math.floor(henMinutes*1.10) and view(at)[1].nextAt==first+(1+math.floor((at-first)/hen.period))*hen.period)
 assert(not view(at)[2].blocked and not NHFarm.sync(s,at) and not s.materials.milk and #s.warehouse==0)
 assert(NHStore.endRun(s,s.runSerial))
 persist()
@@ -114,17 +116,21 @@ local function testGroupedWork()
     assert(before.growthRemaining==1 and after.growthRemaining==20)
     assert(math.abs(after.progress-before.progress-1/hen.period)<1e-9)
     assert(state.farm.herds.chick.adults==1,"looking at a future view must not settle it")
-    assert(NHFarm.sync(state,12000) and state.resources.egg==4)
+    assert(NHFarm.sync(state,12000) and state.resources.egg==3)
     assert(group(12000).adults==6 and group(12000).juveniles==0 and group(12000).period==120
         and group(12000).effectivePeriod==20 and group(12000).remaining==20 and group(12000).progress==0)
     local untilFrame=12000+300*hen.period/6+25
     local beforeAwards=rewards
     NHFarm.sync(state,untilFrame)
-    assert(state.farm.herds.chick.owed==300-128 and state.farm.herds.chick.progress==150)
-    assert(NHFarm.due(state,untilFrame) and NHFarm.sync(state,untilFrame))
-    assert(state.farm.herds.chick.owed==44 and NHFarm.sync(state,untilFrame))
-    assert(not NHFarm.due(state,untilFrame) and not NHFarm.sync(state,untilFrame))
-    assert(rewards-beforeAwards==300 and state.resources.egg==604)
+    assert(NHFarm.due(state,untilFrame),"large restored rare backlogs are drained in bounded steps")
+    local calls=1
+    while NHFarm.due(state,untilFrame) do
+        assert(NHFarm.sync(state,untilFrame))
+        calls=calls+1
+        assert(calls<=4)
+    end
+    assert(calls>=2 and not NHFarm.sync(state,untilFrame))
+    assert(rewards-beforeAwards==300 and state.resources.egg==662)
 end
 testGroupedWork()
 
@@ -149,7 +155,7 @@ local function testLegacyPens()
     state=assert(NHStore.load())
     local chickens=state.farm.herds.chick
     assert(not state.farm.pens and chickens.adults==2 and #chickens.young==1)
-    assert(chickens.owed==2 and chickens.progress==hen.period/2 and chickens.young[1]==now-60+hen.growth)
+    assert(chickens.progress==hen.period/2 and chickens.young[1]==now-60+hen.growth)
     assert(state.farm.herds.gel_pool.adults==1 and state.farm.herds.gel_pool.progress==32)
     assert(NHFarm.sync(state,now) and state.resources.egg==4 and state.resources.meat==2)
     assert(NHLivestock.view(state,"en",now)[1].nextAt==now+hen.period/4)
@@ -161,7 +167,9 @@ local function testLegacyPens()
     -- limit before conversion even if they had been left alone for longer.
     local farm={time=now,plots={},pens={[1]={kind="chick",born=0,nextAt=hen.growth+hen.period}}}
     NHFarm.adopt(farm)
-    assert(farm.passive and farm.herds.chick.owed==4 and farm.herds.chick.progress==0)
+    state.farm,state.resources=farm,{}
+    assert(farm.passive and farm.herds.chick.progress==0)
+    assert(NHFarm.sync(state,now) and state.resources.egg==8 and state.resources.meat==4)
 end
 testLegacyPens()
 print("Shared housing: capacity, simultaneous maturities, live ETA, capped catch-up and exact migration from old independent deadlines passed.")

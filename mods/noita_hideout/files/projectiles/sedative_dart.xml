@@ -1,0 +1,4 @@
+<Entity tags="nh_sedative_dart">
+    <Base file="mods/noita_hideout/files/projectiles/smart_dart_base.xml" />
+    <SpriteComponent image_file="mods/noita_hideout/files/projectiles/sedative_needle.png" offset_x="12" offset_y="3" />
+</Entity>

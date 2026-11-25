@@ -15,7 +15,7 @@ function P.stackTarget(state,player,kind,amount,source)
     for _,id in ipairs(NHTransfers.carried(player)) do
         if id~=source and EntityHasTag(id,"noita_hideout_"..kind) and NHTransfers.available(state,player,id) then
             local count,item=units(id)
-            if NHStore.validBandageCount(count) and count<=(NHTurrets.types[kind] and 4 or 2147483647)-amount and
+            if NHStore.validBandageCount(count) and count<=(NHTurrets.types[kind] and NHTurrets.stackLimit or 2147483647)-amount and
                 (not medical or NHMedkits.canCombine(kind,count,amount)) and
                 (not gun or NHGuns.canCombine(gun,(count-1)%gun.capacity+1,(amount-1)%gun.capacity+1)) then
                 return item,count+amount

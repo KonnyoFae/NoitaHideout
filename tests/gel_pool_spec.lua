@@ -14,7 +14,7 @@ local function viewRow(rows,id)
     error(id)
 end
 
-local start=499
+local start=3600
 local s=load()
 NHStore.newRun(s)
 s.materials={slime=249,water=150,soil_lush=70,soil=30}
@@ -31,8 +31,9 @@ s.gelBonus={seed=fireSeed,pending={}}
 s.summons={gel_pool=100,pending={}}
 assert(NHStore.commit(s))
 local _,produced=NHFarm.sync(s,pen.nextAt-1)
-assert(not produced and not s.resources.herb and s.gelBonus.seed==fireSeed and s.summons.gel_pool==100)
-local checkpoint=load()
+assert(produced and s.resources.herb==3 and s.resources.fiber==4
+    and s.gelBonus.seed==fireSeed and s.summons.gel_pool==100)
+local checkpoints={load(),load(),load()}
 local stale=load()
 local _,did,awards=NHFarm.sync(s,start+period)
 assert(did and #awards==1 and awards[1]=="slime" and s.resources.herb==4 and s.resources.fiber==6 and s.resources.spice==1)
@@ -64,13 +65,11 @@ for seed=1,1000 do
 end
 assert(hits==300)
 for _,id in ipairs(NHInjectors.order) do assert(types[id]) end
-for _,rolls in ipairs({{100,1},{1,100},{1,1}}) do
-    local replay=checkpoint
+for i,rolls in ipairs({{100,1},{1,100},{1,1}}) do
+    local replay=checkpoints[i]
     replay.gelBonus={seed=rolls[1],pending={}}
     replay.summons={gel_pool=rolls[2],pending={}}
     replay.warehouse,replay.resources={},{}
-    replay.farm.time=start
-    replay.farm.herds.gel_pool.progress,replay.farm.herds.gel_pool.owed=0,0
     local _,ok,cards=NHFarm.sync(replay,start+period)
     assert(ok and (replay.resources.spice==1)==(rolls[1]==100) and (#cards==1)==(rolls[2]==100))
 end
@@ -113,11 +112,11 @@ s.gelBonus.seed=fireSeed
 NHFarm.sync(s,start+3*period)
 assert(warehouseItem(s,2,"dose").count==2 and not next(s.gelBonus.pending))
 
--- Guaranteed harvests wait together if either primary resource is capped.
-s.resources.herb=NHStore.maxResourceAmount-3
+-- Only the full resource waits; new fiber and its independent rolls still arrive.
+s.resources.herb=NHStore.maxResourceAmount
 local before,cardStream=s.gelBonus.seed,s.summons.gel_pool
 NHFarm.sync(s,start+4*period)
-assert(s.farm.herds.gel_pool.owed==1 and s.gelBonus.seed==before and s.summons.gel_pool==cardStream)
+assert(s.resources.fiber==24 and s.gelBonus.seed~=before and s.summons.gel_pool~=cardStream)
 s.resources.herb=NHStore.maxResourceAmount-4
 assert(NHFarm.due(s,s.farm.time) and NHFarm.sync(s,s.farm.time))
 assert(s.resources.herb==NHStore.maxResourceAmount and s.resources.fiber==24)

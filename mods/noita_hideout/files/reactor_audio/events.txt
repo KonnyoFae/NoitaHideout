@@ -1,0 +1,2 @@
+{2ff00c7e-6a84-5f85-962f-d7429e510401} bank:/nh_reactor_alarm
+{f384f164-edb0-5856-9491-2d2e89f4f1c6} event:/nh_reactor/warning

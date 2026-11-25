@@ -1,0 +1,6 @@
+<Entity tags="nh_dart_sedative">
+    <InheritTransformComponent only_position="1" />
+    <GameEffectComponent effect="CUSTOM" custom_effect_id="nh_sedative_dart" disable_movement="1" frames="18900" />
+    <VariableStorageComponent _tags="nh_dart_clock" />
+    <LifetimeComponent lifetime="18900" serialize_duration="1" />
+</Entity>

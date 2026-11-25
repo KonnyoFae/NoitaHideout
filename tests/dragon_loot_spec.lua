@@ -34,11 +34,11 @@ assert(other.dragonLoot.seed==first.dragonLoot.seed)
 local s=load()
 local totals={spell=0,containers=0,bag=0,box=0,wand=0,tarot=0,card=0,dragon=0}
 local seen,spellSeed,spellTemplate={}
--- The first 100 seeds permute every percentile exactly once. Continue to
--- inspect every variant in the pool without relying on random test outcomes.
+-- The first 33 seeds permute the rare group and the next 67 the supply
+-- group. Continue to exercise the real item selection for every variant.
 for seed=1,10000 do
     s.warehouse={}
-    s.dragonLoot={seed=seed,pending={}}
+    s.dragonLoot={seed=seed,rareProgress=(seed-1)%100<33 and 99 or 0,pending={}}
     local cards=NHDragonLoot.award(s,1)
     assert(#s.warehouse==1 and NHDragonLoot.pendingCount(s)==0)
     local item=s.warehouse[1].item
@@ -81,9 +81,38 @@ for seed=1,10000 do
 end
 assert(totals.spell==10 and totals.containers==32 and totals.bag==20 and totals.box==15 and totals.wand==5 and totals.tarot==10 and totals.card==5 and totals.dragon==3)
 for _,species in ipairs(NHCompanions.order) do assert(seen["card_"..species],species) end
+for _,species in ipairs(NHTarot.order) do assert(seen["card_"..species],species) end
 for _,key in ipairs({"water","slime",
-    "magic_liquid_unstable_teleportation","sand","gunpowder","travel_satchel","travel_pack","loot_case","supply_pack","improved_supply_pack","advanced_supply_pack","card_tarot_tower"}) do
+    "magic_liquid_unstable_teleportation","sand","gunpowder","travel_satchel","travel_pack","loot_case","supply_pack","improved_supply_pack","advanced_supply_pack"}) do
     assert(seen[key],key)
+end
+
+-- A missing progress field is a pre-upgrade book. Old completed cycles
+-- retain their exact reward and do not advance the new economy.
+do
+    local draft=load()
+    draft.dragonLoot={seed=100,pending={}}
+    assert(NHDragonLoot.rareProgress(draft)==0)
+    local legacy=NHDragonLoot.award(draft,1,true)
+    assert(#legacy==1 and legacy[1]=="dragon" and NHDragonLoot.rareProgress(draft)==0)
+    local rareCount,lastRare=0,0
+    for i=1,100 do
+        draft.warehouse={}
+        NHDragonLoot.award(draft,1)
+        local kind=draft.warehouse[1].item.kind
+        local rare=kind=="summon_card" or kind=="spell" or kind=="wand"
+        assert(rare==(math.floor(i*33/100)>math.floor((i-1)*33/100)))
+        assert(NHDragonLoot.rareProgress(draft)==(33*i)%100)
+        if rare then
+            assert(i-lastRare==3 or i-lastRare==4)
+            rareCount,lastRare=rareCount+1,i
+        end
+    end
+    assert(rareCount==33)
+    for _,invalid in ipairs({-1,0.5,100}) do
+        draft.dragonLoot.rareProgress=invalid
+        assert(not NHStore.commit(draft))
+    end
 end
 -- The old slime-flask key and the new slime-maiden key must survive a
 -- delayed delivery in the same snapshot and use their separate warehouses.
@@ -112,12 +141,13 @@ for slot=1,capacity-1 do
     s.nextItemId=s.nextItemId+1
 end
 assert(NHStore.startOrder(s,"spell_BOMB") and s.order.output.slot==capacity)
-s.dragonLoot={seed=assert(spellSeed),pending={}}
+s.dragonLoot={seed=assert(spellSeed),rareProgress=99,pending={}}
 assert(#NHDragonLoot.award(s,1)==0 and s.dragonLoot.pending.spell_BOMB==1)
 local committedSeed=s.dragonLoot.seed
 assert(NHStore.commit(s))
 s=load()
 assert(s.dragonLoot.seed==committedSeed and s.dragonLoot.pending.spell_BOMB==1 and #s.warehouse==capacity-1)
+assert(NHDragonLoot.rareProgress(s)==32)
 table.remove(s.warehouse,1)
 failHead=true
 assert(not NHStore.commit(s))
@@ -128,7 +158,7 @@ assert(NHStore.commit(s))
 s=load()
 local discovery=s.warehouse[assert(NHStore.slotIndex(s,"warehouse",1,"spell"))].item
 assert(discovery.card.id==spellTemplate.card.id and discovery.card.item.uses_remaining==3)
-assert(NHDragonLoot.pendingCount(s)==0 and s.dragonLoot.seed==committedSeed)
+assert(NHDragonLoot.pendingCount(s)==0 and s.dragonLoot.seed==committedSeed and NHDragonLoot.rareProgress(s)==32)
 assert(NHStore.commit(s) and #load().warehouse==capacity-1)
 
 -- A pending full-charge card merges into a compatible stack even in a full
@@ -168,7 +198,7 @@ do
     local draft=load()
     for seed=1,25000 do
         draft.warehouse={}
-        draft.dragonLoot={seed=seed,pending={}}
+        draft.dragonLoot={seed=seed,rareProgress=99,pending={}}
         NHDragonLoot.award(draft,1)
         local item=draft.warehouse[1].item
         if item.kind=="spell" then
@@ -185,7 +215,7 @@ do
     local all={}
     for seed=1,25000 do
         draft.warehouse={}
-        draft.dragonLoot={seed=seed,pending={}}
+        draft.dragonLoot={seed=seed,rareProgress=99,pending={}}
         NHDragonLoot.award(draft,1)
         local item=draft.warehouse[1].item
         if item.kind=="spell" then all[item.card.id]=true end

@@ -31,7 +31,7 @@ local function edit_pouch(s,id)
 end
 
 local function commit(state, changed)
-    local ok, err = NHStore.commit(changed)
+    local ok, err = NHStore.commit(changed,nil,state)
     if not ok then return nil, err end
     state.revision, state.nextItemId = changed.revision, changed.nextItemId
     state.ewDepositReceipt=changed.ewDepositReceipt

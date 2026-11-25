@@ -45,9 +45,11 @@ return module]=]
         spectate={disable_throwing=function() end},ModDoesFileExist=function() return true end,
         dofile_once=function(file)
             if file:find("ew_waiting",1,true) then return {isAnchor=function() return false end,enter=function() return enterOK,reason end} end
+            assert(not file:find("rewind_watch",1,true),"watch must not intercept EW death")
             return release
         end,ModTextFileGetContent=function(file) return file==sharedFile and shared or native end,
-        EntityHasTag=function(e,t) return e[t] end,
+        EntityHasTag=function(e,t) return type(e)=="table" and e[t] end,
+        EntityGetFirstComponentIncludingDisabled=function() return {} end,
         ModTextFileSetContent=function(file,value)
             if file==sharedFile then shared=value else native=value;writes=writes+1 end
         end},{__index=_G})
@@ -67,6 +69,11 @@ return module]=]
     assert(clears==2 and charges==1 and restores==2)
     cap.nh_reinforce_hold=function() testHp=8; return true end
     assert(env.get_sample(false,1)==0 and env.get_sample(true,1)==8)
+    testHp=0
+    assert(env.get_sample(false,1)==0)
+    env.ctx.my_player.currently_polymorphed=true
+    cap.on_poly_death();assert(clears==2 and charges==1 and restores==2)
+    env.ctx.my_player.currently_polymorphed=false
     cap.on_poly_death();assert(clears==2 and charges==1 and restores==2)
     cap.nh_reinforce_restore();assert(clears==2 and charges==1 and restores==3)
     cap.nh_reinforce_hold=nil

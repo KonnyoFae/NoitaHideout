@@ -234,4 +234,13 @@ near(health.hp,1.05); near(platform.run_velocity,172.5)
 platform.run_velocity=platform.run_velocity*1.25
 expire(pet,clock)
 near(platform.run_velocity,187.5)
+function ModIsEnabled(id) return id=="quant.ew" end
+NHEW.reset()
+local remote=companion("cat")
+EntityAddTag(player,"ew_client")
+NHCompanions.update(remote)
+assert(GlobalsGetValue("noita_hideout_affinity_cat","0")=="0")
+EntityRemoveTag(player,"ew_client")
+NHCompanions.update(remote)
+assert(GlobalsGetValue("noita_hideout_affinity_cat","0")=="6")
 print("All nine roles, four ranks, timed gifts, ally filtering, regen caps and independent modifiers passed.")

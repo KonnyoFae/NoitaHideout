@@ -73,16 +73,21 @@ function R.snapshot(s,player)
     row.item.delay=math.max(0,math.min(180,ready-GameGetFrameNum()))
 end
 
-function R.sync(s,player)
+function R.ensureDamageHook(player)
     local hook=EntityGetFirstComponentIncludingDisabled(player,"LuaComponent","nh_shield_damage")
     if not hook then
         hook=EntityAddComponent2(player,"LuaComponent",{_tags="nh_shield_damage",execute_every_n_frame=-1,
             script_damage_received="mods/noita_hideout/files/shield_damage.lua"})
     end
     local before="mods/noita_hideout/files/shield_damage.lua"
-    if hook and ComponentGetValue2(hook,"script_damage_about_to_be_received")~=before then
+    if hook and hook~=0 and ComponentGetValue2(hook,"script_damage_about_to_be_received")~=before then
         ComponentSetValue2(hook,"script_damage_about_to_be_received",before)
     end
+    return hook and hook~=0
+end
+
+function R.sync(s,player)
+    R.ensureDamageHook(player)
     local row=s.gearShield
     local m=meter(player)
     -- Re-arm both sources after a failed staff cast or a return from mimicry.
@@ -132,9 +137,9 @@ end
 
 function R.hit(player,damage)
     local m=meter(player)
-    if not m or damage<=0 then return damage end
+    if not m or damage<=0 then return damage,0,0 end
     local dm=EntityGetFirstComponentIncludingDisabled(player,"DamageModelComponent")
-    if not dm then return damage end
+    if not dm then return damage,0,0 end
     local d=S.types[ComponentGetValue2(m,"name")]
     local before=ComponentGetValue2(m,"value_int")
     local after,spill=S.absorb(before,ComponentGetValue2(dm,"max_hp"),d.resist,damage)
@@ -143,6 +148,6 @@ function R.hit(player,damage)
     ComponentSetValue2(clock(player),"value_int",GameGetFrameNum()+180)
     remember(ComponentGetValue2(m,"value_string"),after,0,GameGetFrameNum()+180)
     if before>0 and after==0 then clearEffect(player,"nh_shield_elements") end
-    return spill
+    return spill,before,after
 end
 return R

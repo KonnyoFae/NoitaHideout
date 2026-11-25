@@ -301,6 +301,23 @@ function EntityLoad(path)
     entities[id].item={uses_remaining=uses}
     return id
 end
+for _,kind in ipairs(NHLootBags.order) do
+    local profile=state()
+    -- Already-stored bags have no physics or entity fields in their record.
+    profile.warehouse={{id=1,slot=1,item=NHLootBags.item(kind,2)}}
+    profile.nextItemId=2
+    local carried=EntityLoad("mods/noita_hideout/files/items/"..kind..".xml")
+    entities[carried].item.uses_remaining=3
+    pick(carried)
+    assert(NHTransfers.deposit(profile,player,"warehouse",carried,1))
+    assert(not EntityGetIsAlive(carried) and #profile.warehouse==1 and profile.warehouse[1].item.count==5)
+    local ok,restored=NHTransfers.withdraw(profile,player,1,"warehouse")
+    assert(ok and #profile.warehouse==0 and EntityHasTag(restored,"noita_hideout_"..kind))
+    assert(entities[restored].item.uses_remaining==5)
+    pick(restored)
+    assert(NHTransfers.deposit(profile,player,"safe",restored,1))
+    assert(not EntityGetIsAlive(restored) and profile.safe[1].item.kind==kind and profile.safe[1].item.count==5)
+end
 local bundles=state()
 bundles.warehouse[1]={id=1,slot=1,item={kind="bandage",count=4}}
 bundles.nextItemId=2
@@ -394,22 +411,27 @@ print("Quick transfers preserve split stacks on full slots, rejected writes and 
 for _,kind in ipairs(NHTurrets.order) do
     local s=state()
     s.nextItemId=2
-    s.warehouse={{id=1,slot=1,item=NHTurrets.recipe(kind).item}}
+    s.warehouse={{id=1,slot=1,item={kind=kind,count=16}}}
     assert(NHTransfers.moveStored(s,"warehouse",1,"safe",true))
-    assert(s.warehouse[1].item.count==3 and s.safe[1].item.count==1)
+    assert(s.warehouse[1].item.count==15 and s.safe[1].item.count==1)
     assert(NHTransfers.moveStored(s,"safe",1,"warehouse",false))
-    assert(#s.safe==0 and s.warehouse[1].item.count==4)
+    assert(#s.safe==0 and s.warehouse[1].item.count==16)
     local ok,id=NHTransfers.withdraw(s,player,1,"warehouse",nil,true)
-    assert(ok and entities[id].item.uses_remaining==1 and s.warehouse[1].item.count==3)
+    assert(ok and entities[id].item.uses_remaining==1 and s.warehouse[1].item.count==15)
     pick(id)
     assert(NHTransfers.deposit(s,player,"safe",id,1))
     assert(s.safe[1].item.count==1 and not EntityGetIsAlive(id))
     assert(NHTransfers.moveStored(s,"safe",1,"warehouse",false))
-    assert(s.warehouse[1].item.count==4)
+    assert(s.warehouse[1].item.count==16)
     fail=true
     assert(not NHTransfers.withdraw(s,player,1,"warehouse",nil,true))
     fail=false
-    assert(s.warehouse[1].item.count==4)
+    assert(s.warehouse[1].item.count==16)
+    ok,id=NHTransfers.withdraw(s,player,1,"warehouse")
+    assert(ok and entities[id].item.uses_remaining==16 and #s.warehouse==0)
+    pick(id)
+    assert(NHTransfers.deposit(s,player,"safe",id,1))
+    assert(s.safe[1].item.count==16 and not EntityGetIsAlive(id))
 end
 print("Deployment packs retain exact quantities through safe, warehouse and single-item quick transfers.")
 

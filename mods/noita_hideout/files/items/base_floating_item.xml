@@ -1,0 +1,10 @@
+<Entity>
+    <SpriteComponent _tags="enabled_in_world,enabled_in_hand" offset_x="8" offset_y="8" z_index="-1.5" />
+    <ItemComponent _tags="enabled_in_world" is_pickable="1" is_equipable_forced="1"
+        preferred_inventory="QUICK" max_child_items="0" play_spinning_animation="0"
+        is_consumable="0" is_stackable="0" always_use_item_name_in_ui="1" />
+    <UIInfoComponent _tags="enabled_in_world" />
+    <AbilityComponent throw_as_item="0" click_to_use="0" use_gun_script="0">
+        <gun_config deck_capacity="0" />
+    </AbilityComponent>
+</Entity>

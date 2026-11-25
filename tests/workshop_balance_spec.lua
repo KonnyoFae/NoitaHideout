@@ -27,7 +27,7 @@ for _,recipe in ipairs(NHStore.recipes) do
     byId[recipe.id]=recipe
 end
 for _,id in ipairs({"bandage","medical","field_medkit","bread","sugar_cube","card_wallet","pouch",
-    "flare_gun","derringer","grenade","grenade_essence","fire_grenade","frost_grenade","shock_grenade",
+    "flare_gun","sedative_launcher","derringer","grenade","grenade_essence","fire_grenade","frost_grenade","shock_grenade",
     "mana","stable","reverse_stable","spell_LIGHT_BULLET","spell_BOMB"}) do
     assert(byId[id] and byId[id].durationFrames<=10*60,id.." must complete a batch within 10 seconds")
 end

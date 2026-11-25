@@ -7,7 +7,8 @@ local foods={}
 for _,food in ipairs(dofile("mods/noita_hideout/files/cooking.lua")) do foods[food.id]=true end
 
 function M.supports(kind)
-    return (NHShields and NHShields.supply(kind)~=nil) or bags.types[kind]~=nil or foods[kind] or kind=="bandage" or kind=="dose" or kind=="summon_card" or equipment.links[kind]~=nil
+    local red=NHRedRelics and NHRedRelics.types[kind]
+    return (red and not red.katana) or (NHShields and NHShields.supply(kind)~=nil) or bags.types[kind]~=nil or foods[kind] or kind=="bandage" or kind=="dose" or kind=="summon_card" or equipment.links[kind]~=nil
         or NHMedkits.types[kind]~=nil or NHSurgeryKits.types[kind]~=nil or NHThrowables.types[kind]~=nil
 end
 
@@ -95,7 +96,10 @@ function M.spend(draft,player,ref)
     local count=item.count or 1
     local remaining=equipment.linkUses(item.kind,item.remaining) or item.remaining or maxUses(item.kind,item.species) or 1
     local source=cells and cells[index] or item
-    if NHMedkits.capacity(item.kind) then
+    if NHRedRelics and NHRedRelics.types[item.kind] then
+        if not NHRedRelics.valid(item) or remaining<=0 then return nil,"Collectible exhausted." end
+        item.remaining=remaining-1
+    elseif NHMedkits.capacity(item.kind) then
         local left=NHMedkits.charges(item)-1
         if left>0 then NHMedkits.unpack(item,left)
         elseif ref.container=="gear" then draft[NHShields.field(ref.kind)]=nil

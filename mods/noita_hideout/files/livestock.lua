@@ -1,6 +1,7 @@
 NHLivestock={
     resources={egg={zh="蛋",en="Eggs"},milk={zh="奶",en="Milk"},meat={zh="肉",en="Meat"},
-        gold={zh="金币",en="Gold"},loot={zh="寻宝",en="Treasure"}},
+        gold={zh="金币",en="Gold"},loot={zh="寻宝",en="Treasure"},
+        dog_find={zh="资源份数",en="Resource bundles"},cat_tool={zh="战术道具",en="Field tools"}},
     order={"chick","calf","queen_bee","dragon_egg","gel_pool","dog","cat"},
     species={
         cat={young={"幼猫","Kitten"},adult={"寻宝猫","Treasure cat"},pen={"猫窝","Cattery"},facility="cat_house",locked="Cattery is required.",offset=11,
@@ -119,7 +120,7 @@ end
 
 -- Calculate time worked over [from, now] without changing the saved group.
 -- Young animals start contributing precisely at their own maturity frame.
-local function project(herd,period,from,now)
+function NHLivestock.project(herd,period,from,now)
     local progress,owed=addWork(herd.progress,herd.owed,now-from,herd.adults,period)
     local matured=0
     for i,at in ipairs(herd.young) do
@@ -152,78 +153,14 @@ local function bagDelivery(state,kind,count)
     return draft
 end
 
-local function payable(state,kind,owed)
+function NHLivestock.bagPayment(state,species,owed)
     local count=math.min(owed,NHFarm.batchLimit)
-    if NHLootBags.types[kind.yields[1][1]] then
-        while count>0 do
-            local draft=bagDelivery(state,kind,count)
-            if draft then return count,draft end
-            count=math.floor(count/2)
-        end
-        return 0
+    while count>0 do
+        local draft=bagDelivery(state,NHLivestock.species[species],count)
+        if draft then return count,draft end
+        count=math.floor(count/2)
     end
-    for _,part in ipairs(kind.yields) do
-        local id,amount=part[1],part[2]
-        if id=="gold" then count=math.min(count,math.floor((NHStore.maxGold-state.bankGold)/amount))
-        elseif id~="loot" then count=math.min(count,math.floor((NHStore.maxResourceAmount-(state.resources[id] or 0))/amount)) end
-    end
-    return count
-end
-
-function NHLivestock.due(state,now)
-    for species,herd in pairs(state.farm.herds or {}) do
-        local kind=NHLivestock.species[species]
-        local _,owed=project(herd,kind.period,state.farm.time,now)
-        if owed>0 and payable(state,kind,owed)>0 then return true end
-    end
-    return false
-end
-
-function NHLivestock.settle(state,from,now)
-    local total,ranch,hives,gel=0,0,0,0
-    local finds={}
-    for _,species in ipairs(NHLivestock.order) do
-        local herd=(state.farm.herds or {})[species]
-        if herd then
-            local kind=NHLivestock.species[species]
-            local progress,owed,matured=project(herd,kind.period,from,now)
-            local count,delivery=payable(state,kind,owed)
-            herd.progress,herd.owed=progress,owed-count
-            herd.adults=herd.adults+matured
-            for i=1,matured do table.remove(herd.young,1) end
-            if count>0 then
-                if delivery then
-                    state.warehouse,state.nextItemId=delivery.warehouse,delivery.nextItemId
-                    for _,id in ipairs(NHCompanions.reward(state,kind.facility,count)) do finds[#finds+1]=id end
-                else
-                    for _,part in ipairs(kind.yields) do
-                        local id,amount=part[1],part[2]*count
-                        if id=="gold" then assert(NHStore.creditGold(state,amount))
-                        elseif id=="loot" then
-                            for _,card in ipairs(NHDragonLoot.award(state,amount)) do finds[#finds+1]=card end
-                            NHCompanions.income(state,"dragon",count,finds)
-                            NHCompanions.deliver(state)
-                        else state.resources[id]=(state.resources[id] or 0)+amount end
-                    end
-                end
-                total=total+count
-                if kind.facility=="beehive" then hives=hives+count
-                elseif kind.facility=="gel_pool" then gel=gel+count
-                elseif not kind.facility then ranch=ranch+count end
-            end
-        end
-    end
-    if ranch>0 then
-        for _,id in ipairs(NHCompanions.reward(state,"livestock",ranch)) do finds[#finds+1]=id end
-    end
-    if hives>0 then
-        for _,id in ipairs(NHCompanions.reward(state,"beehive",hives)) do finds[#finds+1]=id end
-    end
-    if gel>0 then
-        NHGelPool.award(state,gel)
-        for _,id in ipairs(NHCompanions.reward(state,"gel_pool",gel)) do finds[#finds+1]=id end
-    end
-    return total,finds
+    return 0
 end
 
 function NHLivestock.yieldText(species,lang)
@@ -234,6 +171,38 @@ function NHLivestock.yieldText(species,lang)
         amounts[#amounts+1]=part[2]
     end
     return table.concat(labels," / "),table.concat(amounts," / ")
+end
+
+local petOutputs={dog={"dog_find","travel_satchel","travel_pack"},cat={"cat_tool","loot_case"}}
+local function rateText(amount)
+    return (("%.3f"):format(amount):gsub("0+$",""):gsub("%.$",""))
+end
+
+local function petView(state,pen,perMinute,lang,bonus)
+    local income=NHFarm.income
+    local rates=income.petRates(pen.species,pen.adults,bonus)
+    local labels,values={},{}
+    pen.petRows={}
+    for _,id in ipairs(petOutputs[pen.species]) do
+        local amount=rates[id] or 0
+        local def=NHLootBags.types[id] or NHLivestock.resources[id]
+        local label=lang=="zh" and def.zh or def.en
+        labels[#labels+1],values[#values+1]=label,rateText(amount)
+        local row={id=id,label=label,rate=rateText(amount)}
+        if NHLootBags.types[id] then row.fraction=income.petFraction(state,id) end
+        pen.petRows[#pen.petRows+1]=row
+        perMinute[id]=(perMinute[id] or 0)+amount
+    end
+    if pen.species=="dog" then
+        for _,bundle in ipairs(income.dogBundles) do
+            local id,quantity=bundle[1],bundle[2]
+            perMinute[id]=(perMinute[id] or 0)+pen.adults*quantity/#income.dogBundles
+        end
+    end
+    pen.rateLabel,pen.rateValue=table.concat(labels," / "),table.concat(values," / ")
+    pen.findsPending=income.petPending(state,pen.species)
+    pen.sharedFindsPending=income.petSharedPending(state)
+    pen.blocked=income.petBlocked(state,pen.species)
 end
 
 -- Include future maturities in the estimate. A newly purchased juvenile can
@@ -249,7 +218,8 @@ local function nextPayout(herd,now,adults,matured,needed)
     if adults>0 then return cursor+math.ceil(needed/adults) end
 end
 
-function NHLivestock.view(state,lang,now)
+function NHLivestock.view(state,lang,now,pet,basis)
+    if basis==nil then pet,basis=NHCompanions.productionCurrent(state) end
     local pens,perMinute={},{}
     local language=lang=="zh" and 1 or 2
     now=math.max(state.farm.time,now)
@@ -262,29 +232,50 @@ function NHLivestock.view(state,lang,now)
                 expansion=facility,canExpand=NHStore.level(state,facility)<3,capacity=capacity,count=0,
                 adults=0,juveniles=0,progress=0,owed=0,growth=kind.growth/60,period=kind.period/60}
             pen.yieldLabel,pen.yieldValue=NHLivestock.yieldText(species,lang)
+            local source=species=="dragon_egg" and "dragon" or facility
+            local bonus=NHFarm.income.bonus(state,facility,source,pet,basis)
+            if species=="dragon_egg" then pen.rareProgress=NHDragonLoot.rareProgress(state) end
             local herd=(state.farm.herds or {})[species]
             if herd then
-                local progress,owed,matured=project(herd,kind.period,state.farm.time,now)
+                local progress,owed,matured=NHLivestock.project(herd,kind.period,state.farm.time,now)
                 pen.count=herd.adults+#herd.young
                 pen.adults,pen.juveniles=herd.adults+matured,#herd.young-matured
                 pen.grown=pen.adults>0
                 pen.name=pen.grown and kind.adult[language] or pen.young
                 pen.owed,pen.progress=owed,owed>0 and 1 or progress/kind.period
-                pen.blocked=owed>0 and payable(state,kind,owed)==0
+                local debt=state.farm.minuteIncome and state.farm.minuteIncome.owed or {}
+                for _,part in ipairs(kind.yields) do
+                    local id=part[1]
+                    if debt[id] and (id=="gold" and state.bankGold>=NHStore.maxGold
+                        or (state.resources[id] or 0)>=NHStore.maxResourceAmount) then pen.blocked=true end
+                end
                 if pen.juveniles>0 then pen.growthRemaining=math.ceil((herd.young[matured+1]-now)/60) end
                 pen.nextAt=owed>0 and now or nextPayout(herd,now,pen.adults,matured,kind.period-progress)
                 pen.remaining=math.ceil((pen.nextAt-now)/60)
                 if pen.adults>0 then
                     pen.effectivePeriod=kind.period/(60*pen.adults)
+                end
+                if pen.effectivePeriod and not petOutputs[species] then
                     local rate=60/pen.effectivePeriod
+                    local labels,values={},{}
                     for _,part in ipairs(kind.yields) do
-                        perMinute[part[1]]=(perMinute[part[1]] or 0)+part[2]*rate
+                        local id=part[1]
+                        local resource=NHFarm.crops[id] or NHLivestock.resources[id] or NHLootBags.types[id]
+                        local amount=part[2]*rate
+                        if id~="loot" then amount=amount*(1+bonus/10000) end
+                        perMinute[id]=(perMinute[id] or 0)+amount
+                        labels[#labels+1]=resource[lang=="zh" and "zh" or "en"]
+                        values[#values+1]=rateText(amount)
                     end
+                    pen.rateLabel,pen.rateValue=table.concat(labels," / "),table.concat(values," / ")
                     if species=="gel_pool" then
                         perMinute.spice=(perMinute.spice or 0)+rate*NHGelPool.bonusChance/100
                     end
                 end
             end
+            if petOutputs[species] then petView(state,pen,perMinute,lang,bonus) end
+            pen.rateLabel=pen.rateLabel or pen.yieldLabel
+            pen.rateValue=pen.rateValue or "0"
             pens[#pens+1]=pen
         end
     end
@@ -293,8 +284,10 @@ function NHLivestock.view(state,lang,now)
     local pool=NHStore.level(state,"gel_pool")>0
     if hive then ids[#ids+1]="sugar" end
     if hive or pool then ids[#ids+1]="spice" end
-    if pool then ids[#ids+1]="herb"; ids[#ids+1]="fiber" end
-    if NHStore.level(state,"dragon_nest")>0 then ids[#ids+1]="gold" end
+    local kennel=NHStore.level(state,"dog_kennel")>0
+    if pool or kennel then ids[#ids+1]="herb"; ids[#ids+1]="fiber" end
+    if kennel then ids[#ids+1]="grain" end
+    if NHStore.level(state,"dragon_nest")>0 or perMinute.gold then ids[#ids+1]="gold" end
     if NHStore.level(state,"dog_kennel")>0 then ids[#ids+1]="travel_satchel"; ids[#ids+1]="travel_pack" end
     if NHStore.level(state,"cat_house")>0 then ids[#ids+1]="loot_case" end
     for _,id in ipairs(ids) do

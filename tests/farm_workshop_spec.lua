@@ -25,9 +25,10 @@ assert(NHStore.commit(state))
 state=assert(NHStore.load())
 now=NHFarm.observe(state,180*60)
 assert(NHFarm.sync(state,now) and not NHFarm.sync(state,now))
+local harvest={fiber=9,herb=4,grain=6,sugar=5}
 for slot,crop in ipairs(plots) do
     assert(state.farm.plots[slot].crop==crop and state.farm.plots[slot].readyAt>now)
-    assert(state.resources[crop]==NHFarm.crops[crop].amount and not state.materials[crop])
+    assert(state.resources[crop]==harvest[crop] and not state.materials[crop])
 end
 assert(#state.warehouse==0)
 
@@ -53,5 +54,5 @@ assert(state.warehouse[2].id~=bandageId and state.warehouse[2].item.kind=="medki
 finish("bread")
 finish("sugar_cube")
 assert(#state.warehouse==4 and state.warehouse[3].item.kind=="bread" and state.warehouse[4].item.kind=="sugar_cube")
-assert(state.resources.fiber==2 and state.resources.herb==2 and state.resources.grain==4 and state.resources.sugar==1)
+assert(state.resources.fiber==5 and state.resources.herb==2 and state.resources.grain==4 and state.resources.sugar==2)
 print("Four parallel crops harvested once, then turned into actual warehouse supplies across reloads.")

@@ -110,8 +110,12 @@ function M.nearby(px,py,frame)
     return matches
 end
 
+function M.remaining(frame)
+    return math.max(0,(tonumber(GlobalsGetValue(scanKey,"0")) or 0)-frame)
+end
+
 function M.active(frame)
-    return (tonumber(GlobalsGetValue(scanKey,"0")) or 0)>frame
+    return M.remaining(frame)>0
 end
 
 function M.scan(player,pay,report)

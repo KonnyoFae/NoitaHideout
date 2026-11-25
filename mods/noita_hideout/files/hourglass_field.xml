@@ -1,0 +1,5 @@
+<Entity name="Stasis Hourglass field" tags="nh_hourglass_field">
+    <VariableStorageComponent _tags="nh_hourglass_clock" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/hourglass_tick.lua" execute_every_n_frame="1"
+        vm_type="ONE_PER_COMPONENT_INSTANCE" />
+</Entity>

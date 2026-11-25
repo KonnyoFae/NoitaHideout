@@ -1,0 +1,12 @@
+<Entity name="$nh_hideout_stasis_hourglass" tags="nh_red_relic,noita_hideout_stasis_hourglass,item_pickup,teleportable_NOT">
+    <SpriteComponent _tags="enabled_in_world,enabled_in_hand,nh_collectible_sprite" image_file="mods/noita_hideout/files/items/stasis_hourglass_sprite.xml" rect_animation="default"
+        has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" z_index="-1.5" />
+    <SpriteAnimatorComponent _tags="enabled_in_hand" target_sprite_comp_name="nh_collectible_sprite" />
+    <ItemComponent _tags="enabled_in_world" item_name="$nh_hideout_stasis_hourglass" ui_description="$nh_hideout_stasis_hourglass_desc" ui_sprite="mods/noita_hideout/files/items/stasis_hourglass_icon.png"
+        is_pickable="1" is_equipable_forced="1" preferred_inventory="QUICK" max_child_items="0" play_spinning_animation="0"
+        always_use_item_name_in_ui="1" is_consumable="0" is_stackable="0" uses_remaining="90" />
+    <UIInfoComponent _tags="enabled_in_world" name="$nh_hideout_stasis_hourglass" />
+    <AbilityComponent ui_name="$nh_hideout_stasis_hourglass" throw_as_item="0" click_to_use="0" use_gun_script="0">
+        <gun_config deck_capacity="0" />
+    </AbilityComponent>
+</Entity>

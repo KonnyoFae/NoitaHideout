@@ -1,0 +1,4 @@
+<Entity tags="nh_duster_outlet">
+    <MaterialInventoryComponent drop_as_item="0" do_reactions="0" />
+    <LuaComponent script_source_file="mods/noita_hideout/files/duster_outlet_tick.lua" execute_every_n_frame="60" />
+</Entity>

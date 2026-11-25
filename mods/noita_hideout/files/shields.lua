@@ -41,6 +41,11 @@ end
 
 -- Charge is measured in fractions of a cell. A max-HP change preserves the
 -- filled fraction and the broken cells. Exact integer boundaries stay broken.
+function S.chargePoints(charge,maxHP)
+    local hpScale=tonumber(MagicNumbersGetValue("GUI_HP_MULTIPLIER")) or 25
+    return charge/S.cell*(maxHP/2)*hpScale
+end
+
 function S.absorb(charge,maxHP,resist,damage)
     if damage<=0 or maxHP<=0 or charge<=0 then return charge,damage end
     local unitsPerDamage=(1-resist/100)*S.cell/(maxHP/2)
@@ -126,7 +131,8 @@ function S.move(s,r)
         end
         s[field]=nil
     end
-    if field=="gearShield" and s.gearShield then s.gearShield.epoch=s.revision+1 end
+    if (field=="gearShield" or field=="gearRig") and s[field] then s[field].epoch=s.revision+1 end
+    if field=="gearShield" and s[field] then s[field].equippedAt=s[field].epoch end
     return true
 end
 

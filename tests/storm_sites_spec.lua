@@ -126,9 +126,10 @@ function PhysicsApplyForce(id,x,y)
     end
 end
 
-local function status(tower,rig)
-    local hasTower,hasRig=stations.available()
-    assert(hasTower==tower and hasRig==rig)
+local function status(tower,rig,workingRig)
+    local hasTower,hasRig,_,__,runningTower,runningRig=stations.available()
+    assert(hasTower==tower and hasRig==rig and runningTower==tower)
+    if workingRig~=nil then assert(runningRig==workingRig) end
 end
 status(false,false)
 -- Confirm on the exact core entry frame, even underground and between
@@ -147,7 +148,7 @@ biome="$biome_desert"; now=64860
 stations.update(5,now-17,true)
 assert(not spawns.rig and globals["cycle_storm.sites.desert"]=="pending")
 stations.update(5,now-17)
-status(false,true)
+status(false,true,false)
 _,__,wellPending,rigPending=stations.available()
 assert(wellPending and not rigPending and #landings==1 and landings[1]=="$nh_storm_rigs_arrive_desc")
 assert(spawns.rig==3 and globals["cycle_storm.idle_rigs"]=="3")
@@ -169,6 +170,7 @@ local start=now
 dofile(entities[2].scripts[1].script_interacting)
 interacting(player,2)
 interacting(player,2)
+status(false,true,true) -- The interaction VM has started one of three idle rigs.
 assert(globals["cycle_storm.idle_rigs"]=="2" and entities[2].drilling and not entities[3].drilling)
 for seconds=0,300 do
     now=start+seconds*60
@@ -297,8 +299,10 @@ EntityKill(3); stations.update(1,0); status(false,true)
 assert(globals["cycle_storm.idle_rigs"]=="1")
 stations.activate(player,4)
 entities[4].unloaded=true; streamed=false
-now=now+60; stations.update(1,0); status(false,true)
-now=now+299*60; status(false,false)
+stations=dofile("mods/noita_hideout/files/storm/sites/stations.lua")
+now=now+60; stations.update(1,0); status(false,true,true)
+now=now+299*60-1; status(false,true,true)
+now=now+1; status(false,false,false)
 assert(#notices==2)
 -- A rolled-back partial cluster never lights the HUD or queues a toast.
 entities[4].unloaded=false; streamed=true; biome="$biome_desert"
@@ -323,4 +327,16 @@ stations.update(1,0); status(true,false)
 EntityKill(b); stations.update(1,0); status(true,false)
 EntityKill(a); stations.update(1,0); status(false,false)
 assert(#notices==3 and #landings==2)
+-- One idle rig keeps the cluster available. The two working rigs retain
+-- their individual deadlines after the cluster is unloaded and the VM reloaded.
+local first,second,idle=make("rig",700,0),make("rig",768,0),make("rig",836,0)
+now=now-now%60+60
+stations.activate(player,first)
+now=now+60; stations.activate(player,second)
+local lastDeadline=now+300*60
+entities[first].unloaded,entities[second].unloaded,entities[idle].unloaded=true,true,true
+streamed=false; stations=dofile("mods/noita_hideout/files/storm/sites/stations.lua")
+stations.update(1,0); status(false,true,true)
+now=lastDeadline-60; status(false,true,true)
+now=lastDeadline; status(false,true,false)
 print("Storm sites: group lock, full oil schedule, reinforcements, blocked ports, shatter, regrowth and expiry passed.")

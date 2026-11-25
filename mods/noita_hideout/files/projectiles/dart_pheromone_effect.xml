@@ -1,0 +1,6 @@
+<Entity tags="nh_dart_pheromone">
+    <InheritTransformComponent only_position="1" />
+    <GameEffectComponent effect="CHARM" frames="4500" />
+    <VariableStorageComponent _tags="nh_dart_clock" />
+    <LifetimeComponent lifetime="4500" serialize_duration="1" />
+</Entity>

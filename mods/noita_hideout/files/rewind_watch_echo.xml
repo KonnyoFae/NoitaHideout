@@ -1,0 +1,5 @@
+<Entity>
+    <SpriteComponent image_file="data/enemies_gfx/player.xml" rect_animation="stand"
+        offset_x="6" offset_y="14" alpha="0.27" emissive="1" z_index="-1" />
+    <LifetimeComponent lifetime="12" />
+</Entity>

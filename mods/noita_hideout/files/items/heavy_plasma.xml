@@ -1,12 +1,16 @@
 <Entity name="$nh_hideout_heavy_plasma" tags="nh_support_weapon,nh_loaded_gun,noita_hideout_heavy_plasma,item_pickup,item_physics,teleportable_NOT">
     <Base file="mods/noita_hideout/files/items/base.xml">
-        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/heavy_plasma_world.png" />
-        <SpriteComponent image_file="mods/noita_hideout/files/items/heavy_plasma_world.png" offset_x="3" offset_y="7" />
+        <PhysicsImageShapeComponent image_file="mods/noita_hideout/files/items/heavy_plasma_shape.png" />
+        <SpriteComponent image_file="mods/noita_hideout/files/items/heavy_plasma_art.png" offset_x="6" offset_y="14"
+            has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" />
         <ItemComponent item_name="$nh_hideout_heavy_plasma" uses_remaining="24" ui_description="$nh_hideout_heavy_plasma_desc"
             ui_sprite="mods/noita_hideout/files/items/heavy_plasma.png" />
         <UIInfoComponent name="$nh_hideout_heavy_plasma" />
         <AbilityComponent ui_name="$nh_hideout_heavy_plasma" />
     </Base>
+    <SpriteComponent _tags="enabled_in_world,nh_support_ground_art" image_file="mods/noita_hideout/files/items/heavy_plasma_art.png"
+        offset_x="12" offset_y="12" has_special_scale="1" special_scale_x="0.5" special_scale_y="0.5" z_index="-1" />
+    <LuaComponent _enabled="0" _tags="enabled_in_hand,nh_equipment_mirror" script_source_file="mods/noita_hideout/files/equipment_sprite_mirror.lua" execute_every_n_frame="1" />
     <HotspotComponent _tags="shoot_pos" offset.x="9" offset.y="-4" />
     <LuaComponent script_item_picked_up="mods/noita_hideout/files/bag_pickup.lua" execute_every_n_frame="-1" />
 </Entity>

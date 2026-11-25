@@ -51,6 +51,7 @@ function ComponentSetValue2(c,k,v) c[k]=v end
 function ComponentObjectGetValue2(c,object,k) return c[object][k] end
 function ComponentObjectSetValue2(c,object,k,v) c[object][k]=v end
 function EntityGetTransform() return 10,20 end
+function RaytracePlatforms() return false end
 function GameGetFrameNum() return frame end
 function EntityGetIsAlive(id) return entities[id]~=nil end
 function EntityGetParent(id) return entities[id].parent end
@@ -78,7 +79,12 @@ local failedPath
 function EntityLoad(path)
     if path==failedPath then return 0 end
     local id=spawn(path)
+    if path:find(root.."items/",1,true)==1 then EntityAddComponent2(id,"ItemComponent",{uses_remaining=4}) end
     local effect=({[root.."tarot_life.xml"]="RESPAWN",
+        ["data/entities/misc/effect_edit_wands_everywhere.xml"]="EDIT_WANDS_EVERYWHERE",
+        ["data/entities/misc/effect_protection_fire.xml"]="PROTECTION_FIRE",
+        ["data/entities/misc/effect_saving_grace.xml"]="SAVING_GRACE",
+        ["data/entities/misc/effect_remove_fog_of_war.xml"]="REMOVE_FOG_OF_WAR",
         ["data/entities/misc/effect_invisibility.xml"]="INVISIBILITY",
         ["data/entities/misc/effect_stains_drop_faster.xml"]="STAINS_DROP_FASTER"})[path]
     if effect then EntityAddComponent2(id,"GameEffectComponent",{effect=effect,frames=600}) end
@@ -132,6 +138,34 @@ assert(#EntityGetComponentIncludingDisabled(1,"LuaComponent","nh_tarot_revenge")
 assert(math.abs(dm.damage_multipliers.projectile-0.25)<0.00001)
 assert(R.apply(1,"tarot_tower",pay))
 assert(entities[nextId].path=="data/entities/items/pickup/beamstone.xml" and entities[nextId].parent==0)
+-- A refresh only consumes a charge if the entire physical reward can be delivered.
+assert(R.apply(1,"tarot_magician",pay))
+local mageTimer=assert(EntityGetFirstComponentIncludingDisabled(1,"VariableStorageComponent","nh_tarot_magician"))
+frame=frame+64
+R.tick(1)
+local mageLeft=mageTimer.value_int
+frame=0 -- a loaded world's frame counter can rewind
+dofile(root.."tarot_runtime.lua").tick(1)
+assert(mageTimer.value_int==mageLeft)
+local function countDrops()
+    local count=0
+    for _,e in pairs(entities) do
+        if e.path and e.path:find(root.."items/",1,true)==1 then count=count+1 end
+    end
+    return count
+end
+local batchSize=10
+assert(countDrops()==batchSize)
+failedPath=root.."items/shock_tube.xml"
+local before=paid
+assert(not R.apply(1,"tarot_magician",pay) and paid==before)
+assert(countDrops()==batchSize and mageTimer.value_int==mageLeft)
+failedPath=nil
+assert(not R.apply(1,"tarot_magician",function() return false end) and countDrops()==batchSize)
+assert(R.apply(1,"tarot_magician",pay) and countDrops()==batchSize*2 and mageTimer.value_int==NHTarot.duration)
+frame=frame+NHTarot.duration
+R.tick(1)
+assert(countDrops()==batchSize*2 and not EntityGetFirstComponentIncludingDisabled(1,"LuaComponent","nh_tarot_tick"))
 local shieldKind=NHShields.order[1]
 local s={revision=7,gearShield={item={kind=shieldKind,charge=0,repair=2,delay=180}},
     gearRig={item={kind="ammo_rig",reserve=0}}}
@@ -169,3 +203,98 @@ do
     assert(not EntityGetFirstComponentIncludingDisabled(vanilla,"UIIconComponent"))
 end
 print("Garden life icons: new and legacy effects display once; spent lives stay spent; native perks untouched.")
+
+do
+    local globals,writes={},{}
+    function GlobalsGetValue(k,default) return globals[k] or default end
+    function GlobalsSetValue(k,value) globals[k]=value end
+    function GameSetPostFxParameter(k,x,y,z,w)
+        assert(k=="nh_tarot_sight" and y==0 and z==0 and w==0)
+        writes[#writes+1]=x
+    end
+    function ComponentGetIsEnabled(c) return c.enabled~=false end
+    function ComponentGetTypeName(c) return c.kind end
+    function ComponentGetTags(c) return c._tags or "" end
+    function ComponentHasTag(c,tag) return c._tags==tag end
+    function ComponentAddTag(c,tag) c._tags=tag end
+    function ComponentRemoveTag(c,tag) if c._tags==tag then c._tags=nil end end
+    function EntityGetAllComponents(e) return entities[e].parts end
+    function EntityGetTags(e)
+        local tags={}
+        for tag in pairs(entities[e].tags) do tags[#tags+1]=tag end
+        return table.concat(tags,",")
+    end
+    local sight=dofile(root.."tarot_sight.lua")
+    local function blind(path,frames)
+        local e=spawn(path)
+        EntityAddChild(1,e)
+        EntityAddComponent2(e,"GameEffectComponent",{effect="BLINDNESS",frames=frames or 100})
+        return e
+    end
+    local source="data/entities/misc/effect_blindness.xml"
+    local pure=blind(source)
+    local mixed=blind(source)
+    EntityAddComponent2(mixed,"GameEffectComponent",{effect="CONFUSION",frames=211})
+    local scripted=blind(source)
+    EntityAddComponent2(scripted,"LuaComponent",{script_source_file="foreign_cleanup.lua"})
+    local perk=blind(source);EntityAddTag(perk,"perk_entity")
+    local tagged=blind(source);ComponentAddTag(entities[tagged].parts[1],"perk")
+    local permanent=blind(source,-1)
+    local streamed=blind("")
+    EntityAddComponent2(streamed,"UIIconComponent",{name="$status_blindness",icon_sprite_file="data/ui_gfx/status_indicators/blindness.png"})
+    local platform=EntityAddComponent2(1,"CharacterPlatformingComponent",{pixel_gravity=100})
+
+    assert(not sight.sync(1) and #writes==0)
+    assert(not R.apply(1,"tarot_sun",function()
+        assert(not dofile(root.."tarot_sight.lua").active(1))
+        return false
+    end))
+    assert(entities[pure] and #writes==0)
+    assert(R.apply(1,"tarot_sun",pay) and sight.active(1) and writes[1]==1)
+    assert(not entities[pure] and not entities[streamed])
+    assert(entities[mixed] and entities[scripted] and entities[perk] and entities[tagged] and entities[permanent])
+    assert(entities[mixed].parts[2].frames==211)
+    local later=blind("data/entities/misc/effect_blindness_custom_short.xml",200)
+    frame=frame+15;R.tick(1)
+    assert(not entities[later] and #writes==1)
+    assert(R.apply(1,"tarot_moon",pay) and R.apply(1,"tarot_moon",pay))
+    assert(platform.pixel_gravity==60 and #writes==1)
+    -- Independent script states and a rewound frame counter see the saved clocks.
+    frame=0;R=dofile(root.."tarot_runtime.lua");R.tick(1)
+    local restored=dofile(root.."tarot_sight.lua")
+    assert(restored.active(1) and #writes==1)
+    R.expire(1,"tarot_sun")
+    assert(restored.active(1) and #writes==1)
+    for _,tag in ipairs({"ew_client","ew_notplayer","nh_ew_waiting","polymorphed_player"}) do
+        entities[1].tags[tag]=true
+        assert(not restored.active(1) and not restored.sync(1) and not R.apply(1,"tarot_sun",pay))
+        entities[1].tags[tag]=nil
+    end
+    restored.reset()
+    assert(#writes==2 and writes[2]==0)
+    sight.sync(1)
+    assert(#writes==3 and writes[3]==1)
+    local hook=assert(EntityGetFirstComponentIncludingDisabled(1,"LuaComponent","nh_tarot_tick"))
+    assert(hook.execute_every_n_frame==15)
+    frame=frame+NHTarot.duration-16
+    R.tick(1)
+    assert(hook.execute_every_n_frame==15)
+    frame=frame+1
+    hook.mNextExecutionTime=frame+40 -- restored coarse scheduler
+    sight.sync(1)
+    assert(hook.execute_every_n_frame==1 and hook.mNextExecutionTime==frame+1)
+    for ahead=1,14 do
+        frame=frame+1
+        R.tick(1)
+        assert(hook.execute_every_n_frame==1 and #writes==3 and restored.active(1))
+    end
+    frame=frame+1
+    assert(not restored.active(1))
+    R.tick(1)
+    assert(#writes==4 and writes[4]==0 and platform.pixel_gravity==100)
+    local after=blind(source)
+    assert(not restored.sync(1) and entities[after] and #writes==4)
+    restored.reset(true)
+    assert(#writes==5 and writes[5]==0)
+end
+print("Sun and Moon sight: payment, overlap, expiry, native bodies, reload and dedicated blindness carriers passed.")

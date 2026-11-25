@@ -1,9 +1,11 @@
 local weatherPath = "mods/noita_hideout/files/storm/weather.lua"
 local frame, exposure = 0, 0
 local light, heavy = "cycle_storm_rain_loop", "cycle_storm_downpour_loop"
-local components = {[light] = {event_name = "materials/liquid_flow"}}
+local playerLoops = {[light] = {event_name = "materials/liquid_flow"}}
+local components = {[2] = playerLoops}
 local gain = {}
 local replacements, creates = 0, 0
+local loading, primed = false, {}
 local schedule = "0,77"
 function GameIsIntroPlaying() return false end
 function GameGetFrameNum() return frame end
@@ -12,30 +14,47 @@ function GlobalsSetValue(_, value) schedule = value end
 function GameGetCameraPos() return 0, 4200 end
 function GameGetSkyVisibility() return exposure end
 function GameGetWorldStateEntity() return 1 end
-function EntityGetWithTag() return {2} end
-function EntityGetIsAlive(id) return id == 2 end
-function EntityGetFirstComponentIncludingDisabled(_, kind, tag)
+function EntityGetWithTag() return loading and {} or {2} end
+function EntityCreateNew()
+    assert(loading and not components[3])
+    components[3] = {}
+    return 3
+end
+function EntityKill(id)
+    assert(loading and id == 3 and components[id])
+    components[id] = nil
+end
+function EntityGetIsAlive(id) return components[id] ~= nil end
+function EntityGetFirstComponentIncludingDisabled(id, kind, tag)
     if kind == "WorldStateComponent" then return 1 end
-    return components[tag]
+    return components[id][tag]
 end
 function ComponentSetValue2() end
 function ComponentGetValue2(c, k) return c[k] end
-function EntityRemoveComponent(_, c)
-    assert(c == components[light] and c.event_name == "materials/liquid_flow")
-    replacements, components[light] = replacements + 1, nil
+function EntityRemoveComponent(id, c)
+    assert(id == 2 and c == playerLoops[light] and c.event_name == "materials/liquid_flow")
+    replacements, playerLoops[light] = replacements + 1, nil
 end
-function EntityAddComponent2(_, _, data)
+function EntityAddComponent2(id, kind, data)
     local name = data._tags == light and "drizzle" or "downpour"
-    assert(not components[data._tags] and data.event_name == "cycle_storm/" .. name)
+    assert(kind == "AudioLoopComponent" and not components[id][data._tags] and data.event_name == "cycle_storm/" .. name)
     assert(data.file == "mods/noita_hideout/files/storm/audio/cycle_storm_" .. name .. ".bank")
     local bank = assert(io.open(data.file, "rb"))
     assert(bank:read(4) == "RIFF")
     bank:close()
     assert(data.calculate_material_lowpass == false)
-    creates, components[data._tags] = creates + 1, data
+    if id == 2 then creates = creates + 1 end
+    components[id][data._tags] = data
+    return data
 end
-function GameEntityPlaySoundLoop(_, tag, intensity)
-    assert(components[tag] and intensity > 0 and intensity <= 1)
+function GameEntityPlaySoundLoop(id, tag, intensity, intensity2)
+    assert(components[id][tag])
+    if loading then
+        assert(id == 3 and intensity == 0 and (intensity2 or 0) == 0 and not primed[tag])
+        primed[tag] = true
+        return
+    end
+    assert(id == 2 and intensity > 0 and intensity <= 1)
     gain[tag] = intensity
 end
 function GamePlaySound(_, event)
@@ -79,6 +98,10 @@ local environment=setmetatable({dofile=function(path)
     return {update=function() end}
 end},{__index=_G})
 local storm=setfenv(runtimeFile,environment)()
+loading=true
+storm.preloadAudio()
+assert(primed[light] and primed[heavy] and not components[3])
+loading=false
 for _,sample in ipairs({{125999,false},{126000,72000},{126060,72000},
     {136800,false},{198000,144000}}) do
     frame=sample[1]

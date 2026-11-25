@@ -1,0 +1,8 @@
+reactor_warning.wav
+
+Adapted from “National Alert Signal, Rémalard (61)” by Joseph Sardin,
+a field recording of the French civil warning siren in Rémalard, October 2024.
+Source and CC0 license: https://bigsoundbank.com/national-alert-signal-remalard-61-s3257.html
+
+Nuclear Design Bureau uses this recording for the safety cover siren.
+The Hideout cue edits the wind-up and sustained tone into a single warning.

@@ -8,6 +8,7 @@ dofile(root.."store.lua")
 local state=assert(NHStore.load())
 NHStore.newRun(state)
 state.levels.grenade=1
+assert(NHTurrets.validCount(16) and not NHTurrets.validCount(17) and not NHTurrets.validCount(0) and not NHTurrets.validCount(1.5))
 for _,kind in ipairs(NHTurrets.order) do
     local d=NHTurrets.types[kind]
     state.resources={arcane_scrap=1}
@@ -28,11 +29,26 @@ for _,kind in ipairs(NHTurrets.order) do
     state=assert(NHStore.load())
     local row=state.warehouse[#state.warehouse]
     assert(row.item.kind==kind and row.item.count==4)
-    assert(not NHStore.stackSlot(state,"warehouse",{kind=kind,count=1}))
-    row.item.count=2
-    assert(NHStore.stackSlot(state,"warehouse",{kind=kind,count=2}))
+    assert(NHStore.stackSlot(state,"warehouse",{kind=kind,count=6})==row.slot)
+    NHStore.mergeStack(row.item,{kind=kind,count=6})
+    state.resources={arcane_scrap=1}
+    if d.essence then state.resources[d.essence]=1 end
+    state.bankGold=200
+    assert(NHStore.startOrder(state,kind) and state.order.output.slot==row.slot)
+    assert(NHStore.commit(state))
+    state=assert(NHStore.load())
+    row=state.warehouse[#state.warehouse]
+    assert(NHStore.stackSlot(state,"warehouse",{kind=kind,count=2})==row.slot)
+    assert(not NHStore.stackSlot(state,"warehouse",{kind=kind,count=3}))
     NHStore.mergeStack(row.item,{kind=kind,count=2})
-    assert(row.item.count==4)
+    assert(NHStore.commit(state))
+    assert(NHStore.advanceProduction(state,{run=state.runSerial,orderId=state.order.id,progress=state.order.required}))
+    assert(row.item.count==16 and not NHStore.stackSlot(state,"warehouse",{kind=kind,count=1}))
+    local quote=NHStore.supplyTrade.quote(row.item)
+    assert(quote.oneGold==(d.essence and 35 or 30) and quote.allGold==16*quote.oneGold)
+    assert(NHStore.commit(state))
+    state=assert(NHStore.load())
+    assert(state.warehouse[#state.warehouse].item.count==16)
 end
 
 local entities,nextId,selected={},10,nil
@@ -92,45 +108,46 @@ NHProducts.aim=function() return 1,0 end
 local runtime=dofile(root.."turret_runtime.lua")
 for _,kind in ipairs(NHTurrets.order) do
     local a=adapters[kind]
-    selected=assert(a.restore({kind=kind,count=4},0,0))
-    assert(a.capture(selected).count==4)
+    assert(not a.restore({kind=kind,count=17},0,0))
+    selected=assert(a.restore({kind=kind,count=16},0,0))
+    assert(a.capture(selected).count==16)
     ground=false
     local view=assert(runtime.heldPreview(1))
     assert(not view.valid and view.kind==kind and view.x==28)
-    assert(not NHProducts.fireHeld(1) and a.capture(selected).count==4)
+    assert(not NHProducts.fireHeld(1) and a.capture(selected).count==16)
     ground=true; blocked=true
     assert(not runtime.heldPreview(1).valid)
-    assert(not NHProducts.fireHeld(1) and a.capture(selected).count==4)
+    assert(not NHProducts.fireHeld(1) and a.capture(selected).count==16)
     blocked=false; overlap=true
     assert(not runtime.heldPreview(1).valid)
-    assert(not NHProducts.fireHeld(1) and a.capture(selected).count==4)
+    assert(not NHProducts.fireHeld(1) and a.capture(selected).count==16)
     overlap=false; failed=true
-    assert(not NHProducts.fireHeld(1) and a.capture(selected).count==4)
+    assert(not NHProducts.fireHeld(1) and a.capture(selected).count==16)
     failed=false; omitted="VariableStorageComponent"
-    assert(not NHProducts.fireHeld(1) and a.capture(selected).count==4 and not entities[loaded])
+    assert(not NHProducts.fireHeld(1) and a.capture(selected).count==16 and not entities[loaded])
     omitted=nil
     assert(not runtime.deploy(1,kind,function() return false end) and not entities[loaded])
     local preview=runtime.heldPreview(1)
     assert(preview.valid)
-    assert(NHProducts.fireHeld(1) and a.capture(selected).count==3)
+    assert(NHProducts.fireHeld(1) and a.capture(selected).count==15)
     local tower=entities[loaded]
     assert(tower.x==preview.x and tower.y==preview.y)
     assert(tower.GenomeDataComponent[1].herd_id==7)
     local anchor=comp(loaded,"VariableStorageComponent","nh_decoy_anchor")
     assert(anchor.value_int==preview.x and anchor.value_float==preview.y)
-    for i=1,3 do assert(NHProducts.fireHeld(1)) end
+    for i=1,15 do assert(NHProducts.fireHeld(1)) end
     assert(not EntityGetIsAlive(selected))
 end
 
 -- Pickup delivery only accepts a matching stack with space.
 dofile(root.."products.lua")
-selected=assert(adapters.turret_pack.restore({kind="turret_pack",count=2},0,0))
+selected=assert(adapters.turret_pack.restore({kind="turret_pack",count=14},0,0))
 local source=assert(adapters.rocket_turret_pack.restore({kind="rocket_turret_pack",count=1},0,0))
 NHTransfers.carried=function() return {source,selected} end
 NHTransfers.available=function() return true end
 local pickup=dofile(root.."pickup.lua")
 local target,total=pickup.stackTarget(state,1,"turret_pack",2,source)
-assert(target and total==4)
+assert(target and total==16)
 assert(not pickup.stackTarget(state,1,"turret_pack",3,source))
 assert(not pickup.stackTarget(state,1,"shield_turret_pack",1,source))
 

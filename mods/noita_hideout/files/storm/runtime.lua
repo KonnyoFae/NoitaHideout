@@ -18,8 +18,11 @@ local function update()
     end
 end
 
-local function draw()
-    if phase then draw_cycle(weather, phase, elapsed, age, stations, locations) end
+local effects
+local function draw(player,lang)
+    if not phase then return end
+    effects=effects or dofile(root.."effects.lua")
+    draw_cycle(weather,phase,elapsed,age,stations,locations,effects(player,lang,GameGetFrameNum(),locations))
 end
 
-return {update = update, draw = draw}
+return {update = update, draw = draw, preloadAudio = weather.preloadAudio}

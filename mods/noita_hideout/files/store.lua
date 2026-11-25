@@ -7,6 +7,7 @@ NHStormProducts=dofile("mods/noita_hideout/files/storm_products.lua")
 NHStore.supplyTrade=dofile("mods/noita_hideout/files/supply_trade.lua")
 NHStore.alchemyResources=dofile("mods/noita_hideout/files/alchemy_resources.lua")
 NHFirearms=dofile("mods/noita_hideout/files/firearms.lua")
+NHKatanas=dofile("mods/noita_hideout/files/katanas.lua")
 NHShields=dofile("mods/noita_hideout/files/shields.lua")
 NHTurrets=dofile("mods/noita_hideout/files/turrets.lua")
 NHGuns=dofile("mods/noita_hideout/files/guns.lua")
@@ -19,6 +20,7 @@ dofile("mods/noita_hideout/files/card_wallets.lua")
 dofile("mods/noita_hideout/files/relics.lua")
 NHTablets=dofile("mods/noita_hideout/files/tablets.lua")
 NHNativeValuables=dofile("mods/noita_hideout/files/native_valuables.lua")
+NHRedRelics=dofile("mods/noita_hideout/files/red_relics.lua")
 NHInjectors=dofile("mods/noita_hideout/files/injectors.lua")
 NHMedkits=dofile("mods/noita_hideout/files/medkits.lua")
 NHSurgeryKits=dofile("mods/noita_hideout/files/surgery_kits.lua")
@@ -50,7 +52,7 @@ end
 
 local function fresh(profile)
     local s={
-        pheromoneMagazines=true,supportAmmoExpanded=true,railgunAmmoExpanded=true,ammoPoints=true,multimodeMagazines=true,durableChargers=true, fiveDoseUses=true, medicalStacks=true, foodPortions=true, version = 1, profile = profile, revision = 0,
+        pheromoneMagazines=20,supportAmmoExpanded=true,railgunAmmoExpanded=true,ammoPoints=true,multimodeMagazines=true,durableChargers=true, fiveDoseUses=true, medicalStacks=true, foodPortions=true, version = 1, profile = profile, revision = 0,
         runSerial = 0, closedThrough = 0, checkpoints = {},
         nextItemId = 1, materials = {}, docks = {}, warehouse = {}, safe = {}, safeCapacity = 2, sharedSlots = true, collectionSlots=true,
         pouches = {},
@@ -117,6 +119,7 @@ NHStore.itemCategories.relic_chain="equipment"
 NHStore.itemCategories.relic="equipment"
 NHStore.itemCategories.tablet="equipment"
 NHStore.itemCategories.native_valuable="equipment"
+for kind in pairs(NHRedRelics.types) do NHStore.itemCategories[kind]="collection" end
 NHStore.itemCategories.card_wallet="equipment"
 for kind in pairs(NHEquipment.links) do NHStore.itemCategories[kind]="equipment" end
 for _,kind in ipairs(NHShields.order) do NHStore.itemCategories[kind]="equipment" end
@@ -124,6 +127,7 @@ for _,kind in ipairs(NHShields.chargerOrder) do NHStore.itemCategories[kind]="eq
 for _,kind in ipairs(NHFirearms.order) do
     NHStore.itemCategories[kind]=NHFirearms.items[kind].magazine and "wand" or "equipment"
 end
+for _,kind in ipairs(NHKatanas.order) do NHStore.itemCategories[kind]=NHKatanas.types[kind].warehouseCategory or "wand" end
 function NHStore.category(kind)
     return NHStore.itemCategories[kind] or "supplies"
 end
@@ -284,6 +288,10 @@ local function validate(s)
     assert(s.profile >= 1 and s.closedThrough <= s.runSerial
         and s.nextItemId >= 1, "Invalid profile counters")
     assert(whole(s.pendingChargerUses or 0),"Invalid legacy charger balance")
+    if s.katanaRewardToken~=nil or s.katanaRewardSeen~=nil then
+        assert(type(s.katanaRewardToken)=="string" and #s.katanaRewardToken>0 and #s.katanaRewardToken<=160
+            and whole(s.katanaRewardSeen) and s.katanaRewardSeen<=2147483647,"Invalid katana reward receipt")
+    end
     if s.ewDepositPending~=nil then validateDeposit(s.ewDepositPending,s.ewActive) end
     if s.ewDepositReceipt~=nil then
         local world,owner,seq=tostring(s.ewDepositReceipt):match("^([%w_-]+)|(%w+)|([1-9]%d*)$")
@@ -323,7 +331,9 @@ local function validate(s)
     progression.validate(s,whole)
     NHFarm.validate(s,whole)
     local function validateConsumable(item)
-        if NHFirearms.items[item.kind] then
+        if NHKatanas.types[item.kind] then
+            assert(NHKatanas.valid(item),"Invalid katana")
+        elseif NHFirearms.items[item.kind] then
             assert(NHFirearms.valid(item),"Invalid firearm equipment")
         elseif NHShields.types[item.kind] or NHShields.chargers[item.kind] then
             assert(NHShields.valid(item),"Invalid shield equipment")
@@ -345,6 +355,8 @@ local function validate(s)
             assert(NHRelics.valid(item),"Invalid relic or chain.")
         elseif item.kind=="tablet" then
             assert(NHTablets.valid(item),"Invalid tablet.")
+        elseif NHRedRelics.types[item.kind] then
+            assert(NHRedRelics.valid(item),"Invalid collectible durability.")
         elseif item.kind=="native_valuable" then
             assert(NHNativeValuables.valid(item),"Invalid native valuable.")
         elseif NHEquipment.links[item.kind] then
@@ -453,26 +465,64 @@ local function validate(s)
     end
 end
 
--- Only strings, finite numbers, booleans and tables. Text is length-prefixed
--- in bytes, so localized names and punctuation need no escaping.
-local function encode(root)
+local function copy_tree(value)
+    if type(value) ~= "table" then return value end
+    local copy = {}
+    for key, child in pairs(value) do copy[key] = copy_tree(child) end
+    return copy
+end
+
+local function same_tree(value, snapshot)
+    if rawequal(value, snapshot) then
+        -- %.17g preserves the sign of zero in the NH1 number token.
+        return value ~= 0 or 1 / value == 1 / snapshot
+    end
+    if type(value) ~= "table" or type(snapshot) ~= "table" then return false end
+    for key, child in pairs(value) do
+        if not same_tree(child, rawget(snapshot, key)) then return false end
+    end
+    for key in pairs(snapshot) do
+        if rawget(value, key) == nil then return false end
+    end
+    return true
+end
+
+-- NH1 length-prefixes text in bytes. A cached row contains exactly the bytes
+-- produced by this encoder, including all of its item and slot metadata.
+local function encode(root, previous_rows)
     local parts, visiting, bytes = {}, {}, 0
+    local next_rows = previous_rows and {}
     local function add(fragment)
         bytes = bytes + #fragment
         assert(bytes <= max_bytes, "Prototype profile exceeds 1 MiB")
         parts[#parts + 1] = fragment
     end
-    local function put(value, depth)
+    local put
+    local function put_row(row, depth)
+        local id = type(row) == "table" and rawget(row, "id")
+        if not whole(id) then return put(row, depth) end
+        local previous = previous_rows[id]
+        if previous and same_tree(row, previous.row) then
+            add(previous.bytes)
+            next_rows[id] = previous
+        else
+            local start = #parts + 1
+            put(row, depth)
+            next_rows[id] = {row = copy_tree(row), bytes = table.concat(parts, "", start, #parts)}
+        end
+    end
+    put = function(value, depth)
         assert(depth <= max_depth, "Profile nesting too deep")
         local kind = type(value)
         if kind == "table" then
             assert(not visiting[value], "Cyclic inventory data")
             visiting[value] = true
             add("{")
+            local write_value = previous_rows and depth == 1 and rawequal(value, root.warehouse) and put_row or put
             for k, v in pairs(value) do
                 assert(type(k) == "number" or type(k) == "string", "Unsupported inventory key")
                 put(k, depth + 1)
-                put(v, depth + 1)
+                write_value(v, depth + 1)
             end
             add("}")
             visiting[value] = nil
@@ -490,7 +540,7 @@ local function encode(root)
         end
     end
     put(root, 0)
-    return table.concat(parts)
+    return table.concat(parts), next_rows
 end
 
 local function decode(payload)
@@ -711,19 +761,36 @@ local function unpack_slot(raw)
         migrateChargers(s)
         s.durableChargers=true
     end
-    if not s.pheromoneMagazines then
-        local function refill(item)
-            if item and item.kind=="flare_gun" then
-                assert(item.remaining==1,"Invalid legacy flare gun.")
-                NHGuns.unpack(item,assert(NHGuns.convertFlares(item.count or 1)))
+    if s.pheromoneMagazines~=20 then
+        -- 'true' identifies the four-round format. Earlier single-use signal
+        -- guns retain their original exchange of four rounds per gun.
+        assert(not s.pheromoneMagazines or s.pheromoneMagazines==true,"Unknown pheromone magazine format")
+        local function repack(item)
+            if not item or item.kind~="flare_gun" then return end
+            local count=item.count or 1
+            assert(NHStore.validBandageCount(count),"Invalid legacy flare count")
+            local rounds
+            if s.pheromoneMagazines then
+                assert(NHStore.validBandageCount(item.remaining) and item.remaining<=4,"Invalid legacy pheromone magazine")
+                rounds=(count-1)*4+item.remaining
+            else
+                assert(item.remaining==1,"Invalid legacy flare gun")
+                rounds=NHGuns.convertFlares(count)
             end
+            assert(NHStore.validBandageCount(rounds),"Invalid legacy ammunition count")
+            NHGuns.unpack(item,rounds)
+        end
+        local function expedition(slot)
+            for _,release in pairs(slot.transit and slot.transit.issued or {}) do repack(release.row.item) end
+            if slot.ewDepositPending then repack(slot.ewDepositPending.record) end
         end
         for _,rows in ipairs({s.safe,s.warehouse}) do
-            for _,row in ipairs(rows) do refill(row.item) end
+            for _,row in ipairs(rows) do repack(row.item) end
         end
-        for _,release in pairs(s.transit and s.transit.issued or {}) do refill(release.row.item) end
-        if s.order then refill(s.order.output.item) end
-        s.pheromoneMagazines=true
+        if s.order then repack(s.order.output.item) end
+        expedition(s)
+        for _,slot in pairs(s.ewExpeditions or {}) do expedition(slot) end
+        s.pheromoneMagazines=20
     end
     NHFarm.adopt(s.farm)
     if not s.sharedSlots then
@@ -740,11 +807,43 @@ local function unpack_slot(raw)
     return s
 end
 
+-- The settings and head remain authoritative. Only the active profile is
+-- cached; a superseded slot keeps its verified revision without its tree.
+local snapshot_profile, verified_slots, warehouse_rows
+local draft_sources = setmetatable({}, {__mode = "k"})
+
+local function read_slot(index, raw, profile, head)
+    local cached = verified_slots[index]
+    if cached and cached.raw == raw then
+        if cached.revision ~= head then
+            cached.state = nil
+            return
+        end
+        if cached.state then return cached.state end
+    end
+    verified_slots[index] = nil
+    local ok, state = pcall(unpack_slot, raw)
+    if ok and state.profile == profile then
+        local winner = state.revision == head and state or nil
+        verified_slots[index] = {raw = raw, revision = state.revision, state = winner}
+        return winner
+    end
+end
+
+local function revisionKey(profile) return "noita_hideout.p"..profile.."_revision" end
+
+function NHStore.publishedRevision(profile)
+    return ModSettingGet(revisionKey(profile)) or 0
+end
+
 local function read_slots()
     local profile = active_profile()
+    if profile ~= snapshot_profile then
+        snapshot_profile, verified_slots, warehouse_rows = profile, {}, {}
+    end
     local prefix = "noita_hideout.p" .. profile
     local slots = {prefix .. "_a", prefix .. "_b"}
-    local head_key = prefix .. "_revision"
+    local head_key = revisionKey(profile)
     local head = ModSettingGet(head_key)
     assert(head == nil or whole(head), "Invalid hideout revision")
     local winner, index = nil, nil
@@ -756,21 +855,32 @@ local function read_slots()
                 local version = raw:match("^NH(%d+):")
                 assert(not version or version == "1", "Newer hideout profile. Update the mod.")
             end
-            local ok, s = pcall(unpack_slot, raw)
-            if ok and s.profile == profile and s.revision == head then
-                winner, index = s, i
-            end
+            local state = read_slot(i, raw, profile, head)
+            if state then winner, index = state, i end
+        else
+            verified_slots[i] = nil
         end
     end
     assert(head == nil or head == 0 or winner,
         "Latest committed hideout snapshot unavailable; restore a matching backup")
-    return winner or fresh(profile), index, slots, head_key
+    return winner or fresh(profile), index and verified_slots[index].raw, index, slots, head_key
 end
 
 function NHStore.load()
-    local ok, state = pcall(read_slots)
-    if ok then return state end
-    return nil, tostring(state)
+    local ok, state, raw = pcall(read_slots)
+    if not ok then return nil, tostring(state) end
+    local draft = raw and copy_tree(state) or state
+    draft_sources[draft] = raw or false
+    return draft
+end
+
+-- EW may recover a transaction by reading its durable receipt and adopting
+-- that exact draft in place, since other controllers still hold target.
+function NHStore.adoptSnapshot(target, snapshot)
+    if target == snapshot then return end
+    for key in pairs(target) do target[key] = nil end
+    for key, value in pairs(snapshot) do target[key] = value end
+    draft_sources[target] = draft_sources[snapshot]
 end
 
 local function write_verified(key, value)
@@ -851,12 +961,17 @@ local function depositReserve(state,settling)
     return bytes
 end
 
-function NHStore.commit(state,settlingDeposit)
+-- Transfers edit a separate draft and advance their live base on success.
+-- Check that base's source bytes and publish its new source at the same boundary.
+function NHStore.commit(state,settlingDeposit,base)
     local ok, result = pcall(function()
         validate(state)
-        local saved, active, slots, head_key = read_slots()
+        local saved, source, active, slots, head_key = read_slots()
         assert(saved.profile == state.profile, "Save slot changed. Reload the hideout.")
-        assert(saved.revision == state.revision, "Profile changed. Reload and retry.")
+        local expected = draft_sources[base or state]
+        assert(saved.revision == state.revision and (expected == nil or expected == (source or false))
+            and (not base or (base.profile == saved.profile and base.revision == saved.revision)),
+            "Profile changed. Reload and retry.")
         local next_state = {}
         for k, v in pairs(state) do next_state[k] = v end
         next_state.revision = saved.revision + 1
@@ -866,7 +981,7 @@ function NHStore.commit(state,settlingDeposit)
         if not settling then stageDeliveries(next_state) end
         compactEWReleases(next_state,saved)
         validate(next_state)
-        local payload = encode(next_state)
+        local payload, next_rows = encode(next_state, warehouse_rows)
         assert(#payload+depositReserve(next_state,settling)<=max_bytes,"Hideout profile needs room to finish its deposit (1 MiB)")
         local raw = "NH1:" .. checksum(payload) .. ":" .. payload
         local key = slots[active == 1 and 2 or 1]
@@ -876,6 +991,8 @@ function NHStore.commit(state,settlingDeposit)
         write_verified(key, raw)
         -- This pointer is the commit boundary; a newer unpointed snapshot is staged.
         write_verified(head_key, next_state.revision)
+        warehouse_rows, draft_sources[state] = next_rows, raw
+        if base then draft_sources[base] = raw end
         return next_state
     end)
     if not ok then return nil, tostring(result) end
@@ -1036,6 +1153,7 @@ NHStore.recipes={
     NHGuns.recipe("frost_tube","frost_grenade",{},{essence_frost=6},4),
     NHGuns.recipe("shock_tube","shock_grenade",{},{essence_lightning=6},4),
     NHGuns.recipe("flare_gun"),
+    NHGuns.recipe("sedative_launcher"),
     NHGuns.recipe("derringer"),
 }
 for _,kind in ipairs(NHTurrets.order) do NHStore.recipes[#NHStore.recipes+1]=NHTurrets.recipe(kind) end
@@ -1063,6 +1181,10 @@ for _,d in ipairs(NHFirearms.mods.order) do
         resources={arcane_scrap=2},goldCost=10,durationFrames=240,item=NHFirearms.mods.card(d),noteZh=zh,noteEn=en})
 end
 for _,kind in ipairs(NHFirearms.order) do NHStore.recipes[#NHStore.recipes+1]=NHFirearms.recipe(kind) end
+for _,kind in ipairs(NHKatanas.order) do
+    local recipe=NHKatanas.recipe(kind)
+    if recipe then NHStore.recipes[#NHStore.recipes+1]=recipe end
+end
 for _,kind in ipairs(NHShields.order) do NHStore.recipes[#NHStore.recipes+1]=NHShields.recipe(NHShields.types[kind]) end
 for _,kind in ipairs(NHShields.chargerOrder) do NHStore.recipes[#NHStore.recipes+1]=NHShields.recipe(NHShields.chargers[kind]) end
 local linkRecipes={
@@ -1255,13 +1377,20 @@ function NHStore.stackSlot(state,container,item,preferred)
     local gun=NHGuns.types[item.kind]
     local medical=NHMedkits.capacity(item.kind)
     if not NHStore.stackUnits(item) or (container~="warehouse" and container~="safe") then return end
-    local limit=NHStormProducts.types[item.kind] and NHStormProducts.stackLimit or (NHTurrets.types[item.kind] and 4 or 2147483647)
+    local limit=NHStormProducts.types[item.kind] and NHStormProducts.stackLimit or 2147483647
+    -- A paid four-round production order may already share its reserved slot
+    -- with another former full gun. Both become partial after the capacity change.
+    local order=state.order and state.order.output
+    local reservedPheromone=container=="warehouse" and item.kind=="flare_gun" and order
+        and order.item==item and preferred==order.slot
+    local reservation=container=="warehouse" and order and order.item~=item and order
     for i,row in ipairs(state[container]) do
-        if row.item.kind==item.kind and (not preferred or preferred==(row.slot or i))
+        local slot=row.slot or i
+        if row.item.kind==item.kind and (not preferred or preferred==slot)
             and (not medical or NHMedkits.canCombine(item.kind,NHMedkits.charges(item),NHMedkits.charges(row.item)))
-            and (not gun or NHGuns.canCombine(gun,item.remaining,row.item.remaining))
-            and NHStore.stackUnits(row.item)+NHStore.stackUnits(item)<=limit then
-            return row.slot or i,i
+            and (not gun or reservedPheromone or NHGuns.canCombine(gun,item.remaining,row.item.remaining))
+            and NHStore.stackUnits(row.item)+NHStore.stackUnits(item)<=(NHTurrets.types[item.kind] and NHTurrets.slotLimit(item.kind,slot,reservation) or limit) then
+            return slot,i
         end
     end
 end

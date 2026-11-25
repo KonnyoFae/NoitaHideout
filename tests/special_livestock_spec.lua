@@ -45,16 +45,16 @@ assert(NHFarm.view(state,"en",0).pens[1].grown and not NHFarm.view(state,"en",48
 assert(NHFarm.view(state,"en",480*60).pens[2].grown)
 state.summons={beehive=100,pending={}}
 persist()
-assert(NHFarm.sync(state,firstHoney-1) and not state.resources.sugar)
+assert(NHFarm.sync(state,firstHoney-1) and state.resources.sugar==3 and state.resources.spice==1)
 local _,produced,cards=NHFarm.sync(state,firstHoney)
 assert(produced and #cards==1 and cards[1]=="bee" and state.warehouse[1].item.species=="bee")
 assert(state.resources.sugar==5 and state.resources.spice==2 and not state.summons.livestock)
 assert(not NHFarm.sync(state,firstHoney))
 
--- Both harvests stay together if the spice stock cannot receive its share.
-state.resources.spice=NHStore.maxResourceAmount-1
+-- Full spice storage preserves the owed spice while sugar and rare rolls continue.
+state.resources.spice=NHStore.maxResourceAmount
 assert(NHFarm.sync(state,2*firstHoney) and not NHFarm.due(state,2*firstHoney))
-assert(state.farm.herds.queen_bee.owed==1 and state.resources.sugar==5)
+assert(state.resources.spice==NHStore.maxResourceAmount and state.resources.sugar==10)
 state.resources.spice=NHStore.maxResourceAmount-2
 assert(NHFarm.due(state,2*firstHoney) and NHFarm.sync(state,2*firstHoney))
 assert(state.resources.spice==NHStore.maxResourceAmount and state.resources.sugar==10)
@@ -69,15 +69,10 @@ assert(math.abs(find(farm.produce,"sugar").perMinute-sugarRate)<1e-9)
 assert(math.abs(find(farm.crops,"spice").perMinute-2/3)<1e-9)
 assert(find(farm.produce,"gold").perMinute==0)
 
--- With insufficient bank headroom neither the date nor the reward seed moves.
+-- A full bank defers only the gold, while a full collection grid queues the rolled treasure.
 state.resources.sugar=NHStore.maxResourceAmount
-state.bankGold=NHStore.maxGold-149
-state.dragonLoot={seed=100,pending={}}
-assert(NHFarm.sync(state,firstHoard) and state.bankGold==NHStore.maxGold-149)
-assert(state.dragonLoot.seed==100 and state.farm.herds.dragon_egg.owed==1)
-farm=NHFarm.view(state,"en",firstHoard)
-assert(farm.pens[2].blocked and find(farm.produce,"gold").perMinute==30)
-assert(NHStore.spendGold(state,1))
+state.bankGold=NHStore.maxGold
+state.dragonLoot={seed=33,rareProgress=99,pending={}}
 for slot=2,NHStore.warehouseCapacity(state,"collection") do
     state.warehouse[#state.warehouse+1]={id=state.nextItemId,slot=slot,
         item=NHCompanions.withCount({species="griffin",remaining=1},1)}
@@ -89,10 +84,14 @@ local before=#state.warehouse
 _,produced,cards=NHFarm.sync(state,firstHoard)
 assert(produced and #cards==1 and cards[1]=="dragon")
 assert(state.bankGold==NHStore.maxGold and state.bankWalletNet==0 and #state.warehouse==before)
+farm=NHFarm.view(state,"en",firstHoard)
+assert(farm.pens[2].blocked and find(farm.produce,"gold").perMinute==30 and state.dragonLoot.seed~=33)
+assert(NHDragonLoot.rareProgress(state)==32)
 assert(NHFarm.view(state,"en",firstHoard).dragonPending==1)
 persist()
 assert(NHFarm.sync(stale,firstHoard) and not NHStore.commit(stale))
 assert(not NHFarm.sync(state,firstHoard) and state.dragonLoot.pending.dragon==1)
+assert(NHStore.spendGold(state,150) and NHFarm.sync(state,firstHoard) and state.bankGold==NHStore.maxGold)
 table.remove(state.warehouse)
 persist()
 assert(not next(state.dragonLoot.pending) and state.warehouse[before].item.species=="dragon")
@@ -141,6 +140,7 @@ assert(NHFarm.sync(single,ending))
 for at=1230,ending,30 do NHFarm.sync(ticks,at) end
 for _,name in ipairs({"herb","fiber","sugar","spice"}) do assert(single.resources[name]==ticks.resources[name]) end
 assert(single.bankGold==ticks.bankGold and single.dragonLoot.seed==ticks.dragonLoot.seed and single.gelBonus.seed==ticks.gelBonus.seed)
+assert(NHDragonLoot.rareProgress(single)==NHDragonLoot.rareProgress(ticks))
 assert(single.summons.beehive==ticks.summons.beehive and single.summons.gel_pool==ticks.summons.gel_pool)
 for species,herd in pairs(single.farm.herds) do
     local other=ticks.farm.herds[species]

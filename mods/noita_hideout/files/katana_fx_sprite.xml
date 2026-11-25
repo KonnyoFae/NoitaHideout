@@ -1,0 +1,4 @@
+<Sprite filename="mods/noita_hideout/files/katana_fx.png" offset_x="0" offset_y="32" default_animation="slash">
+    <!-- The renderer draws the first cell before it picks up the hand transform. -->
+    <RectAnimation name="slash" pos_x="0" pos_y="0" frame_width="64" frame_height="64" frame_count="5" frames_per_row="5" frame_wait="0.0333333333" loop="0" />
+</Sprite>

@@ -27,21 +27,28 @@ NHCardWallets.registerItem()
 NHRelics.registerItems()
 NHTablets.register()
 NHNativeValuables.register()
+NHRedRelics.register()
+NHSalvageBell=dofile(files.."salvage_bell.lua")
+NHRewind=dofile(files.."rewind_watch.lua")
 NHStormProducts.register()
 dofile_once(files .. "products.lua")
 NHFirearms.registerItems()
+NHKatanas.registerItems()
 NHSurgeryCleanse=dofile(files .. "surgery_cleanse.lua")
 NHSurgery=dofile(files .. "surgery.lua")
 dofile_once(files .. "perks.lua")
 dofile_once(files .. "native_items.lua")
 dofile_once(files .. "doses.lua")
 local pickup=dofile(files .. "pickup.lua")
+local migrateGroundItems,migrateSupportGuns
 local deliverGift=dofile(files.."companions/gifts.lua")
 local rescue=dofile(files.."rescue.lua")
 local turretRuntime=dofile(files.."turret_runtime.lua")
 local tarotRuntime=dofile(files.."tarot_runtime.lua")
+local tarotSight=dofile(files.."tarot_sight.lua")
 local shieldRuntime=dofile(files .. "shield_runtime.lua")
 local ammoRuntime=dofile(files .. "ammo_runtime.lua")
+local katanaRuntime=dofile(files.."katana_runtime.lua")
 dofile_once(files .. "ui.lua")
 NHNative.registerTranslations()
 
@@ -54,10 +61,17 @@ function OnModPreInit()
         ModLuaFileAppend(modules,files.."ew_claim.lua")
         ModLuaFileAppend(modules,files.."ew_reinforce_rpc.lua")
         ModLuaFileAppend(modules,files.."ew_reinforce_fx.lua")
+        ModLuaFileAppend(modules,files.."tarot_vitality_ew.lua")
+        ModLuaFileAppend(modules,files.."tarot_shared_health_ew.lua")
+        ModLuaFileAppend(modules,files.."salvage_bell_ew.lua")
+        ModLuaFileAppend(modules,files.."loot_bonuses_ew.lua")
+        ModLuaFileAppend(modules,files.."katana_ew.lua")
     end
 end
 function OnModInit()
     dofile(files .. "storm/register.lua")
+    ModRegisterAudioEventMappings(files.."reactor_audio/events.txt")
+    dofile(files .. "loot_spawn_sources.lua")()
     ammoRuntime.registerStaff()
     NHFirearms.modes.register(NHFirearms.mods)
     ModLuaFileAppend("data/scripts/gun/gun_actions.lua",files.."firearm_actions.lua")
@@ -75,7 +89,9 @@ function OnModInit()
 end
 
 function OnModPostInit()
+    dofile(files.."tarot_sight_shader.lua")
     if not ModIsEnabled("new_enemies") then return end
+    dofile(files.."tarot_sight_ne.lua")()
     local path = "data/entities/misc/healthbar_dummy.xml"
     if not ModDoesFileExist(path) then return end
     local xml = ModTextFileGetContent(path)
@@ -106,12 +122,14 @@ local lang, status, last_error = "en", "", nil
 local model_cache, next_attempt = nil, 0
 local last_dose_frame = -1
 local left_down,fire_request=false,nil
+local collectible_fire_down=false
 local quick_click_player
 local last_pickup_press
 local right_use
 -- A paid link belongs to this player and lasts through one opening of the native inventory.
 local inventory_aim={x=1,y=0}
-local next_room_check,pending_visit=0,nil
+local next_room_check,pending_visits=0,{}
+local blocked_production
 local bank_synced=false
 local wallet_allowed
 local waiting_since,waiting_notice,waiting_profile
@@ -121,6 +139,8 @@ local function tr(zh, en)
 end
 
 local error_translations = {
+    ["A charged shield is required."]="请装备至少还有半格充能的护盾。",
+    ["Not enough shield charge."]="护盾充能不足，开启斩夺需要半格护盾。",
     ["Pick up this item before storing it."]="请先用原版交互拾取，再从自己的物品栏存入。",
     ["The original owner must handle this legacy item."]="这件旧物品的来源无法在联机中确认，已保留原物。",
     ["This container belongs to another profile."]="这只容器的内容保存在另一位玩家的档案中，已保留原物。",
@@ -237,6 +257,14 @@ local error_translations = {
     ["No essence for this spell."] = "这张法术没有对应的精华。",
     ["Resource storage is full."] = "这项资源的库存已满。",
     ["Invalid salvage mode."] = "无法识别所选的拆解方式。",
+    ["Collectible exhausted."] = "这件藏品的耐久已耗尽，仍可在藏品页全额分解。",
+    ["Collection needs room for the reward cards."] = "藏品页空间不足，请为奖励卡腾出位置后重试。",
+    ["Rewind already active."] = "倒流表已经启动。",
+    ["Field already active."] = "这件遗物的领域仍在生效。",
+    ["Reactor already active."] = "堆芯直通仍在生效。",
+    ["Shared health cannot be rewound."] = "EW 共享血量模式下无法启动倒流表。",
+    ["Rewind unavailable."] = "当前无法记录倒流锚点。",
+    ["Bell sync unavailable."] = "联机打捞钟尚未就绪，请稍后重试。",
     ["The selected item is no longer in your quick inventory."] = "这件物品已经离开快捷栏。",
     ["The case is already in your inventory."] = "安全箱就在你的道具栏里。",
     ["The case is already within reach."] = "安全箱就在附近，可按 G 开箱。",
@@ -254,6 +282,13 @@ local error_translations = {
     ["Unsupported flask script"] = "药瓶带有无法还原的脚本，已保留原瓶",
     ["Unsupported flask state"] = "药瓶带有无法还原的自定义状态，已保留原瓶",
     ["Unsupported flask component"] = "药瓶带有无法还原的组件，已保留原瓶",
+    ["Duplicate ItemAIKnowledgeComponent"] = "物品带有重复的 AI 识别组件，无法确认应使用哪一份。",
+    ["Cannot inspect ItemAIKnowledgeComponent"] = "无法读取物品的 AI 识别组件。",
+    ["Unsupported item AI field"] = "物品的 AI 识别组件包含尚未支持的字段",
+    ["Invalid item AI field"] = "无法准确读取物品的 AI 识别字段",
+    ["Invalid stored item AI knowledge"] = "库存中的物品 AI 识别记录无效。",
+    ["Could not restore ItemAIKnowledgeComponent"] = "无法在取出的物品上还原 AI 识别组件。",
+    ["Item AI readback mismatch"] = "取出时 AI 识别状态未能正确还原",
     ["Unsupported flask tag"] = "药瓶带有无法还原的标签，已保留原瓶",
     ["Cannot inspect flask components"] = "无法检查药瓶的组件，已保留原瓶。",
     ["Cannot inspect flask script"] = "无法检查药瓶脚本，已保留原瓶。",
@@ -262,6 +297,9 @@ local error_translations = {
     ["Unsupported wand template"] = "未适配的魔杖模板",
     ["Unknown wand template"] = "未能识别魔杖模板",
     ["Unsupported wand script"] = "魔杖带有无法还原的脚本",
+    ["Duplicate wand shop pickup effect."] = "魔杖带有重复的商店拾取特效。",
+    ["Could not verify the shop pickup effect."] = "无法核实商店拾取特效。",
+    ["Invalid wand shop pickup state."] = "魔杖的商店拾取特效状态无效。",
     ["Unsupported wand component"] = "魔杖带有无法还原的组件",
     ["Unsupported wand variable"] = "魔杖带有无法还原的状态",
     ["Wand is still generating"] = "魔杖仍在生成，请稍后重试",
@@ -271,6 +309,8 @@ local error_translations = {
     ["Unsupported spell script"] = "法术带有无法还原的脚本",
     ["Unsupported spell attachment"] = "法术带有无法还原的附件",
     ["Unsupported spell variable"] = "法术带有无法还原的状态",
+    ["Could not verify the original hitbox after Unseen."] = "无法确认原碰撞框，已保留原物。",
+    ["Wait for Unseen or Swallowed to wear off before storing this item."] = "请等隐形或吞噬效果结束后再存入。",
 }
 
 local function report(problem)
@@ -323,13 +363,27 @@ local function invalidate()
     next_attempt = GameGetFrameNum() + 60
 end
 
-local function save(draft,only_time)
+local function save(draft,only_time,passive)
     local cached=only_time and model_cache
     if cached and cached.profile_revision~=draft.revision then cached=nil end
     NHAffinity.sync(draft)
     shieldRuntime.snapshot(draft,player_id)
     local ok, err = NHStore.commit(draft)
-    if not ok then invalidate(); report(err); return false end
+    if not ok then
+        if passive and tostring(err):find("1 MiB",1,true) then
+            blocked_production={profile=draft.profile,run=draft.runSerial,revision=draft.revision}
+            if state.revision~=draft.revision then
+                local saved=NHStore.load()
+                if saved and saved.profile==draft.profile and saved.runSerial==draft.runSerial
+                    and saved.ewActive==draft.ewActive then state,model_cache=saved,nil end
+            end
+            report(tr("个人档案已达 1 MiB 上限。生产进度已暂存，取出仓库物品腾出空间后将重新结算。",
+                "Profile at its 1 MiB limit. Production is queued. Withdraw stored items to make room."))
+            return false,"capacity"
+        end
+        invalidate(); report(err); return false
+    end
+    NHCompanions.checkpointProduction(draft)
     if cached then cached.profile_revision=draft.revision end
     state, model_cache = draft, cached or nil
     return true
@@ -356,7 +410,8 @@ local function attach()
         next_attempt=0
         NHClock.reset()
         NHFarm.resetClock()
-        pending_visit,popup,case_open,opened=nil,nil,nil,false
+        NHCompanions.resetProduction()
+        pending_visits,blocked_production,popup,case_open,opened={},nil,nil,nil,false
     end
     if GameGetFrameNum() < next_attempt then return false end
     next_attempt = GameGetFrameNum() + 60
@@ -444,6 +499,12 @@ local function active_run()
     return not scope or scope==state.ewActive
 end
 
+NHCompanions.onProductionSummon=function(player)
+    if not active_run() then return end
+    local frame=GameGetFrameNum()
+    NHCompanions.observeProduction(state,NHFarm.observe(state,frame),frame,player)
+end
+
 local function active_draft()
     local draft, err = NHStore.load()
     if not draft then report(err); return end
@@ -475,20 +536,33 @@ local function commit_edit(edit, zh, en, arg)
     return true
 end
 
+local function productionBlocked(frame)
+    if not blocked_production then return false end
+    local b=blocked_production
+    if b.profile==state.profile and b.run==run_id and b.revision==state.revision
+        and (frame%60~=0 or NHStore.publishedRevision(b.profile)==b.revision) then return true end
+    blocked_production=nil
+    return false
+end
+
 local function update_workshop(player,frame,farm_time)
     local order=state.order
     local elapsed=order and order.required or 0
-    if frame>=next_room_check and not pending_visit then
+    if frame>=next_room_check then
         next_room_check=frame+10
         local key,ax,ay=NHClock.mountainAt(player)
         mountain_storage.update(player,ax,ay)
         terminalAccess.invalidateAccess()
-        if key and not state.checkpoints[key] then pending_visit=key end
+        if key and not state.checkpoints[key] then pending_visits[key]=true end
     end
+    if productionBlocked(frame) then return true end
+    local pending_visit=next(pending_visits)
     -- Finish already-paid legacy orders on the first update. New crafts settle immediately.
     -- Farm production and Holy Mountain discovery keep their own existing clocks.
     local farm_due=NHFarm.due(state,farm_time)
-    local affinity_due=frame%360==0 and NHAffinity.changed(state)
+    -- A running farm checkpoints affinity with its minute payment. A player
+    -- with no active producers still checkpoints companionship once a minute.
+    local affinity_due=not farm_due and farm_time==state.farm.time and frame%3600==0 and NHAffinity.changed(state)
     if not pending_visit and not farm_due and not affinity_due and (not order or (elapsed<order.required and elapsed-order.progress<600)) then return true end
     local draft=active_draft()
     if not draft then return false end
@@ -497,13 +571,14 @@ local function update_workshop(player,frame,farm_time)
     local farm_changed,produced,cards
     if farm_due then farm_changed,produced,cards=NHFarm.sync(draft,farm_time) end
     if changed or farm_changed or affinity_due then
-        if not save(draft,not done and not produced) then return false end
+        local saved,reason=save(draft,not done and not produced,true)
+        if not saved then return reason=="capacity" end
         if done then feedback(tr("旧订单已立即完成，成品已入库。","Previous order completed immediately. Output delivered to storage.")) end
         if cards and #cards>0 then feedback(NHCompanions.rewardText(cards,lang,state)) end
     elseif draft.revision~=state.revision then
         state,model_cache=draft,nil
     end
-    pending_visit=nil
+    if pending_visit then pending_visits[pending_visit]=nil end
     NHClock.observe(state,frame)
     return true
 end
@@ -586,13 +661,14 @@ local function stored_view(entry)
         icon=potion and NHPotion.inventoryIcon(potion) or (item.kind=="dose" and NHInjectors.get(item.subtype).icon)
             or (wallet and wallet.icon) or (equipment and equipment.icon) or (NHLootBags.types[item.kind] or {}).icon
             or (NHStormProducts.types[item.kind] or {}).icon or item.icon or (item.sprite and item.sprite.image_file) or NHProducts.icons[item.kind],
-        remaining=NHEquipment.linkUses(item.kind,item.remaining) or NHMedkits.remaining(item) or (NHFoods.byId[item.kind] and NHFoods.byId[item.kind].uses),count=item.count or ((item.kind=="bandage" or item.kind=="grenade") and 1 or nil),
+        remaining=(NHRedRelics.types[item.kind] and item.remaining) or NHEquipment.linkUses(item.kind,item.remaining) or NHMedkits.remaining(item) or (NHFoods.byId[item.kind] and NHFoods.byId[item.kind].uses),count=item.count or ((item.kind=="bandage" or item.kind=="grenade") and 1 or nil),
         subtype=item.subtype,species=item.species,dockSlot=NHPotion.dockSlot(item)}
 end
 
 local function inventory_view()
     if model_cache and model_cache.profile_revision == state.revision then return model_cache end
     local model = {revision = state.revision, profile_revision=state.revision, secure_loot = {}, warehouse = {}}
+    model.workshopOutput=state.order and state.order.output
     model.affinityPoints=function(species) return NHAffinity.points(state,species) end
     model.essences={}
     for _,key in ipairs(NHEssences.order) do
@@ -855,6 +931,7 @@ local function native_slots(player)
                                 NHMedkits.unpack(slot,kind=="bandage" and n==-1 and 1 or n)
                             end
                             if NHEquipment.links[kind] then slot.remaining=NHEquipment.linkUses(kind,ComponentGetValue2(item,"uses_remaining")) end
+                            if NHRedRelics.types[kind] then slot.remaining=ComponentGetValue2(item,"uses_remaining") end
                             if NHGuns.types[kind] then NHGuns.unpack(slot,NHGuns.physicalRounds(kind,id,item)) end
                             if NHLootBags.types[kind] or NHTurrets.types[kind] then slot.count=ComponentGetValue2(item,"uses_remaining") end
                             if NHStormProducts.types[kind] then slot.count=NHStormProducts.worldCount(item) end
@@ -1014,6 +1091,15 @@ local function start_ammo_pack(player,kind,available,source,payPhysical)
     end)
 end
 
+local function relic_feedback(ok,kind)
+    if not ok then report(kind)
+    elseif kind=="rewind_watch" then feedback(tr("倒流锚点已记录。60 秒内首次受击，5 秒后闪回。","Anchor set. A hit within 60 seconds triggers a rewind 5 seconds later."))
+    elseif kind=="salvage_bell" then feedback(tr("打捞钟已鸣响，掉落加成持续 15 分钟。","Salvage Bell rung. Drop bonus active for 15 minutes."))
+    elseif kind=="stasis_hourglass" then feedback(tr("静滞领域已展开，持续 30 秒。","Stasis field opened for 30 seconds."))
+    elseif kind=="dustless_duster" then feedback(tr("无尘领域已展开，接下来 60 秒将随你移动。","Repulsion field active around you for 60 seconds."))
+    elseif kind=="mana_reactor" then feedback(tr("堆芯直通已启动，持续 90 秒。","Reactor direct power active for 90 seconds.")) end
+end
+
 local function use_carried(player,entity,slot)
     local kind=NHNative.kind(entity) or NHTransfers.item_kind(entity)
     if NHEquipment.links[kind] then
@@ -1035,6 +1121,8 @@ local function use_carried(player,entity,slot)
         local remaining,subtype=NHDoses.remaining(state,entity)
         if not remaining then report("This syringe is no longer available."); return end
         inject(player,subtype,function() return NHDoses.consume(state,player,entity,slot~=nil) end)
+    elseif NHRedRelics.types[kind] then
+        relic_feedback(NHRedRelics.activate(state,player,entity,slot))
     elseif kind=="summon_card" then
         local card=NHCompanions.captureCard(entity)
         local ok=NHCompanions.use(player,entity,lang,slot~=nil,function() return commit_edit(NHTarot.refillDraft) end)
@@ -1078,7 +1166,7 @@ local function use_inventory(player,source)
     if source.container=="native" then
         local slot=matching_slot(player,source)
         if slot and slot.entity==source.entity and slot.kind==source.kind and EntityGetRootEntity(slot.entity)==player then
-            if NHEquipment.links[slot.kind] and slot.remaining~=source.remaining then return end
+            if (NHEquipment.links[slot.kind] or NHRedRelics.types[slot.kind]) and slot.remaining~=source.remaining then return end
             use_carried(player,slot.entity,slot)
         end
         return
@@ -1119,6 +1207,14 @@ local function use_inventory(player,source)
         inject(player,item.subtype,function()
             if pay() then return true,left end
         end)
+    elseif NHRedRelics.types[item.kind] then
+        local paid
+        local ok,reason=NHRedRelics.activateStored(state,player,item,function()
+            paid=pay()
+            return paid
+        end)
+        -- A rejected commit has already reported the precise storage error.
+        if paid~=false then relic_feedback(ok,reason) end
     elseif item.kind=="summon_card" then
         local ok=NHCompanions.summon(player,item.species,lang,pay)
         if ok and NHTarot.types[item.species] then
@@ -1203,7 +1299,9 @@ local function workshop_action(player,action,index)
         commit_edit(NHStore.supplyTrade.apply,index.mode=="sell" and "已出售，金币已存入存钱罐。" or "产物已计入资源库存。",
             index.mode=="sell" and "Sold. Gold deposited." or "Product added to resource stock.",index)
     elseif action=="salvage" and type(index)=="table" then
-        if index.mode=="essence" or index.mode=="quick_essence" then
+        if index.mode=="collectible" then
+            commit_edit(NHRedRelics.salvage,"分解完成，四种资源包、塔罗牌和同伴卡已入库。","Four types of logistics packs, tarot cards and companion cards stored.",index)
+        elseif index.mode=="essence" or index.mode=="quick_essence" then
             commit_edit(NHStore.salvage,"提取完成，精华已入库。","Essence extracted and stored.",index)
         elseif index.mode=="store_contents" then
             commit_edit(NHStore.salvage,"物料已入库，容器已拆成碎片。","Contents stored and container dismantled.",index)
@@ -1407,7 +1505,8 @@ local function dispatch(player, action, index)
                     if not NHEquipment.links[index.kind] then return end
                     kind=index.kind
                 elseif action=="move_relic" then
-                    if index.kind~="relic" and index.kind~="relic_chain" and index.kind~="tablet" and index.kind~="native_valuable" then return end
+                    if index.kind~="relic" and index.kind~="relic_chain" and index.kind~="tablet" and index.kind~="native_valuable"
+                        and not NHRedRelics.types[index.kind] then return end
                     kind=index.kind
                 elseif action=="move_firearm" then
                     if not NHFirearms.items[index.kind] or NHFirearms.packs[index.kind] then return end
@@ -1669,6 +1768,19 @@ local function suppress_item_input(player)
 end
 
 function OnWorldInitialized()
+    tarotSight.reset(true)
+    storm.preloadAudio()
+    local newBagsOnly = "noita_hideout.floating_bags_from_start"
+    local newCardsOnly = "noita_hideout.floating_cards_from_start"
+    local newGunArt = "noita_hideout.support_art_from_start"
+    if GameGetFrameNum() <= 1 and GlobalsGetValue(run_key, "") == "" then
+        GlobalsSetValue(newBagsOnly, "1")
+        GlobalsSetValue(newCardsOnly, "1")
+        GlobalsSetValue(newGunArt, "1")
+    end
+    local oldBags, oldCards = GlobalsGetValue(newBagsOnly, "") ~= "1", GlobalsGetValue(newCardsOnly, "") ~= "1"
+    migrateGroundItems = (oldBags or oldCards) and dofile(files .. "legacy_loot_bags.lua")(oldBags, oldCards) or nil
+    migrateSupportGuns = GlobalsGetValue(newGunArt, "") ~= "1" and NHProducts.repairNearbySupportWeapons or nil
     NHEW.reset()
     NHEWDeposit.reset()
     if NHEW.enabled() then
@@ -1680,6 +1792,7 @@ function OnWorldInitialized()
     travel.reset()
     fireSupport.reset()
     ammoRuntime.reset()
+    katanaRuntime.reset(true)
     NHSurgery.reset()
     right_use=nil
     inventory_aim.x,inventory_aim.y=1,0
@@ -1687,13 +1800,15 @@ function OnWorldInitialized()
     mountain_storage.reset()
     terminals.reset()
     NHFarm.resetClock()
+    NHCompanions.resetProduction()
     NHHomeWandEdit.reset()
     NHRelics.reset()
     bank_synced=false
-    next_room_check,pending_visit=0,nil
+    next_room_check,pending_visits,blocked_production=0,{},nil
     state, run_id, home_x, home_y, player_id = nil, nil, nil, nil, nil
     opened, mouse_release, next_attempt, last_dose_frame = false, false, 0, -1
     case_open,popup = nil,nil
+    collectible_fire_down=false
     quick_click_player=nil
     last_pickup_press=nil
     NHNative.resetInput()
@@ -1703,6 +1818,8 @@ end
 
 function OnPlayerSpawned(player)
     if not NHEW.localBody(player) then return end
+    katanaRuntime.reset(true)
+    tarotSight.sync(player)
     NHSurgery.reset(player)
     player_id = player
     set_home(player, true)
@@ -1710,7 +1827,8 @@ function OnPlayerSpawned(player)
     NHHomeWandEdit.update(player,near_home(x,y,home_x,home_y))
     if attach() and active_run() then
         NHClock.observe(state,GameGetFrameNum())
-        NHFarm.observe(state,GameGetFrameNum())
+        local frame=GameGetFrameNum()
+        NHCompanions.observeProduction(state,NHFarm.observe(state,frame),frame,player)
         NHPerks.update(state,player,not NHPerks.enabled)
         NHRelics.update(state,player)
         shieldRuntime.sync(state,player)
@@ -1722,12 +1840,14 @@ end
 function OnPausedChanged(is_paused,is_inventory_pause)
     -- The pause menu can start a fresh world before the next regular checkpoint.
     if not is_paused or is_inventory_pause or not active_run() then return end
-    local now=NHFarm.observe(state,GameGetFrameNum())
+    local frame=GameGetFrameNum()
+    if productionBlocked(frame) then return end
+    local now=NHFarm.observe(state,frame)
     if now<=state.farm.time and not NHFarm.due(state,now) and not NHAffinity.changed(state) then return end
     local draft=active_draft()
     if not draft then return end
     local _,produced,cards=NHFarm.sync(draft,now)
-    if save(draft,not produced) and cards and #cards>0 then feedback(NHCompanions.rewardText(cards,lang,state)) end
+    if save(draft,not produced,true) and cards and #cards>0 then feedback(NHCompanions.rewardText(cards,lang,state)) end
 end
 
 local function local_body_with_tag(tag)
@@ -1737,7 +1857,11 @@ local function local_body_with_tag(tag)
 end
 local function current_player()
     if player_id and EntityGetIsAlive(player_id) and EntityHasTag(player_id,"player_unit") and NHEW.localBody(player_id) then return player_id end
+    local previous=player_id
     player_id=local_body_with_tag("player_unit")
+    if player_id~=previous then
+        if player_id then tarotSight.sync(player_id) else tarotSight.reset() end
+    end
     return player_id
 end
 
@@ -1747,6 +1871,8 @@ function OnWorldPreUpdate()
     local player = current_player()
     remoteTerminal.update()
     if player and GameGetFrameNum()%60==0 then
+        if migrateGroundItems then migrateGroundItems() end
+        if migrateSupportGuns and GameGetFrameNum()%180==0 then migrateSupportGuns(player) end
         NHNative.refreshLinkArt()
         NHStormProducts.refreshLegacyItems(player)
         for _,kind in ipairs({"scatter_revolver","marksman_rifle","battle_staff","hunting_bow"}) do
@@ -1763,7 +1889,10 @@ function OnWorldPreUpdate()
         if active_run() then rescue.arm(state,player) end
     elseif active_run() then
         local body=local_body_with_tag("polymorphed_player")
-        if body and not ammoRuntime.guardMimic(body) then rescue.polymorph(state,body) end
+        if body then
+            if ammoRuntime.guardMimic(body) then NHRewind.polymorph(body,state)
+            else rescue.polymorph(state,body) end
+        end
     end
     -- Covers existing worlds and enemies with independent entity templates.
     if player and GameGetFrameNum()%15==0 then
@@ -1776,7 +1905,14 @@ function OnWorldPreUpdate()
     local inventory_open=GameIsInventoryOpen()
     NHHomeWandEdit.update(player,player and (not state or active_run()) and near_hideout(player))
     local menu=inventory_open or opened
+    -- Read the native Fire binding before a menu can suppress it. A held
+    -- trigger must be released before it can activate a collectible again.
+    local controls=player and EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")
+    local boundFire=controls and ComponentGetValue2(controls,"mButtonDownFire")==true or false
+    local collectiblePress=boundFire and not collectible_fire_down
+    collectible_fire_down=boundFire
     local supportInput=fireSupport.input(active_run() and state,player,menu or mouse_release)
+    local katanaInput=katanaRuntime.capture(player,menu or mouse_release or supportInput or not active_run())
     if player and not menu and active_run() then pickup_press(player,false) end
     local pressed=InputIsMouseButtonDown(1)
     if not pressed or player~=quick_click_player then quick_click_player=nil end
@@ -1793,29 +1929,26 @@ function OnWorldPreUpdate()
         end
     end
     ammoRuntime.bind(player and active_run() and state or nil)
-    if quick_click_player then
-        local controls=EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")
-        if controls then
-            for _,action in ipairs({"Fire","LeftClick"}) do
-                ComponentSetValue2(controls,"mButtonDown"..action,false)
-                ComponentSetValue2(controls,"mButtonFrame"..action,-1)
-            end
+    if quick_click_player and controls then
+        for _,action in ipairs({"Fire","LeftClick"}) do
+            ComponentSetValue2(controls,"mButtonDown"..action,false)
+            ComponentSetValue2(controls,"mButtonFrame"..action,-1)
         end
     end
-    local trigger=pressed and player and not menu and not mouse_release and not supportInput and NHNative.held(player) or nil
-    fire_request=NHGuns.trigger(trigger,pressed and not left_down,GameGetFrameNum())
+    local trigger=(pressed or collectiblePress) and player and not menu and not mouse_release and not supportInput
+        and not katanaInput and NHNative.held(player) or nil
+    fire_request=NHGuns.trigger(pressed and trigger or nil,pressed and not left_down,GameGetFrameNum())
+    if trigger and EntityHasTag(trigger,"nh_red_relic") then fire_request=collectiblePress and trigger or nil end
     left_down=pressed
     right_use=NHNative.prepareRightUse(player,menu,menu and NHUI.useTarget() or nil)
+    if katanaInput and not menu then right_use=nil end
     if supportInput then right_use=nil end
     if type(right_use)=="number" then right_use=NHNative.heldUseSlot(player,right_use) end
-    if player and not menu then
-        local controls=EntityGetFirstComponentIncludingDisabled(player,"ControlsComponent")
-        if controls then
-            local x,y=ComponentGetValue2(controls,"mAimingVectorNormalized")
-            if type(x)=="number" and type(y)=="number" and x*x+y*y>0.000001 then
-                local length=math.sqrt(x*x+y*y)
-                inventory_aim.x,inventory_aim.y=x/length,y/length
-            end
+    if controls and not menu then
+        local x,y=ComponentGetValue2(controls,"mAimingVectorNormalized")
+        if type(x)=="number" and type(y)=="number" and x*x+y*y>0.000001 then
+            local length=math.sqrt(x*x+y*y)
+            inventory_aim.x,inventory_aim.y=x/length,y/length
         end
     end
     if not opened and not mouse_release then return end
@@ -1825,17 +1958,17 @@ function OnWorldPreUpdate()
         return
     end
     if not opened and not InputIsMouseButtonDown(1) and not InputIsMouseButtonDown(2) then
-        local c = EntityGetFirstComponentIncludingDisabled(player, "ControlsComponent")
-        mouse_release = c and (ComponentGetValue2(c, "mButtonDownFire") or ComponentGetValue2(c, "mButtonDownFire2"))
+        mouse_release = controls and (ComponentGetValue2(controls, "mButtonDownFire") or ComponentGetValue2(controls, "mButtonDownFire2"))
     end
     if opened or mouse_release then suppress_item_input(player) end
 end
 
 function OnWorldPostUpdate()
     local player = current_player()
+    if not player then katanaRuntime.reset() end
     fireSupport.finishInput()
     local inventory_open=GameIsInventoryOpen()
-    if not inventory_open and not opened and not case_open then storm.draw() end
+    if not inventory_open and not opened and not case_open then storm.draw(player,lang) end
     NHHomeWandEdit.update(player,player and (not state or active_run()) and near_hideout(player))
     local gun=fire_request
     fire_request=nil
@@ -1849,6 +1982,8 @@ function OnWorldPostUpdate()
     if not run_id and not traveler and not (NHEW.enabled() and GameHasFlagRun("ew_flag_notplayer_active")) then return end
     if not attach() or not active_run() then return end
     local frame = GameGetFrameNum()
+    NHRewind.update(state,player,commit_edit)
+    if not active_run() then return end
     if state.ewDepositPending and NHEW.enabled() then
         local event,reason=NHEWDeposit.update(state,player,NHEWDeposit.canAccess)
         if event then
@@ -1875,9 +2010,14 @@ function OnWorldPostUpdate()
     if not player then
         NHRelics.update(state,nil)
         local active,frames=ammoRuntime.guardMimic(traveler)
-        if active then mimicFrames=frames else rescue.polymorph(state,traveler) end
+        if active then mimicFrames=frames; NHRewind.polymorph(traveler,state)
+        else rescue.polymorph(state,traveler) end
     end
-    if not traveler then NHClock.suspend(); NHFarm.suspendClock(); opened,case_open=false,nil; return end
+    if not traveler then
+        NHCompanions.observeProduction(state,nil,frame,nil)
+        NHClock.suspend(); NHFarm.suspendClock(); opened,case_open=false,nil
+        return
+    end
     local wallet_now=NHEW.walletAllowed()
     if wallet_now~=wallet_allowed then
         wallet_allowed,bank_synced,model_cache=wallet_now,false,nil
@@ -1900,6 +2040,7 @@ function OnWorldPostUpdate()
         travel.update(player,home_x,home_y,inventory_open or opened)
     end
     local farm_time=NHFarm.observe(state,frame)
+    NHCompanions.observeProduction(state,farm_time,frame,player)
     if not update_workshop(traveler,frame,farm_time) then return end
     if not player then
         opened,case_open=false,nil
@@ -1910,6 +2051,8 @@ function OnWorldPostUpdate()
     if not state then return end
     if not inventory_open and not opened then pickup_press(player,true) end
     if not ammoRuntime.gold(state,commit_edit) then return end
+    local katanaView=katanaRuntime.update(state,player,commit_edit,not inventory_open and not opened)
+    if not state then return end
     local ammoKey=tonumber(ModSettingGet("noita_hideout.ammo_key")) or 5
     if ammoKey==21 then ammoKey=5 end
     local ammoView,castMimic=ammoRuntime.update(state,player,commit_edit,{enabled=not inventory_open and not opened,canMimic=shieldRuntime.canMimic,
@@ -1920,7 +2063,9 @@ function OnWorldPostUpdate()
     if not active_run() then return end
     if not inventory_open and not opened then
         local held=NHNative.held(player)
-        if gun and gun==held then NHProducts.fireHeld(player)
+        if gun and gun==held and EntityHasTag(held,"nh_red_relic") then
+            relic_feedback(NHRedRelics.activate(state,player,held))
+        elseif gun and gun==held then NHProducts.fireHeld(player)
         else NHProducts.poseSupportGun(player,held) end
     end
     local restored
@@ -1959,6 +2104,7 @@ function OnWorldPostUpdate()
     model.fireSupport=not opened and fireSupport.view(state,player) or nil
     model.travel=(case_open or not opened) and travel.view() or nil
     model.ammo=ammoView
+    model.katana=katanaView
     model.shield=shieldRuntime.sync(state,player)
     model.rescue=rescue.view(state,player)
     model.deployment=not opened and (turretRuntime.heldPreview(player) or remoteTerminal.heldPreview(player,nearby)) or nil
@@ -2030,6 +2176,7 @@ OnWorldPreUpdate=terminalAccess.duringUpdate(OnWorldPreUpdate)
 OnWorldPostUpdate=terminalAccess.duringUpdate(OnWorldPostUpdate)
 
 function OnPlayerDied()
+    tarotSight.reset()
     fireSupport.reset()
     ammoRuntime.reset()
     NHRelics.update(state,nil)
@@ -2048,7 +2195,7 @@ function OnPlayerDied()
     local farm_time=NHFarm.observe(state,GameGetFrameNum())
     local order_id=state.order and state.order.id or false
     commit_edit(function(draft)
-        NHStore.advanceProduction(draft,{run=run_id,orderId=order_id,progress=elapsed,checkpoint=pending_visit})
+        NHStore.advanceProduction(draft,{run=run_id,orderId=order_id,progress=elapsed,checkpoint=next(pending_visits)})
         NHFarm.sync(draft,farm_time)
         return NHStore.endRun(draft,run_id)
     end)

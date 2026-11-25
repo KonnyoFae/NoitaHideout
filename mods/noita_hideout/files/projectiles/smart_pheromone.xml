@@ -1,0 +1,4 @@
+<Entity tags="nh_pheromone_dart">
+    <Base file="mods/noita_hideout/files/projectiles/smart_dart_base.xml" />
+    <SpriteComponent image_file="mods/noita_hideout/files/projectiles/pheromone_needle.png" offset_x="12" offset_y="3" />
+</Entity>

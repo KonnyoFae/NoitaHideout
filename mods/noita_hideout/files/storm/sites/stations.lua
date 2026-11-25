@@ -4,6 +4,7 @@ local locations = dofile(root.."locations.lua")
 local items = "mods/noita_hideout/files/items/"
 local idle_key = "cycle_storm.idle_rigs"
 local prefix = "cycle_storm.sites."
+local running_rig_key = prefix.."running_rig_until"
 local rig_life, well_life = 300*60, 600*60
 local rig_until, well_until
 local lastForecast
@@ -64,11 +65,11 @@ local function trackSites(oil,frame,entities)
     local key=prefix..(oil and "rig_locations" or "well_locations")
     local old=GlobalsGetValue(key,"")
     local seen,records={},{}
-    local latest,lostIdle=0,0
+    local runningUntil,lostIdle,hasIdle=0,0,false
     local expiring=false
     local function keep(pos,expires)
         records[#records+1]=pos..","..expires
-        latest=math.max(latest,expires<0 and math.huge or expires)
+        if expires<0 then hasIdle=true else runningUntil=math.max(runningUntil,expires) end
     end
     for _,e in ipairs(entities) do
         local x,y=EntityGetTransform(e)
@@ -92,21 +93,27 @@ local function trackSites(oil,frame,entities)
     local saved=table.concat(records,";")
     if saved~=old then GlobalsSetValue(key,saved) end
     if oil then
+        -- Activation runs in an entity VM; publish the latest working rig's
+        -- deadline independently of idle rigs, even when its chunk unloads.
+        local deadline=tostring(runningUntil)
+        if GlobalsGetValue(running_rig_key,"0")~=deadline then GlobalsSetValue(running_rig_key,deadline) end
         local idle=tonumber(GlobalsGetValue(idle_key,"0")) or 0
         if lostIdle>0 then
             idle=math.max(0,idle-lostIdle)
             GlobalsSetValue(idle_key,tostring(idle))
         end
         -- Old saves already count idle rigs, even outside the loaded world.
-        if idle>0 then return math.huge,expiring end
+        if idle>0 then hasIdle=true end
     end
-    return latest,expiring
+    return hasIdle and math.huge or runningUntil,expiring
 end
 
 function M.available()
     local frame=GameGetFrameNum()
-    return (well_until or 0)>frame,(rig_until or 0)>frame,
-        GlobalsGetValue(prefix.."winter","")=="pending",GlobalsGetValue(prefix.."desert","")=="pending"
+    local well=(well_until or 0)>frame
+    return well,(rig_until or 0)>frame,
+        GlobalsGetValue(prefix.."winter","")=="pending",GlobalsGetValue(prefix.."desert","")=="pending",
+        well,(tonumber(GlobalsGetValue(running_rig_key,"0")) or 0)>frame
 end
 
 local function fitRig(e)

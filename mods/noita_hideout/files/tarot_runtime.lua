@@ -1,10 +1,17 @@
 local root="mods/noita_hideout/files/"
 local T=NHTarot or dofile(root.."tarot.lua")
+local sight=dofile(root.."tarot_sight.lua")
 local R={}
 local paths={
     tarot_hermit={"data/entities/misc/effect_invisibility.xml","data/entities/misc/effect_stains_drop_faster.xml"},
     tarot_chariot={"data/entities/misc/perks/shield.xml","data/entities/misc/perks/contact_damage.xml"},
 }
+local handlers={}
+for _,module in ipairs({dofile(root.."tarot_vitality.lua"),dofile(root.."tarot_tactics.lua")}) do
+    for id,effects in pairs(module.paths) do paths[id],handlers[id]=effects,module end
+end
+local tickInterval=sight.tickInterval
+local function grantsSight(id) return id=="tarot_sun" or id=="tarot_moon" end
 local function clock(player,id) return EntityGetFirstComponentIncludingDisabled(player,"VariableStorageComponent","nh_"..id) end
 local function remove(id)
     -- Unpaid physical rewards must not leave a physics body behind.
@@ -23,8 +30,10 @@ local function resistance(player,factor)
     end
 end
 function R.expire(player,id)
-    for _,entity in ipairs(EntityGetAllChildren(player,"nh_"..id) or {}) do remove(entity) end
     local c=clock(player,id)
+    local handler=handlers[id]
+    if c and handler and handler.expire then handler.expire(player,id,c) end
+    for _,entity in ipairs(EntityGetAllChildren(player,"nh_"..id) or {}) do remove(entity) end
     if id=="tarot_hermit" and GameGetGameEffectCount(player,"INVISIBILITY")==0 then
         -- Vanilla INVISIBILITY removal restores sprites. Do not reveal a
         -- player who still has the perk or an unrelated invisibility effect.
@@ -39,6 +48,7 @@ function R.expire(player,id)
         if c and ComponentGetValue2(c,"value_bool") then resistance(player,1/0.8) end
     end
     if c then EntityRemoveComponent(player,c) end
+    if grantsSight(id) then sight.sync(player) end
 end
 -- Older garden effects were GameEffect children without a perk icon.
 -- Restore only their presentation, including the engine's consumed-life state.
@@ -61,21 +71,41 @@ function R.refreshLifeIcons(player)
     end
 end
 function R.tick(player)
-    for _,id in ipairs({"tarot_hermit","tarot_chariot"}) do
-        local c=clock(player,id)
+    if not sight.localBody(player) then return end
+    local now=GameGetFrameNum()
+    local active=false
+    local sightActive=false
+    for _,id in ipairs(T.timedOrder) do
+        local c=paths[id] and clock(player,id)
         if c then
-            local now=GameGetFrameNum()
             local previous=ComponentGetValue2(c,"value_float")
-            if now~=previous then
-                local left=ComponentGetValue2(c,"value_int")-math.max(1,now-previous)
-                if left<=0 then R.expire(player,id)
-                else ComponentSetValue2(c,"value_int",left); ComponentSetValue2(c,"value_float",now) end
+            local remaining=ComponentGetValue2(c,"value_int")
+            local left=math.max(0,remaining-math.max(0,now-previous))
+            local handler=handlers[id]
+            if handler and handler.pulse then
+                local seconds=math.ceil(remaining/60)-math.ceil(left/60)
+                if seconds>0 then handler.pulse(player,id,c,seconds) end
             end
+            if left==0 then R.expire(player,id)
+            else
+                active=true
+                sightActive=sightActive or grantsSight(id)
+                if left~=remaining then ComponentSetValue2(c,"value_int",left) end
+                if now~=previous then ComponentSetValue2(c,"value_float",now) end
+            end
+        end
+    end
+    if sightActive then sight.sync(player,now) end
+    local hook=EntityGetFirstComponentIncludingDisabled(player,"LuaComponent","nh_tarot_tick")
+    if hook then
+        if not active then EntityRemoveComponent(player,hook)
+        elseif not sightActive and ComponentGetValue2(hook,"execute_every_n_frame")~=tickInterval then
+            ComponentSetValue2(hook,"execute_every_n_frame",tickInterval)
         end
     end
 end
 function R.apply(player,id,pay)
-    if not T.types[id] then return end
+    if not T.types[id] or not sight.localBody(player) then return end
     local dm=EntityGetFirstComponentIncludingDisabled(player,"DamageModelComponent")
     if not dm or ComponentGetValue2(dm,"hp")<=0 then return end
     local x,y=EntityGetTransform(player)
@@ -84,8 +114,8 @@ function R.apply(player,id,pay)
         for _,entity in ipairs(entities) do remove(entity) end
         for _,c in ipairs(components) do EntityRemoveComponent(player,c) end
     end
-    local function spawn(path,tag,attach)
-        local entity=EntityLoad(path,x,y-10)
+    local function spawn(path,tag,attach,spawnX,spawnY)
+        local entity=EntityLoad(path,spawnX or x,spawnY or y-10)
         if not entity or entity==0 then return end
         entities[#entities+1]=entity
         if tag then EntityAddTag(entity,tag) end
@@ -112,16 +142,19 @@ function R.apply(player,id,pay)
         for _,path in ipairs(paths[id]) do
             if not spawn(path,"nh_"..id,true) then rollback(); return end
         end
-        timer=add("VariableStorageComponent",{_tags="nh_"..id,value_int=T.duration,value_float=GameGetFrameNum()})
+        timer=add("VariableStorageComponent",{_tags="nh_"..id,value_int=0,value_float=GameGetFrameNum()})
         if not timer then rollback(); return end
         if id=="tarot_chariot" and not add("LuaComponent",{_tags="nh_tarot_revenge",
             script_damage_received="data/scripts/perks/revenge_bullet.lua",execute_every_n_frame=-1}) then rollback(); return end
     end
+    local handler=handlers[id]
+    if handler and handler.prepare and not handler.prepare(player,id,existing,spawn,add,timer) then rollback(); return end
     if paths[id] and not EntityGetFirstComponentIncludingDisabled(player,"LuaComponent","nh_tarot_tick") then
-        if not add("LuaComponent",{_tags="nh_tarot_tick",script_source_file=root.."tarot_tick.lua",execute_every_n_frame=1}) then rollback(); return end
+        if not add("LuaComponent",{_tags="nh_tarot_tick",script_source_file=root.."tarot_tick.lua",execute_every_n_frame=tickInterval}) then rollback(); return end
     end
     local paid,reason=pay()
     if not paid then rollback(); return nil,reason end
+    if handler and handler.commit then handler.commit(player,id,timer,existing) end
     if timer then
         ComponentSetValue2(timer,"value_int",T.duration)
         ComponentSetValue2(timer,"value_float",GameGetFrameNum())
@@ -141,6 +174,7 @@ function R.apply(player,id,pay)
         end
     end
     if id=="tarot_garden" then R.refreshLifeIcons(player) end
+    if grantsSight(id) then sight.sync(player) end
     return true
 end
 return R

@@ -2,6 +2,7 @@
 -- item gets a token before ownership changes. A world-side receipt survives
 -- normal use/destruction of a delivered item, so it cannot be reclaimed.
 NHTransfers = {}
+local itemAI=dofile("mods/noita_hideout/files/item_ai_knowledge.lua")
 local tag = "noita_hideout_transfer_item"
 local marker_tag = "noita_hideout_transfer_id"
 
@@ -27,7 +28,7 @@ local function draft(s)
 end
 
 local function commit(s, changed)
-    local ok, err = NHStore.commit(changed)
+    local ok, err = NHStore.commit(changed,nil,s)
     if not ok then return nil, err end
     s.pendingChargerUses=changed.pendingChargerUses
     s.ewDepositReceipt=changed.ewDepositReceipt
@@ -45,7 +46,13 @@ local function countdown(old,current,frames)
         and current>=0 and current<old and old-current<=frames+1)
 end
 
-local function sameRecord(old,current,sampleFrame)
+local function sameRecord(old,current,sampleFrame,entity)
+    -- A grant can outlive the version that captured its pending record.
+    if old.aiKnowledge and current.aiKnowledge==nil and old.kind==current.kind
+        and itemAI.forStorage(old.aiKnowledge,old.kind,entity,old.template or old.variant)==nil then
+        old=copy(old)
+        old.aiKnowledge=nil
+    end
     if NHEWDeposit.same(old,current) then return true end
     if old.kind~="wand" or current.kind~="wand" or not old.ability or not current.ability or not sampleFrame then return false end
     local frames=GameGetFrameNum()-sampleFrame
@@ -77,7 +84,7 @@ function NHTransfers.prepareEW(s,player,entity,source,intent,record,replay)
     if not (NHEWItems and NHEWItems.enabled()) then return false end
     if not NHEWDeposit then return nil,"Waiting for item ownership. Try again." end
     if replay then
-        if not NHEWDeposit.same(replay.intent,intent) or not sameRecord(replay.record,record,intent.sampleFrame) then
+        if not NHEWDeposit.same(replay.intent,intent) or not sameRecord(replay.record,record,intent.sampleFrame,entity) then
             return nil,"Inventory slot changed."
         end
         return false
@@ -653,6 +660,7 @@ local function recover(draft,release)
         local field=NHShields.field(row.item.kind)
         if not draft[field] then
             row.epoch=draft.revision+1
+            if field=="gearShield" then row.equippedAt=row.epoch end
             draft[field]=row
             return true
         end

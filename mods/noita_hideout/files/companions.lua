@@ -1,4 +1,4 @@
-NHCompanions={durability=80,order={"dryad","flower_fairy","minotaur","griffin","bee","dragon","slime","dog","cat"}}
+NHCompanions={durability=80,durationFrames=15*60*60,order={"dryad","flower_fairy","minotaur","griffin","bee","dragon","slime","dog","cat"}}
 NHTarot=NHTarot or dofile("mods/noita_hideout/files/tarot.lua")
 function NHCompanions.cardDefinition(id) return NHCompanions.species[id] or NHTarot.types[id] end
 function NHCompanions.cardCapacity(id) return NHTarot.types[id] and NHTarot.durability or NHCompanions.durability end
@@ -33,6 +33,15 @@ NHCompanions.bonuses={
 }
 function NHCompanions.giftMinutes(spec) return spec.role=="support" and 2 or 3 end
 local families={cat_house={"cat"},dog_kennel={"dog"},farm={"dryad","flower_fairy"},livestock={"minotaur","griffin"},beehive={"bee"},gel_pool={"slime"}}
+dofile("mods/noita_hideout/files/companions/production.lua")
+function NHCompanions.productionMatch(source,id)
+    if not id then return false end
+    if source=="dragon" then return NHCompanions.species[id]~=nil end
+    for _,candidate in ipairs(families[source] or {}) do
+        if candidate==id then return true end
+    end
+    return false
+end
 local seedOffsets={cat_house=87109,dog_kennel=79190,farm=126,livestock=7918,beehive=15836,gel_pool=23754}
 local modulus=2147483647
 
@@ -195,17 +204,7 @@ end
 
 -- One persistent roll per successful crop or animal production cycle, in the
 -- same transaction as its produce, even when multiple batches are due.
-function NHCompanions.income(state,source,units,found)
-    local player=EntityGetWithTag and (EntityGetWithTag("player_unit") or {})[1]
-    if not player then return end
-    local id=NHCompanions.active(player)
-    if not id then return end
-    local eligible=source=="dragon"
-    for _,candidate in ipairs(families[source] or {}) do
-        if candidate==id then eligible=true end
-    end
-    if not eligible then return end
-    local chance=NHAffinity.incomeBasisPoints(NHAffinity.points(state,id))
+function NHCompanions.productionCardRoll(state,id,chance,units,found)
     if chance==0 then return end
     local seed=state.companionIncomeSeed or (1+state.profile*15485863%(modulus-1))
     local book=state.summons or {pending={}}
@@ -220,7 +219,20 @@ function NHCompanions.income(state,source,units,found)
     state.companionIncomeSeed=seed
 end
 
-function NHCompanions.reward(state,source,units)
+function NHCompanions.income(state,source,units,found)
+    local players=EntityGetWithTag and EntityGetWithTag("player_unit") or {}
+    for _,player in ipairs(players) do
+        if not NHEW or NHEW.localBody(player) then
+            local id=NHCompanions.active(player)
+            if NHCompanions.productionMatch(source,id) then
+                NHCompanions.productionCardRoll(state,id,NHAffinity.incomeBasisPoints(NHAffinity.points(state,id)),units,found)
+            end
+            return
+        end
+    end
+end
+
+function NHCompanions.reward(state,source,units,skipPrivate)
     local family=assert(families[source])
     local book=state.summons or {pending={}}
     state.summons=book
@@ -240,7 +252,7 @@ function NHCompanions.reward(state,source,units)
         end
     end
     book[source]=seed
-    NHCompanions.income(state,source,units,found)
+    if not skipPrivate then NHCompanions.income(state,source,units,found) end
     NHCompanions.deliver(state)
     return found
 end
@@ -298,9 +310,10 @@ end
 function NHCompanions.active(player)
     for _,pet in ipairs(EntityGetAllChildren(player,"noita_hideout_companion") or {}) do
         local clock=EntityGetFirstComponentIncludingDisabled(pet,"VariableStorageComponent","nh_companion_clock")
-        if clock and ComponentGetValue2(clock,"value_int")<15*60*60 then
+        local left=clock and NHCompanions.durationFrames-ComponentGetValue2(clock,"value_int")
+        if left and left>0 then
             local id=ComponentGetValue2(clock,"value_string")
-            if NHCompanions.species[id] then return id,pet end
+            if NHCompanions.species[id] then return id,pet,left end
         end
     end
 end
@@ -353,6 +366,8 @@ function NHCompanions.summon(player,id,lang,pay)
     NHCompanions.clearSupport(player)
     EntityAddTag(pet,"nh_companion_roles")
     NHCompanions.immunities.apply(player,id)
+    NHCompanions.productionPartyChanged()
+    if NHCompanions.onProductionSummon then NHCompanions.onProductionSummon(player) end
     local spec=NHCompanions.species[id]
     GamePrint(lang=="zh" and (spec.zh.."开始随行。") or (spec.en.." joined you."))
     return true

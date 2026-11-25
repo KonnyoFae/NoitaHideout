@@ -30,12 +30,13 @@ function M.wandItem(key)
         icon=("data/items_gfx/wands/wand_%04d.png"):format(preset[2]),
         cards={{id=preset[3],x=0,y=0,item={}}}}
 end
+local rareShare=33
 local groups={
     {cutoff=3,kind="card",keys={"dragon"},zh="龙娘卡",en="Dragon card"},
     {cutoff=8,kind="card",keys=cardPool,zh="其他召唤卡",en="Other summon card"},
     {cutoff=18,kind="tarot",keys=NHTarot.order,zh="塔罗牌",en="Tarot card"},
     {cutoff=28,kind="recipe",keys=spells,zh="法术",en="Spell"},
-    {cutoff=33,kind="wand",keys={"random_wand"},zh="法杖",en="Wand"},
+    {cutoff=rareShare,kind="wand",keys={"random_wand"},zh="法杖",en="Wand"},
     {cutoff=53,kind="bag",keys=NHLootBags.order,zh="战利品容器",en="Loot container"},
     {cutoff=68,kind="bag",keys=NHLootBags.packKinds,zh="补给箱",en="Supply box"},
     {cutoff=100,kind="container",keys=containers,zh="物料容器",en="Material container"},
@@ -159,9 +160,23 @@ local function deliver(state)
     end
 end
 
+function M.rareProgress(state)
+    return state.dragonLoot and state.dragonLoot.rareProgress or 0
+end
+
+-- Discoveries 4, 7, 10, ... are rare. The same two seed advances per find
+-- select its category and item regardless of when a full warehouse can pay.
+local function categoryRoll(book,legacy)
+    if legacy then return book.seed%100 end
+    local progress=(book.rareProgress or 0)+rareShare
+    book.rareProgress=progress%100
+    if progress>=100 then return book.seed%rareShare end
+    return rareShare+book.seed%(100-rareShare)
+end
+
 -- Run on a detached farm settlement alongside the bank credit and new deadline.
--- One category roll per cycle: the generic cards and dragon card are exclusive.
-function M.award(state,periods)
+-- Already-earned discoveries from older saves use their original single roll.
+function M.award(state,periods,legacy)
     local awards={}
     if periods==0 then return awards end
     catalogue()
@@ -174,7 +189,7 @@ function M.award(state,periods)
     end
     for _=1,periods do
         book.seed=advance(book.seed)
-        local roll=book.seed%100
+        local roll=categoryRoll(book,legacy)
         for _,group in ipairs(groups) do
             if roll<group.cutoff then
                 book.seed=advance(book.seed)
@@ -197,7 +212,7 @@ end
 -- original pending book or mutate its item rows before the new revision lands.
 function M.stageDelivery(state)
     if not state.dragonLoot or not next(state.dragonLoot.pending) then return end
-    state.dragonLoot={seed=state.dragonLoot.seed,wandSeed=state.dragonLoot.wandSeed,pending=copy(state.dragonLoot.pending)}
+    state.dragonLoot=copy(state.dragonLoot)
     local pending=state.dragonLoot.pending
     if pending.metal_knife then
         pending.derringer=(pending.derringer or 0)+pending.metal_knife
@@ -229,6 +244,8 @@ function M.validate(state,whole)
     if not book then return end
     assert(type(book)=="table" and whole(book.seed) and book.seed>0 and book.seed<modulus
         and type(book.pending)=="table","Invalid dragon discoveries")
+    assert(book.rareProgress==nil or (whole(book.rareProgress) and book.rareProgress>=0 and book.rareProgress<100),
+        "Invalid dragon rare discovery progress")
     assert((not book.wandSeed and not book.pending.random_wand) or
         (whole(book.wandSeed) and book.wandSeed>0 and book.wandSeed<modulus),"Invalid dragon wand seed")
     for key,number in pairs(book.pending) do

@@ -291,7 +291,7 @@ do
         local gun=upgraded.warehouse[1].item
         assert(upgraded.supportAmmoExpanded and gun.count==2 and gun.remaining==93 and NHGuns.rounds(gun)==413)
         local flare=upgraded.safe[1].item
-        assert(upgraded.pheromoneMagazines and flare.count==3 and NHGuns.rounds(flare)==12)
+        assert(upgraded.pheromoneMagazines==20 and flare.count==1 and flare.remaining==12 and NHGuns.rounds(flare)==12)
         upgraded=save(upgraded)
     end
     -- A profile from the previous release already has the other support-weapon capacities.
@@ -345,3 +345,142 @@ do
     assert(save(held).ewDepositPending.phase=="return")
 end
 print("Store: missing legacy deposit fields, valid pending orders and atomic rejection of damaged orders passed.")
+
+do
+    selected=9
+    profiles[selected]={}
+    local draft=load()
+    local bottleId=draft.nextItemId
+    draft.warehouse={
+        {id=bottleId,slot=1,item={kind="potion",name="ccc",materials={water=8,slime=1}}},
+        {slot=1,item={kind="wand",name="Legacy wand"}}, -- An older row with no item ID.
+    }
+    draft.nextItemId=bottleId+1
+    assert(NHStore.commit(draft))
+    local untouched=load()
+    draft.warehouse[1].item.materials.water=5
+    draft.warehouse[1].item.materials.slime=nil
+    draft.warehouse[1].slot=2
+    assert(untouched.warehouse[1].item.materials.water==8 and load().warehouse[1].slot==1)
+    untouched.warehouse[2].item.name="Uncommitted"
+    assert(load().warehouse[2].item.name=="Legacy wand")
+
+    -- Fail after staging the edited row, then retry with another edit to the same bottle.
+    blocked_key,blocked_value,fail_after="noita_hideout.p9_revision",2,false
+    assert(not NHStore.commit(draft))
+    assert(load().warehouse[1].item.materials.slime==1)
+    blocked_key=nil
+    draft.warehouse[1].item.materials.water=3
+    assert(NHStore.commit(draft))
+    draft.warehouse[1].item.materials.water=99
+    local function checkBottle(s,name,revision)
+        local row=s.warehouse[1]
+        assert(s.revision==(revision or 2) and row.id==bottleId and row.slot==2 and row.item.name==name)
+        assert(row.item.materials.water==3 and row.item.materials.slime==nil)
+        assert(s.warehouse[2].item.name=="Legacy wand")
+    end
+    local function shallowCopy(source)
+        local copy={}
+        for key,value in pairs(source) do copy[key]=value end
+        return copy
+    end
+    local beforeRestore=load()
+    checkBottle(beforeRestore,"ccc")
+
+    local current,older="noita_hideout.p9_b","noita_hideout.p9_a"
+    local committed,backup=settings[current],settings[older]
+    -- These two names have the same length and Adler-32. A restored slot can share
+    -- its head and checksum with a cached snapshot while containing different data.
+    local replacement,n=committed:gsub("s3:ccc","s3:dad",1)
+    assert(n==1)
+    settings[current]=replacement
+    checkBottle(load(),"dad")
+    assert(not NHStore.commit(beforeRestore))
+    assert(not NHStore.commit(shallowCopy(beforeRestore),nil,beforeRestore))
+    settings[current]=replacement:gsub("s3:dad","s3:bad",1)
+    assert(not NHStore.load() and not NHStore.commit(draft))
+    settings[current]=replacement
+    settings[older]=backup:gsub("^NH1:","NH2:",1)
+    assert(not NHStore.load() and not NHStore.commit(draft))
+    assert(settings[current]==replacement and settings["noita_hideout.p9_revision"]==2)
+    settings[older]=backup
+    checkBottle(load(),"dad")
+    settings["noita_hideout.p9_revision"]=1
+    local rolledBack=load()
+    assert(rolledBack.revision==1 and rolledBack.warehouse[1].slot==1)
+    assert(rolledBack.warehouse[1].item.name=="ccc" and rolledBack.warehouse[1].item.materials.water==8)
+    settings["noita_hideout.p9_revision"]=2
+    assert(not NHStore.commit(rolledBack))
+    checkBottle(load(),"dad")
+
+    -- After receipt recovery the controller keeps its original table; item
+    -- transfers commit a shallow copy, then copy the changed fields back.
+    NHStore.adoptSnapshot(beforeRestore,load())
+    checkBottle(beforeRestore,"dad")
+    local transfer=shallowCopy(beforeRestore)
+    assert(NHStore.creditGold(transfer,1) and NHStore.commit(transfer,nil,beforeRestore))
+    beforeRestore.revision,beforeRestore.bankGold=transfer.revision,transfer.bankGold
+    assert(NHStore.creditGold(beforeRestore,1) and NHStore.commit(beforeRestore))
+    dofile("mods/noita_hideout/files/store.lua")
+    local reloaded=load()
+    checkBottle(reloaded,"dad",4)
+    assert(reloaded.bankGold==2)
+end
+print("Store: detached snapshots, warehouse edits, staged-write retries, same-head restores and cold reload passed.")
+
+-- Write an actual four-round-format snapshot, including a reserved stack and
+-- the two multiplayer places that can be parked when a different world loads.
+do
+    selected=19
+    profiles[selected]={}
+    local s=load()
+    NHStore.newRun(s)
+    s.ewActive="ACTIVE"
+    local function gun(count,remaining) return {kind="flare_gun",count=count,remaining=remaining} end
+    local function ticket(count,remaining) return {row={id=14,slot=1,item=gun(count,remaining)},container="warehouse"} end
+    local function pending(world,count,remaining)
+        return {world=world,issuer="PLAYER1",tx="11",phase="prepare",run=s.runSerial,
+            keys={"g/123"},intent={route="item",dest="safe"},record=gun(count,remaining),
+            original=false,hadItem=true,slot={bag="inventory_quick",x=1,y=0}}
+    end
+    s.transit={run=s.runSerial,issued={a=ticket(6,3)},retired={}}
+    s.ewDepositPending=pending("ACTIVE",5,1)
+    s.ewExpeditions={PARKED={ewDepositPending=pending("PARKED",3,2),
+        transit={run=2,issued={b=ticket(1,4)},retired={}}}}
+    s.warehouse={{id=2,slot=1,item=gun(2,4)}}
+    s.safe={{id=3,slot=1,item=gun(3,2)}}
+    s.order={id=s.finished+1,progress=0,required=100,output={slot=1,item=gun(1,4)}}
+    s.nextItemId=15
+    s.pheromoneMagazines=true
+    NHGuns.types.flare_gun.capacity=4
+    assert(NHStore.commit(s))
+    NHGuns.types.flare_gun.capacity=20
+    local function check(record,rounds)
+        assert(NHGuns.rounds(record)==rounds and record.count==math.ceil(rounds/20) and record.remaining==(rounds-1)%20+1)
+    end
+    for i=1,2 do
+        s=load()
+        assert(s.pheromoneMagazines==20)
+        check(s.warehouse[1].item,8); check(s.safe[1].item,10)
+        check(s.order.output.item,4); check(s.transit.issued.a.row.item,23)
+        check(s.ewDepositPending.record,17); check(s.ewExpeditions.PARKED.ewDepositPending.record,10)
+        check(s.ewExpeditions.PARKED.transit.issued.b.row.item,4)
+        assert(NHStore.commit(s))
+    end
+    assert(NHStore.advanceProduction(s,{run=s.runSerial,orderId=s.order.id,progress=100}))
+    s=save(s);assert(not s.order and #s.warehouse==1 and s.warehouse[1].id==2)
+    check(s.warehouse[1].item,12)
+
+    local function physical(rounds,tagged)
+        local item={uses_remaining=rounds}
+        local entity={nh_pheromone_launcher=tagged}
+        function EntityHasTag(e,tag) return e[tag] end
+        function EntityAddTag(e,tag) e[tag]=true end
+        function ComponentGetValue2(c,key) return c[key] end
+        function ComponentSetValue2(c,key,v) c[key]=v end
+        local n=NHGuns.physicalRounds("flare_gun",entity,item)
+        assert(entity.nh_pheromone_launcher and NHGuns.physicalRounds("flare_gun",entity,item)==n)
+        return n
+    end
+    assert(physical(3,false)==12 and physical(2,true)==2 and physical(22,true)==22)
+end

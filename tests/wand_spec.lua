@@ -8,8 +8,21 @@ local function entity(file)
     ents[e] = {file = file, name = "", components = {}, children = {}}
     return e
 end
+function EntityCreateNew(name)
+    local e=entity("")
+    ents[e].name=name or ""
+    return e
+end
 function EntityAddComponent2(e, t, v)
     local c = id()
+    if t=="LuaComponent" and v and v.script_item_picked_up=="data/scripts/items/shop_effect.lua" then
+        local defaults={script_source_file="",execute_every_n_frame=1,execute_on_added=false,execute_on_removed=false,
+            execute_times=0,remove_after_executed=false,limit_all_callbacks=false,enable_coroutines=false,
+            call_init_function=false,limit_how_many_times_per_frame=-1,limit_to_every_n_frame=-1,
+            vm_type="SHARED_BY_MANY_COMPONENTS"}
+        for key,value in pairs(v) do defaults[key]=value end
+        v=defaults
+    end
     comps[c] = {type = t, data = v or {}}
     table.insert(ents[e].components, c)
     return c
@@ -19,7 +32,8 @@ function EntityGetComponentIncludingDisabled(e, t, tag)
     local result = {}
     for _, c in ipairs(ents[e].components) do
         -- Noita treats an explicit empty tag as a tag filter.
-        if comps[c].type == t and (not tag or comps[c].data._tags == tag) then
+        local tags=","..(comps[c].data._tags or "")..","
+        if comps[c].type == t and (not tag or (tag~="" and tags:find(","..tag..",",1,true))) then
             result[#result + 1] = c
         end
     end
@@ -28,7 +42,13 @@ end
 function EntityGetFirstComponentIncludingDisabled(e, t, tag)
     return EntityGetComponentIncludingDisabled(e, t, tag)[1]
 end
-function ComponentGetMembers(c) return comps[c].data end
+function ComponentGetMembers(c)
+    local fields=comps[c].data
+    if comps[c].type~="ItemAIKnowledgeComponent" then return fields end
+    local result={}
+    for key,value in pairs(fields) do if key~="_tags" then result[key]=value end end
+    return result
+end
 function ComponentGetTypeName(c) return comps[c].type end
 function ComponentGetIsEnabled(c) return true end
 function ComponentGetValue2(c, field)
@@ -49,11 +69,15 @@ local function remove(list, value)
 end
 function EntityRemoveComponent(e, c) remove(ents[e].components, c) end
 function EntityGetAllChildren(e) return ents[e].children end
+function EntityGetParent(e) return ents[e].parent or 0 end
+function EntityGetRootEntity(e) return ents[e].parent and EntityGetRootEntity(ents[e].parent) or e end
+function EntityGetIsAlive(e) return ents[e] and not ents[e].dead end
 function EntityAddChild(e, child) ents[child].parent = e; table.insert(ents[e].children, child) end
 function EntityRemoveFromParent(e) remove(ents[ents[e].parent].children, e); ents[e].parent = nil end
 function EntityKill(e) ents[e].dead = true; for _, child in ipairs(ents[e].children) do EntityKill(child) end end
 function EntityGetFilename(e) return ents[e].file end
 function EntityGetTags(e) return ents[e].tags or "item,wand" end
+function EntityHasTag(e,tag) return (","..EntityGetTags(e)..","):find(","..tag..",",1,true)~=nil end
 function EntityAddTag(e, tag) ents[e].tags = EntityGetTags(e) .. "," .. tag end
 function EntityRemoveTag() error("Unexpected tag removal") end
 function EntityGetName(e) return ents[e].name end
@@ -168,6 +192,78 @@ local record = assert(NHWand.capture(starter))
 assert(record.editor[1].values.value_string=="BOUNCY_ORB:,BOUNCY_ORB:," and not record.editor[1].enabled)
 assert(NHWand.restore(record, 0, 0))
 
+do
+    local itemAI=dofile("tests/item_ai_fixture.lua")
+    local wand=assert(NHWand.restore(record,0,0))
+    itemAI.add(wand,false)
+    local savedAI=assert(NHWand.capture(wand))
+    local load,defaultAI=EntityLoad
+    function EntityLoad(path)
+        local e=load(path)
+        defaultAI=itemAI.add(e,true)
+        ComponentSetValue2(defaultAI,"never_use",false)
+        ComponentSetValue2(defaultAI,"_tags","template_a,template_b")
+        return e
+    end
+    local copy=assert(NHWand.restore(savedAI,0,0))
+    EntityLoad=load
+    assert(EntityGetFirstComponentIncludingDisabled(copy,"ItemAIKnowledgeComponent")==defaultAI)
+    itemAI.check(copy,false)
+    assert(not EntityGetFirstComponentIncludingDisabled(assert(NHWand.restore(record,0,0)),"ItemAIKnowledgeComponent"))
+    local duplicate=itemAI.add(wand,true)
+    assert(not NHWand.capture(wand) and not ents[wand].dead)
+    EntityRemoveComponent(wand,duplicate)
+    EntityAddComponent2(wand,"AIKnowledgeComponent",{})
+    local result,why=NHWand.capture(wand)
+    assert(not result and why:find("AIKnowledgeComponent",1,true) and not ents[wand].dead)
+    itemAI.check(wand,false)
+
+    local stock=assert(NHWand.restore(record,0,0))
+    local marker=itemAI.addStock(stock,"wand",true)
+    assert(assert(NHWand.capture(stock)).aiKnowledge==nil)
+    itemAI.checkStock(stock,marker,"wand",true)
+    local duplicateStock=itemAI.addStock(stock,"wand",true)
+    result,why=NHWand.capture(stock)
+    assert(not result and why:find("Duplicate",1,true) and EntityGetIsAlive(stock))
+    EntityRemoveComponent(stock,duplicateStock)
+    ComponentSetValue2(marker,"_tags","quest_profile")
+    assert(assert(NHWand.capture(stock)).aiKnowledge.tags=="quest_profile")
+    ComponentSetValue2(marker,"_tags","")
+    ComponentSetValue2(marker,"ranged_min_distance",8)
+    assert(assert(NHWand.capture(stock)).aiKnowledge.ranged_min_distance==8)
+    ComponentSetValue2(marker,"ranged_min_distance",0)
+    EntitySetComponentIsEnabled(stock,marker,false)
+    local ground=assert(NHWand.capture(stock))
+    assert(ground.aiKnowledge.enabled==false and ground.aiKnowledge.is_weapon)
+    local explicit=assert(NHWand.restore(ground,0,0))
+    itemAI.checkStock(explicit,EntityGetFirstComponentIncludingDisabled(explicit,"ItemAIKnowledgeComponent"),"wand",false)
+    local player,quick=EntityCreateNew("player"),EntityCreateNew("inventory_quick")
+    ents[player].tags="player_unit"
+    EntityAddChild(player,quick)
+    EntityAddChild(quick,stock)
+    local compact=assert(NHWand.capture(stock))
+    assert(compact.aiKnowledge==nil)
+    itemAI.checkStock(stock,marker,"wand",false)
+    EntitySetName(quick,"inventory_full")
+    assert(assert(NHWand.capture(stock)).aiKnowledge==nil)
+    EntitySetName(quick,"quest_storage")
+    assert(assert(NHWand.capture(stock)).aiKnowledge.enabled==false)
+    itemAI.checkStock(stock,marker,"wand",false)
+    local ordinary=assert(NHWand.restore(compact,0,0))
+    assert(not EntityGetFirstComponentIncludingDisabled(ordinary,"ItemAIKnowledgeComponent"))
+    -- Simulate an already stored 0.42.41 wand on a template without an AI component.
+    compact.aiKnowledge={is_weapon=true,is_ranged_weapon=true}
+    local old=assert(NHWand.restore(compact,0,0))
+    itemAI.checkStock(old,EntityGetFirstComponentIncludingDisabled(old,"ItemAIKnowledgeComponent"),"wand",true)
+    assert(compact.aiKnowledge.is_weapon and assert(NHWand.capture(old)).aiKnowledge==nil)
+    local wrong=assert(NHWand.restore(record,0,0))
+    itemAI.addStock(wrong,"potion",true)
+    assert(assert(NHWand.capture(wrong)).aiKnowledge.is_consumed)
+    local broomAI=itemAI.addStock(rebuilt,"wand",true)
+    assert(assert(NHWand.capture(rebuilt)).aiKnowledge.is_weapon)
+    EntityRemoveComponent(rebuilt,broomAI)
+end
+
 local loose=CreateItemActionEntity("LIGHT_BULLET")
 local item=EntityGetFirstComponentIncludingDisabled(loose,"ItemComponent")
 ComponentSetValue2(item,"inventory_slot",7,0)
@@ -229,6 +325,68 @@ for _,id in ipairs({"DISC_BULLET","DISC_BULLET_BIG"}) do
     EntityRemoveFromParent(card)
 end
 
+-- The shop attaches a separate cosmetic callback to a wand root after loading
+-- its template. A disabled callback is distinct from a wand that never had one.
+do
+    local wand=assert(NHWand.restore(record,0,0))
+    local deck=EntityGetAllChildren(wand)
+    local function shopScripts(e)
+        local result={}
+        for _,c in ipairs(EntityGetComponentIncludingDisabled(e,"LuaComponent")) do
+            if ComponentGetValue2(c,"script_item_picked_up")==shopEffect then result[#result+1]=c end
+        end
+        return result
+    end
+    assert(record.shopPickup==nil and #shopScripts(wand)==0)
+    local fx=EntityAddComponent2(wand,"LuaComponent",{script_item_picked_up=shopEffect,
+        mLastExecutionFrame=343195,mTimesExecutedThisFrame=1})
+    for _,enabled in ipairs({false,true}) do
+        EntitySetComponentIsEnabled(wand,fx,enabled)
+        local snapshot=assert(NHWand.capture(wand))
+        for i=1,2 do
+            assert(snapshot.shopPickup==enabled)
+            local copy=assert(NHWand.restore(snapshot,0,0))
+            local scripts=shopScripts(copy)
+            assert(#scripts==1 and ComponentGetIsEnabled(scripts[1])==enabled)
+            assert(not EntityGetFirstComponentIncludingDisabled(copy,"ItemCostComponent"))
+            snapshot=assert(NHWand.capture(copy))
+        end
+    end
+    EntitySetComponentIsEnabled(wand,fx,false)
+    local function declined()
+        assert(not NHWand.capture(wand))
+        assert(not ents[wand].dead and shopScripts(wand)[1]==fx and not ComponentGetIsEnabled(fx))
+        for _,card in ipairs(deck) do assert(not ents[card].dead and ents[card].parent==wand) end
+    end
+    local price=EntityAddComponent2(wand,"ItemCostComponent",{cost=375,stealable=true})
+    declined()
+    EntityRemoveComponent(wand,price)
+    local duplicate=EntityAddComponent2(wand,"LuaComponent",{script_item_picked_up=shopEffect})
+    declined()
+    EntityRemoveComponent(wand,duplicate)
+    for field,value in pairs({script_kick="mods/other/kick.lua",
+        script_material_area_checker_success="data/scripts/animals/wand_charm.lua",
+        _tags="enabled_in_world",execute_every_n_frame=3,vm_type="ONE_PER_COMPONENT_INSTANCE"}) do
+        local before=comps[fx].data[field]
+        ComponentSetValue2(fx,field,value)
+        declined()
+        ComponentSetValue2(fx,field,before)
+    end
+    local stored=assert(NHWand.capture(wand))
+    local factory=EntityLoad
+    function EntityLoad(path)
+        local result=factory(path)
+        EntityAddComponent2(result,"LuaComponent",{script_item_picked_up=shopEffect})
+        return result
+    end
+    local copy=assert(NHWand.restore(stored,0,0))
+    local legacy=assert(NHWand.restore(record,0,0))
+    EntityLoad=factory
+    local scripts=shopScripts(copy)
+    assert(#scripts==1 and not ComponentGetIsEnabled(scripts[1]))
+    assert(#shopScripts(legacy)==0 and record.shopPickup==nil and stored.shopPickup==false and not ents[wand].dead)
+end
+
 do
     dofile("mods/noita_hideout/files/store.lua")
     for _,key in ipairs({"nest_wand_010","nest_wand_011","nest_wand_013","nest_wand_016"}) do
@@ -285,6 +443,17 @@ do
         for value in (comps[c].data._tags or ""):gmatch("[^,]+") do if value==tag then return true end end
         return false
     end
+    local watched=assert(NHWand.restore(record,0,0))
+    EntityAddTag(watched,"nh_rewind_equipment")
+    EntityAddComponent2(watched,"VariableStorageComponent",{_tags="nh_rewind_equipment",name="nh_rewind_equipment",value_string="solo/1/2/3|1|wand|0|67"})
+    local callback=EntityAddComponent2(watched,"LuaComponent",{_tags="nh_rewind_throw,enabled_in_inventory,enabled_in_hand,enabled_in_world",
+        script_throw_item="mods/noita_hideout/files/rewind_throw.lua",execute_every_n_frame=-1})
+    local stored=assert(NHWand.capture(watched))
+    local issued=assert(NHWand.restore(stored,0,0))
+    assert(not stored.tags.nh_rewind_equipment and not EntityGetFirstComponentIncludingDisabled(issued,"VariableStorageComponent","nh_rewind_equipment"))
+    assert(not EntityGetFirstComponentIncludingDisabled(issued,"LuaComponent","nh_rewind_throw"))
+    ComponentSetValue2(callback,"script_damage_received","mods/another/script.lua")
+    assert(not NHWand.capture(watched))
     local e=assert(NHWand.restore(record,0,0))
     local card=CreateItemActionEntity("LIGHT_BULLET")
     local function attach(id)
@@ -324,4 +493,178 @@ do
     ComponentSetValue2(callback,"script_kick","mods/other/kick.lua")
     assert(not NHSpell.capture(card) and not NHWand.capture(e))
     NHEW,NHEWItems=nil,nil
+end
+
+-- New Enemies can leave repeated hitbox backups on loose cards and wands.
+-- A snapshot must match an ordinary one while the original remains untouched.
+do
+    local key="new_enemies_unseen_effect_old_values_values"
+    local restoreScript="data/scripts/misc/unseen_restore_script.lua"
+    local function box(height,masked,tags)
+        return {_tags=tags,aabb_min_x=masked and 0 or -4,aabb_max_x=masked and 0 or 4,
+            aabb_min_y=masked and -450 or -height,aabb_max_y=masked and -450 or height,
+            damage_multiplier=masked and 0 or 1,offset={0,0},is_player=false,is_item=false,is_enemy=height==3}
+    end
+    local special="data/entities/misc/custom_cards/teleport_projectile_short.xml"
+    function ModTextFileGetContent(path)
+        assert(path==special)
+        return '<Entity><Base file="data/entities/base_custom_card.xml" /></Entity>'
+    end
+    function CreateItemActionEntity(action)
+        local card=create(action)
+        ents[card].file=action=="TELEPORT_PROJECTILE_SHORT" and special or "data/entities/misc/custom_cards/action.xml"
+        ents[card].tags="card_action"
+        EntityAddComponent2(card,"HitboxComponent",box(3,false,"enabled_in_world"))
+        return card
+    end
+    local loadWand=EntityLoad
+    function EntityLoad(path)
+        local wand=loadWand(path)
+        EntityAddComponent2(wand,"HitboxComponent",box(4,false,"enabled_in_world"))
+        return wand
+    end
+    function ModIsEnabled(mod) return mod=="new_enemies" end
+    local function residue(e,height,n)
+        local original=EntityGetFirstComponentIncludingDisabled(e,"HitboxComponent")
+        comps[original].data=box(height,true,"enabled_in_world")
+        ComponentSetValue2(original,"offset",0,450)
+        local backup,temp
+        for i=1,n do
+            local data=box(height,i>1,"enabled_in_world,temp_hitbox")
+            temp=EntityAddComponent2(e,"HitboxComponent",data)
+            local values=("aabb_max_x:number=%d,damage_multiplier:number=%d,aabb_min_x:number=%d,aabb_max_y:number=%d,aabb_min_y:number=%d")
+                :format(data.aabb_max_x,data.damage_multiplier,data.aabb_min_x,data.aabb_max_y,data.aabb_min_y)
+            backup=EntityAddComponent2(e,"VariableStorageComponent",{name=key,value_string=values,
+                value_int=0,value_float=0,value_bool=false})
+        end
+        return original,backup,temp
+    end
+    local function restoreHelper(e)
+        return EntityAddComponent2(e,"LuaComponent",{
+            _tags="enabled_in_world,enabled_in_hand,enabled_in_inventory,disabled_visual",
+            script_source_file=restoreScript,execute_every_n_frame=300,execute_on_added=false,execute_on_removed=false,
+            remove_after_executed=false,call_init_function=false,execute_times=0,limit_how_many_times_per_frame=-1,
+            limit_to_every_n_frame=-1,limit_all_callbacks=false,enable_coroutines=false})
+    end
+    local function equal(a,b)
+        if type(a)~="table" or type(b)~="table" then return a==b end
+        for k,v in pairs(a) do if not equal(v,b[k]) then return false end end
+        for k in pairs(b) do if a[k]==nil then return false end end
+        return true
+    end
+    local function normalBox(e,height)
+        local boxes=EntityGetComponentIncludingDisabled(e,"HitboxComponent")
+        assert(#boxes==1 and equal(comps[boxes[1]].data,box(height,false,"enabled_in_world")))
+    end
+    local player=entity("data/entities/player.xml")
+    local inventory=entity("")
+    ents[inventory].name="inventory_full"
+    EntityAddChild(player,inventory)
+    local card=CreateItemActionEntity("BURST_8")
+    EntityAddChild(inventory,card)
+    ComponentSetValue2(EntityGetFirstComponentIncludingDisabled(card,"ItemComponent"),"uses_remaining",3)
+    local plain=assert(NHSpell.capture(card))
+    local primary,backup,temp=residue(card,3,3)
+    EntitySetComponentIsEnabled(card,backup,false)
+    local captured=assert(NHSpell.capture(card))
+    assert(equal(plain,captured))
+    ents[card].file="mods/other/entities/custom_card.xml"
+    assert(not NHSpell.capture(card) and not ents[card].dead)
+    ents[card].file="??SAV/player.xml"
+    assert(equal(plain,assert(NHSpell.capture(card))))
+    local teleport=CreateItemActionEntity("TELEPORT_PROJECTILE_SHORT")
+    residue(teleport,3,1)
+    local specialized=assert(NHSpell.capture(teleport))
+    local restoredTeleport=assert(NHSpell.restore(specialized,0,0))
+    assert(ents[restoredTeleport].file==special)
+    normalBox(restoredTeleport,3)
+    ents[teleport].file="??SAV/player.xml"
+    assert(equal(specialized,assert(NHSpell.capture(teleport))))
+    ents[teleport].file="data/entities/misc/custom_cards/torch_electric.xml"
+    assert(not NHSpell.capture(teleport) and not ents[teleport].dead)
+    -- Reconstructing this action now would give it different collision geometry.
+    local factory=CreateItemActionEntity
+    local changedAction="TEST_CHANGED_SPELL_HITBOX"
+    local changed=factory(changedAction)
+    ents[changed].file="??SAV/player.xml"
+    residue(changed,3,1)
+    local probe
+    function CreateItemActionEntity(action,x,y)
+        local e=factory(action,x,y)
+        if action==changedAction then
+            probe=e
+            ComponentSetValue2(EntityGetFirstComponentIncludingDisabled(e,"HitboxComponent"),"aabb_min_x",-9)
+        end
+        return e
+    end
+    local result,why=NHSpell.capture(changed)
+    CreateItemActionEntity=factory
+    assert(not result and why:find("original hitbox",1,true) and not ents[changed].dead and ents[probe].dead)
+    local clone=assert(NHSpell.restore(captured,0,0))
+    normalBox(clone,3)
+    assert(equal(plain,assert(NHSpell.capture(clone))))
+    restoreHelper(clone)
+    assert(equal(plain,assert(NHSpell.capture(clone))))
+    assert(not ents[card].dead and #EntityGetComponentIncludingDisabled(card,"HitboxComponent")==4
+        and #EntityGetComponentIncludingDisabled(card,"VariableStorageComponent")==3
+        and ComponentGetValue2(primary,"aabb_min_y")==-450 and not ComponentGetIsEnabled(backup))
+
+    local storedValue=ComponentGetValue2(backup,"value_string")
+    ComponentSetValue2(backup,"value_string",(storedValue:gsub("aabb_min_x:number=0","aabb_min_x:number=-14")))
+    assert(not NHSpell.capture(card))
+    ComponentSetValue2(backup,"value_string",storedValue)
+    ComponentSetValue2(temp,"damage_multiplier",2)
+    assert(not NHSpell.capture(card))
+    ComponentSetValue2(temp,"damage_multiplier",0)
+    local custom=EntityAddComponent2(card,"VariableStorageComponent",{name="another_mod_marker"})
+    assert(not NHSpell.capture(card) and not ents[card].dead)
+    EntityRemoveComponent(card,custom)
+    local fx=restoreHelper(card)
+    assert(equal(plain,assert(NHSpell.capture(card))))
+    ComponentSetValue2(fx,"script_kick","mods/other/kick.lua")
+    assert(not NHSpell.capture(card))
+    comps[fx].data.script_kick=nil
+
+    for _,name in ipairs({"NEW_ENEMIES_UNSEEN","NEW_ENEMIES_SWALLOWED"}) do
+        local effect=entity("")
+        EntityAddComponent2(effect,"GameEffectComponent",{effect="CUSTOM",custom_effect_id=name,frames=400})
+        EntityAddChild(player,effect)
+        local result,why=NHSpell.capture(card)
+        assert(not result and why:find("Wait for Unseen or Swallowed",1,true) and not ents[card].dead)
+        EntityRemoveFromParent(effect)
+    end
+    EntityRemoveFromParent(card)
+    local wand=assert(NHWand.restore(record,0,0))
+    EntityAddChild(wand,card)
+    local plainWand=assert(NHWand.capture(wand))
+    local wandBox=residue(wand,4,1)
+    restoreHelper(wand)
+    local repaired=assert(NHWand.capture(wand))
+    assert(equal(repaired,plainWand) and ComponentGetValue2(wandBox,"damage_multiplier")==0)
+    local rebuilt=assert(NHWand.restore(repaired,0,0))
+    normalBox(rebuilt,4)
+    local found=false
+    for _,child in ipairs(EntityGetAllChildren(rebuilt)) do
+        local action=EntityGetFirstComponentIncludingDisabled(child,"ItemActionComponent")
+        if action and ComponentGetValue2(action,"action_id")=="BURST_8" then
+            normalBox(child,3)
+            found=true
+        end
+    end
+    assert(found)
+    comps[primary].data=box(3,false,"enabled_in_world")
+    assert(equal(plain,assert(NHSpell.capture(card))))
+    custom=EntityAddComponent2(card,"HitboxComponent",box(3,false,"quest_hitbox"))
+    assert(not NHWand.capture(wand) and not ents[wand].dead and not ents[card].dead)
+    EntityRemoveComponent(card,custom)
+    assert(equal(repaired,assert(NHWand.capture(wand))))
+    local incomplete=CreateItemActionEntity("BURST_8")
+    local baseBox,lostBackup,lostTemp=residue(incomplete,3,1)
+    EntityRemoveComponent(incomplete,lostBackup)
+    assert(not NHSpell.capture(incomplete))
+    comps[baseBox].data=box(3,false,"enabled_in_world")
+    assert(NHSpell.capture(incomplete))
+    EntityRemoveComponent(incomplete,lostTemp)
+    comps[baseBox].data=box(3,true,"enabled_in_world,disabled_visual")
+    assert(not NHSpell.capture(incomplete))
 end
