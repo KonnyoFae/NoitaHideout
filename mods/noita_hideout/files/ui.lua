@@ -328,7 +328,7 @@ local function item_details(slot,model,tr)
     if bag and bag.loot then
         local loot=bags[bag.loot]
         return {tr(bag.zh,bag.en).." ×"..(slot.count or 1),tr("补满已装备护盾与弹挂","Refills equipped shield and ammo rig"),
-            tr("充能器、弹药盒各一件","One charger and one ammo box"),tr("随机掉落 · ","Bonus loot · ")..tr(loot.zh,loot.en)}
+            tr("充能器、弹药盒各一件","One charger and one ammo box"),tr("普通随机奖励 · ","Standard loot · ")..tr(loot.zh,loot.en)}
     end
     if bag then
         local chance=bag.chances
@@ -336,7 +336,8 @@ local function item_details(slot,model,tr)
             tr("必得 %d 金和一件补给","Always drops %d gold and one supply"):format(bag.gold*10),
             tr("食物 %d%% · 医疗 %d%%","Food %d%% · Medical %d%%"):format(chance.food,chance.medical),
             tr("工具 %d%% · 针剂 %d%%","Tool %d%% · Injector %d%%"):format(chance.tool,chance.dose),
-            tr("额外掉落 · 塔罗牌 %d%% · 同伴卡 %d%%","Bonus drops · Tarot %d%% · Companion card %d%%"):format(bag.tarot,bag.card)}
+            tr("额外掉落 · 塔罗牌 %d%% · 同伴卡 %d%%","Bonus drops · Tarot %d%% · Companion card %d%%"):format(bag.tarot,bag.card),
+            bag.red and tr("额外大红 %d%% · 每盒独立","Extra red relic %d%% · Independent per box"):format(bag.red) or nil}
     end
     local food=foods[slot.kind]
     if food then

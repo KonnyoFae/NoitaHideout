@@ -189,7 +189,7 @@ end
 
 local function tryParry(player,id,nx,ny,shape,oldBlade,newBlade)
     local shot=EntityGetFirstComponentIncludingDisabled(id,"ProjectileComponent")
-    if not shot or not targets.hostileProjectile(player,id,shot) then return false end
+    if not shot then return false end
     local velocity=EntityGetFirstComponentIncludingDisabled(id,"VelocityComponent")
     if not velocity then return false end
     local x,y=EntityGetTransform(id)

@@ -120,7 +120,23 @@ function EntityLoad(path,x,y)
     return field
 end
 function EntityGetHerdRelationSafe(a,b) return entities[b].friendly and 100 or 0 end
-function GetHerdRelation(a,b) return a==b and 100 or 0 end
+local herdIds={ally_zero=0,player=1,enemy=2,mod_hunter=107,mod_friend=108}
+local knownIds={[0]=true,[1]=true,[2]=true,[107]=true,[108]=true}
+local registryReads,herdCalls=0,0
+function ModTextFileGetContent(path)
+    assert(path=="data/genome_relations.csv")
+    registryReads=registryReads+1
+    return "HERD,ally_zero,player,-1,enemy,mod_hunter,mod_friend\r\n"
+        .."-1,0,0,0,0,0\r\nally_zero,100,100,0,0,100\r\nplayer,100,100,0,0,100\r\nenemy,0,0,100,0,0\r\n"
+        .."mod_hunter,0,0,0,100,0\r\nmod_friend,100,100,0,0,100\r\n"
+end
+function StringToHerdId(name) return assert(herdIds[name],"only registered CSV names may be looked up") end
+function HerdIdToString() error("never probe a numeric herd ID for validity") end
+function GetHerdRelation(a,b)
+    assert(knownIds[a] and knownIds[b],"an unknown herd ID reached the native relation API")
+    herdCalls=herdCalls+1
+    return (a==b or b==108 or b==0) and 100 or 0
+end
 function GameGetGameEffectCount(entity,effect) return entities[entity].charmed and 1 or 0 end
 local query=EntityGetInRadius
 local queries=0
@@ -131,7 +147,7 @@ function EntityGetInRadius(x,y,r)
 end
 local function comp(id,kind,data) return EntityAddComponent2(id,kind,data or {}) end
 local player=spawn("player_unit,mortal")
-comp(player,"GenomeDataComponent",{herd_id=1})
+local playerGenome=comp(player,"GenomeDataComponent",{herd_id=1})
 local weapon=spawn("noita_hideout_katana",0,player)
 local inventory=comp(player,"Inventory2Component",{mActiveItem=weapon})
 local enemy=spawn("enemy,mortal",20)
@@ -160,6 +176,7 @@ local physicsEnemy=body(83); EntityAddTag(physicsEnemy,"enemy")
 local hg=dofile_once(files.."hourglass_field.lua")
 local blade=dofile_once(files.."katana_field.lua")
 local freeze=dofile_once(files.."stasis.lua")
+assert(registryReads==0,"load the final modded herd registry only when a field needs it")
 local paid=0
 local function pay() paid=paid+1; return true end
 assert(not blade.activate(0,{},pay))
@@ -300,7 +317,7 @@ for _,duration in ipairs({1,300,7200}) do
     frame=frame+1;blade.tick(id);assert(not blade.active(id) and components[ai].enabled)
 end
 
--- Parrying and field capture share the same faction and authority policy.
+-- Blade stasis retains enemy-only capture even though parries allow any herd.
 local targets=dofile_once(files.."field_targets.lua")
 for _,id in ipairs({player,peer,friendlyEnemy,companion,turret,charmed}) do assert(targets.friendly(player,id)) end
 assert(not targets.friendly(player,enemy) and not targets.friendly(player,0))
@@ -309,36 +326,68 @@ local reflectedVelocity=comp(reflected,"VelocityComponent",{mVelocity={120,-160}
 local reflectedShot=comp(reflected,"ProjectileComponent",{mWhoShot=enemy,mShooterHerdId=2,lifetime=73})
 local reflectedTTL=comp(reflected,"LifetimeComponent",{kill_frame=frame+17,lifetime=17})
 local reflectedTick=comp(reflected,"LuaComponent",{script_source_file="projectile_tick.lua",execute_every_n_frame=7})
-assert(targets.hostileProjectile(player,reflected) and targets.hostileProjectile(player,reflected,reflectedShot))
+field=assert(blade.activate(player,{duration=30},pay))
+assert(blade.affects(field,reflected))
 for _,shooter in ipairs({player,peer,friendlyEnemy,companion,turret,charmed,weapon,peerWeapon}) do
     ComponentSetValue2(reflectedShot,"mWhoShot",shooter)
-    assert(not targets.hostileProjectile(player,reflected,reflectedShot),"friendly shooter or its held weapon was hostile")
+    assert(not blade.affects(field,reflected),"friendly shooter or its held weapon was hostile")
 end
 local enemyWeapon=spawn("wand",20,enemy)
 ComponentSetValue2(reflectedShot,"mWhoShot",enemyWeapon)
-assert(targets.hostileProjectile(player,reflected,reflectedShot),"shooter root must determine allegiance")
+assert(blade.affects(field,reflected),"shooter root must determine allegiance")
 ComponentSetValue2(reflectedShot,"mWhoShot",enemy)
 entities[enemy].alive=false
-assert(targets.hostileProjectile(player,reflected,reflectedShot),"dead shooter's hostile herd must survive")
+assert(blade.affects(field,reflected),"dead shooter's hostile herd must survive")
 ComponentSetValue2(reflectedShot,"mShooterHerdId",1)
-assert(not targets.hostileProjectile(player,reflected,reflectedShot))
-ComponentSetValue2(reflectedShot,"mShooterHerdId",0)
-assert(not targets.hostileProjectile(player,reflected,reflectedShot),"unknown effects are not proof of hostile fire")
+assert(not blade.affects(field,reflected))
+local reads=registryReads
+for _,herd in ipairs({0,108}) do
+    ComponentSetValue2(reflectedShot,"mShooterHerdId",herd)
+    assert(not blade.affects(field,reflected),"registered friendly herds, including ID zero, must stay free")
+end
+ComponentSetValue2(reflectedShot,"mShooterHerdId",107)
+assert(blade.affects(field,reflected),"a dead modded shooter's registered hostile herd must survive")
+ComponentSetValue2(playerGenome,"herd_id",0)
+assert(blade.affects(field,reflected),"zero is a valid registered player herd ID")
+ComponentSetValue2(playerGenome,"herd_id",1)
+for _,herd in ipairs({-1,25166272,999,2.5,math.huge,-math.huge,0/0,"2",false}) do
+    local calls=herdCalls
+    ComponentSetValue2(reflectedShot,"mShooterHerdId",herd)
+    assert(not blade.affects(field,reflected),"invalid stored firing herds must not freeze effects")
+    assert(herdCalls==calls,"invalid firing herd was probed by a native relation call")
+    ComponentSetValue2(reflectedShot,"mShooterHerdId",2)
+    ComponentSetValue2(playerGenome,"herd_id",herd)
+    assert(not blade.affects(field,reflected),"invalid caster herds must not reach native relations")
+    assert(herdCalls==calls)
+    ComponentSetValue2(playerGenome,"herd_id",1)
+end
+ComponentSetValue2(reflectedShot,"mShooterHerdId",nil)
+assert(not blade.affects(field,reflected),"unknown effects are not proof of hostile fire")
+ComponentSetValue2(reflectedShot,"mShooterHerdId",2)
+ComponentSetValue2(playerGenome,"herd_id",nil)
+local calls=herdCalls
+assert(not blade.affects(field,reflected) and herdCalls==calls,"a missing caster herd must not reach native relations")
+ComponentSetValue2(playerGenome,"herd_id",1)
+assert(registryReads==reads,"projectile checks must reuse the registered-herd cache")
 entities[enemy].alive=true
+ComponentSetValue2(reflectedShot,"mShooterHerdId",25166272)
+local calls=herdCalls
+assert(blade.affects(field,reflected) and herdCalls==calls,"a live shooter supplies allegiance without probing stale stored IDs")
 ComponentSetValue2(reflectedShot,"mShooterHerdId",2)
 local remoteShot=spawn("projectile,ew_des",20)
 local remoteVelocity=comp(remoteShot,"VelocityComponent",{mVelocity={120,-160}})
 comp(remoteShot,"ProjectileComponent",{mWhoShot=enemy,mShooterHerdId=2})
 local gid=comp(remoteShot,"VariableStorageComponent",{name="ew_gid_lid",value_string="24",value_bool=false})
-assert(not targets.hostileProjectile(player,remoteShot))
+assert(not blade.affects(field,remoteShot))
 assert(not freeze.redirect(remoteShot,300,0) and components[remoteVelocity].mVelocity[1]==120,"remote velocity must stay untouched")
 ComponentSetValue2(gid,"value_bool",true)
-assert(targets.hostileProjectile(player,remoteShot),"local DES owner may redirect its authoritative projectile")
+assert(blade.affects(field,remoteShot),"local DES owner may freeze its authoritative projectile")
 local itemShot=spawn("projectile",20)
 comp(itemShot,"ProjectileComponent",{mWhoShot=enemy});comp(itemShot,"ItemComponent")
-assert(not targets.hostileProjectile(player,itemShot),"physical inventory items are excluded from hostile projectile targeting")
+assert(not blade.affects(field,itemShot),"physical inventory items are excluded from hostile projectile targeting")
 entities[itemShot].parent=player
-assert(not targets.hostileProjectile(player,itemShot))
+assert(not blade.affects(field,itemShot))
+blade.cancel(field)
 
 local function speed(x,y)
     local vx,vy=freeze.getVelocity(reflected)
@@ -414,4 +463,4 @@ local last=#entities-1
 for n=1,5 do frame=frame+1; blade.tick(field) end
 assert(EntityHasTag(last,"nh_hourglass_still"),"bounded scan must not starve later entities")
 blade.cancel(field)
-print("Katana fields: shared hostile targeting, redirected frozen velocities, independent leases, payment rollback, restoration and bounded scans passed.")
+print("Katana fields: registered hostile herds, redirected frozen velocities, independent leases, payment rollback, restoration and bounded scans passed.")

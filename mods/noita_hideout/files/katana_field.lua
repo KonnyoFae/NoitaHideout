@@ -7,6 +7,41 @@ local function component(entity,kind,key)
     if key then return EntityGetFirstComponentIncludingDisabled(entity,kind,key) end
     return EntityGetFirstComponentIncludingDisabled(entity,kind)
 end
+local registeredHerds
+local function knownHerd(id)
+    if type(id)~="number" or id~=id or id<0 or id>2147483647 or id~=math.floor(id) then return false end
+    if not registeredHerds then
+        registeredHerds={}
+        -- The virtual CSV includes every enabled mod's registered herds.
+        -- Read it lazily after mod initialization, once per Lua VM. This API
+        -- is available in component scripts as well as init.lua.
+        local header=(ModTextFileGetContent("data/genome_relations.csv") or ""):match("[^\r\n]+") or ""
+        for name in (header:match("^[^,]*,(.*)$") or ""):gmatch("[^,]+") do
+            name=name:match("^%s*(.-)%s*$")
+            if name~="" and name~="-1" then
+                local herd=StringToHerdId(name)
+                if type(herd)=="number" and herd==herd and herd>=0 and herd<=2147483647 and herd==math.floor(herd) then
+                    registeredHerds[herd]=true
+                end
+            end
+        end
+    end
+    return registeredHerds[id]==true
+end
+local function hostileProjectile(player,shot)
+    local shooter=ComponentGetValue2(shot,"mWhoShot")
+    if shooter and shooter~=0 and EntityGetIsAlive(shooter) then
+        return not targets.friendly(player,EntityGetRootEntity(shooter))
+    end
+    local genome=component(player,"GenomeDataComponent")
+    if not genome then return false end
+    local playerHerd=ComponentGetValue2(genome,"herd_id")
+    local shotHerd=ComponentGetValue2(shot,"mShooterHerdId")
+    -- A dead shooter may leave a valid modded herd on its projectile. Native
+    -- herd APIs can abort the process for an unregistered ID, so never use a
+    -- numeric range alone or probe an unknown ID through HerdIdToString.
+    return knownHerd(shotHerd) and knownHerd(playerHerd) and GetHerdRelation(playerHerd,shotHerd)<40
+end
 local function held(player)
     local inventory=component(player,"Inventory2Component")
     return inventory and ComponentGetValue2(inventory,"mActiveItem")
@@ -41,7 +76,7 @@ function M.affects(field,entity)
         or EntityHasTag(entity,tag) or component(entity,"ItemComponent") then return false end
     local player=owner(field)
     local shot=component(entity,"ProjectileComponent")
-    if shot then return targets.hostileProjectile(player,entity,shot) end
+    if shot then return hostileProjectile(player,shot) end
     return (EntityHasTag(entity,"enemy") or EntityHasTag(entity,"mortal")) and not targets.friendly(player,entity)
 end
 local function create(player,weapon,x,y,radius,duration,token,remote)

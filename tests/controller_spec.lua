@@ -2804,7 +2804,8 @@ do
     end
     local function open(action,ref)
         tick()
-        rolls={100,2,100,100}
+        -- Regen-mana dose and a salvage bell, with neither optional card.
+        rolls={100,2,100,100,1,1}
         tick(nil,action,ref,"right")
         assert(#rolls==0)
         rolls=nil
@@ -2816,11 +2817,13 @@ do
     open("use_inventory",ref)
     fail_commit=false
     assert(state().warehouse[1].item.count==2 and #EntityGetWithTag("noita_hideout_dose")==0)
+    assert(#EntityGetWithTag("noita_hideout_salvage_bell")==0)
     advance(61)
     open("use_inventory",ref)
     local dose=assert(EntityGetWithTag("noita_hideout_dose")[1])
     local left,subtype=NHDoses.remaining(state(),dose)
     assert(left==5 and subtype=="regen_mana" and state().warehouse[1].item.count==1)
+    assert(#EntityGetWithTag("noita_hideout_salvage_bell")==1)
     local source={container="warehouse",kind="loot_case",safeSlot=1,storedId=row.id,parent=quick,lane="tool",xslot=0,yslot=0}
     tick(nil,"secure_withdraw",source)
     held=assert(EntityGetWithTag("noita_hideout_loot_case")[1])
@@ -2828,6 +2831,7 @@ do
     tick()
     open()
     assert(not EntityGetIsAlive(held) and #EntityGetWithTag("noita_hideout_dose")==2)
+    assert(#EntityGetWithTag("noita_hideout_salvage_bell")==2)
     assert(NHDoses.reconcile(state(),player) and #EntityGetWithTag("noita_hideout_dose")==2)
     GamePickUpInventoryItem(player,dose)
     held=dose

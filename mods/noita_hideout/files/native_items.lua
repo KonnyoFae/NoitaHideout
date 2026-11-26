@@ -207,15 +207,17 @@ function NHNative.registerTranslations()
                 ("右键开启，必得一个%s。另得一件奖励，食品 %d%% / 遗物 %d%% / 塔罗牌 %d%%。"):format(pack.zh,bag.food,bag.relic,bag.tarot)}
         elseif bag.loot then
             local tableName=bags.types[bag.loot]
-            labels[#labels+1]={"nh_hideout_"..id.."_desc","Right-click to refill shield and rig. Drops a charger and ammo box plus "..tableName.en.." loot.",
-                "右键补满护盾和弹挂，获得充能器、弹药盒及"..tableName.zh.."的随机掉落。"}
+            labels[#labels+1]={"nh_hideout_"..id.."_desc","Right-click to refill shield and rig. Drops a charger and ammo box plus "..tableName.en.." standard loot.",
+                "右键补满护盾和弹挂，获得充能器、弹药盒及"..tableName.zh.."的普通随机奖励。"}
         else
             local c=bag.chances
             labels[#labels+1]={"nh_hideout_"..id.."_desc",
                 ("Right-click for %d gold and one supply. Food %d%% / medical %d%% / tool %d%% / injector %d%%. Extra tarot %d%% / companion %d%%."):format(
-                    bag.gold*10,c.food,c.medical,c.tool,c.dose,bag.tarot,bag.card),
+                    bag.gold*10,c.food,c.medical,c.tool,c.dose,bag.tarot,bag.card)
+                    ..(bag.red and (" Each box independently has a %d%% chance for one extra red relic from the shared pool of six equally likely items, including Dragon King."):format(bag.red) or ""),
                 ("右键开启，获得 %d 金和一件补给。食物 %d%% / 医疗 %d%% / 工具 %d%% / 针剂 %d%%。额外塔罗 %d%% / 同伴卡 %d%%。"):format(
-                    bag.gold*10,c.food,c.medical,c.tool,c.dose,bag.tarot,bag.card)}
+                    bag.gold*10,c.food,c.medical,c.tool,c.dose,bag.tarot,bag.card)
+                    ..(bag.red and ("每盒独立有 %d%% 概率额外获得一件大红，共享池六件等概率，含龙王。"):format(bag.red) or "")}
         end
     end
     local turrets=NHTurrets or dofile("mods/noita_hideout/files/turrets.lua")

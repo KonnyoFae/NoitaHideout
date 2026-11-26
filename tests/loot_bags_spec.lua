@@ -82,17 +82,41 @@ NHNative={spawn=function(kind,_,_,subtype)
 end}
 NHDoses={confirmLoot=function(entity) confirmed=entity end}
 
-local function openWith(kind, sequence, pay)
+local redPool=dofile(root.."red_collectibles.lua")
+local redFiles,redIds={},{}
+assert(#redPool==6,"lockboxes must use the shared six-collectible pool")
+for _,entry in ipairs(redPool) do
+    assert(not redIds[entry.id] and not redFiles[entry.file],"duplicate red collectible")
+    redIds[entry.id],redFiles[entry.file]=true,true
+    local file=assert(io.open(entry.file,"r")); file:close()
+end
+for _,id in ipairs({"salvage_bell","rewind_watch","stasis_hourglass","dustless_duster","mana_reactor","dragon_king"}) do
+    assert(redIds[id],id.." missing from the shared red pool")
+end
+
+-- Existing ordinary-loot cases explicitly miss the new independent roll.
+-- A successful roll must make exactly one uniform draw over the shared pool.
+local function openWith(kind, sequence, pay, redRoll, redIndex)
+    local rolls={}
+    for i,n in ipairs(sequence) do rolls[i]=n end
+    if kind=="loot_case" then
+        redRoll=redRoll or 100
+        rolls[#rolls+1]=redRoll
+        if redRoll==1 then rolls[#rolls+1]=redIndex or 1 end
+    end
     local index=0
     function ProceduralRandomi(_,_,lo,hi)
         index=index+1
-        local n=sequence[index]
+        if kind=="loot_case" and index>#sequence then
+            assert(lo==1 and hi==(index==#sequence+1 and 100 or #redPool),"wrong red-roll bounds")
+        end
+        local n=rolls[index]
         assert(n and n>=lo and n<=hi,"unexpected loot roll "..index.." for "..kind)
         return n
     end
     created,alive,confirmed={},{},nil
     local ok=NHLootBags.open(1,kind,pay or function() return true end)
-    assert(index==#sequence)
+    assert(index==#rolls,"missing loot roll for "..kind)
     ProceduralRandomi=chooseLast
     return ok
 end
@@ -173,6 +197,82 @@ for _,set in ipairs({NHMedkits.order,NHSurgeryKits.order,NHTurrets.order,NHShiel
 end
 assert(openWith("loot_case",{100,1,1,1,1,1}) and #created==6 and confirmed==4)
 assert(not openWith("loot_case",{100,1,1,1,1,1},function() return false end) and not confirmed and not next(alive))
+
+-- Only the lockbox owns this extra 1% roll; matching supply boxes retain the
+-- same ordinary tier without inheriting the lockbox's red reward.
+for kind,bag in pairs(NHLootBags.types) do
+    assert((bag.red or 0)==(kind=="loot_case" and 1 or 0),"red chance leaked into "..kind)
+end
+for chance=1,100 do
+    assert(openWith("loot_case",{1,1,100,100},nil,chance))
+    assert(created[4]==root.."items/advanced_medkit.xml","red roll replaced the main supply")
+    assert(#created==(chance==1 and 5 or 4),"red chance is not exactly 1% at "..chance)
+    if chance==1 then assert(created[5]==redPool[1].file) end
+end
+
+local allBonuses={100,1,1,#NHTarot.order,1,#NHCompanions.order}
+local function caseStack()
+    local stack={kind="loot_case",count=2}
+    local draft={runSerial=1,closedThrough=0,warehouse={{id=1,slot=1,item=stack}}}
+    return stack,draft,{container="warehouse",slot=1,storedId=1,kind="loot_case",count=2}
+end
+for index,entry in ipairs(redPool) do
+    local stack,draft,clicked=caseStack()
+    local paid=0
+    assert(openWith("loot_case",allBonuses,function(entity,subtype)
+        paid=paid+1
+        assert(entity==4 and subtype=="healing_2")
+        assert(#created==7 and created[7]==entry.file and alive[7],"red reward must be staged before payment")
+        return use.spend(draft,1,clicked)
+    end,1,index))
+    assert(paid==1 and stack.count==1 and #draft.warehouse==1,"opening must consume exactly one lockbox")
+    assert(#created==7 and confirmed==4 and created[4]==root.."items/dose_healing_2.xml")
+    assert(created[5]==root.."items/card_tarot_devil.xml" and created[6]==root.."items/card_cat.xml")
+    assert(created[7]==entry.file,"shared red entry was not selectable: "..entry.id)
+    for id=1,7 do assert(alive[id]) end
+
+    -- Replaying the original click must not consume another box or leave any
+    -- of the staged ordinary, tarot, companion or red rewards behind.
+    assert(not openWith("loot_case",allBonuses,function() return use.spend(draft,1,clicked) end,1,index))
+    assert(stack.count==1 and not confirmed and not next(alive))
+
+    stack,draft,clicked=caseStack()
+    paid=0
+    assert(not openWith("loot_case",allBonuses,function()
+        paid=paid+1
+        assert(#created==7 and created[7]==entry.file)
+        return false
+    end,1,index))
+    assert(paid==1 and stack.count==2 and not confirmed and not next(alive))
+
+    local load=EntityLoad
+    for _,failure in ipairs({"zero","nil"}) do
+        EntityLoad=function(file)
+            if file==entry.file then
+                if failure=="zero" then return 0 end
+                return nil
+            end
+            return load(file)
+        end
+        assert(not openWith("loot_case",allBonuses,function() error("failed red reward was charged") end,1,index))
+        assert(#created==6 and stack.count==2 and not confirmed and not next(alive))
+    end
+    EntityLoad=load
+end
+for level,kind in ipairs(NHLootBags.order) do
+    local rolls={1,1,1,#NHTarot.order}
+    if NHLootBags.types[kind].card>0 then
+        rolls[#rolls+1]=1; rolls[#rolls+1]=#NHCompanions.order
+    end
+    for _,container in ipairs({kind,NHLootBags.packKinds[level]}) do
+        if container~="loot_case" then
+            assert(openWith(container,rolls))
+            for _,file in ipairs(created) do assert(not redFiles[file],"red reward leaked into "..container) end
+        end
+    end
+end
+print("Lockboxes independently grant 1% shared red loot, including Dragon King; ordinary rewards, one-box payment and atomic rollback passed.")
+
 local giftOdds={{60,30,10},{50,35,15},{40,40,20}}
 for level,odds in ipairs(giftOdds) do
     local kind="gift_box_"..level
@@ -223,6 +323,10 @@ for level,kind in ipairs(NHLootBags.packKinds) do
         created,alive,roll={},{},chance
         assert(NHLootBags.open(1,NHLootBags.order[level],function() return true end))
         local expected=created
+        if level==3 and chance==1 then
+            assert(expected[#expected]==redPool[#redPool].file)
+            table.remove(expected) -- This extra reward belongs only to the lockbox.
+        end
         created,alive={},{}
         assert(NHLootBags.open(1,kind,function() return true end))
         assert(created[1]==root.."items/"..bag.charger..".xml" and created[2]==root.."items/"..bag.ammo..".xml")

@@ -53,7 +53,6 @@ function EntityGetInRadiusWithTag(x,y,radius,tag)
     for _,id in ipairs(EntityGetInRadius(x,y,radius)) do if EntityHasTag(id,tag) then found[#found+1]=id end end
     return found
 end
-function GetHerdRelation(a,b) return a==b and 100 or 0 end
 function RaytracePlatforms(x1,y1,x2,y2)
     if floorY and math.max(y1,y2)>=floorY then return true,x2,floorY end
     if wall and math.min(x1,x2)<=wall and math.max(x1,x2)>=wall then return true,wall,y2 end
@@ -84,8 +83,7 @@ function dofile_once(path)
     if path==root.."katana_rewards.lua" then return {mark=function(id,owner,message) marked[#marked+1]={id=id,owner=owner,message=message} end} end
     return dofile(path)
 end
--- Geometry is isolated from the separately tested projectile rewrite. This
--- mock deliberately leaves bullets hostile so duplicate callbacks remain visible.
+-- Record each contact without moving the bullet so repeated callbacks are visible.
 local originalDofile=dofile
 function dofile(path)
     if path==root.."katana_parry.lua" then return {reflect=function(player,id,shot,velocity,nx,ny,x,y)
@@ -300,15 +298,15 @@ for _,variant in ipairs(variants) do
             bullet(6,e.x2+2,-4,120,0) -- Past the rounded tip and flying away.
             mob(7,20,-4)
             count,hits=combat.apply(1,e)
-            assert(count==4 and #parryCalls==3 and #hitCalls==1,"one swing must reflect multiple bullets and still hit its enemy: "..e.token)
-            assert(reflected(2) and reflected(3) and reflected(4) and not reflected(5) and not reflected(6))
+            assert(count==5 and #parryCalls==4 and #hitCalls==1,"one swing must reflect all touching bullets and still hit its enemy: "..e.token)
+            assert(reflected(2) and reflected(3) and reflected(4) and reflected(5) and not reflected(6))
             assert(#marked==(plunder and 1 or 0),"parrying a projectile must not award a kill refill")
             for _,entry in ipairs(parryCalls) do
                 assert(entry.nx==1 and entry.ny==0 and entry.x==nil,"inside bullets reflect in place toward the blade tip")
             end
-            assert(combat.apply(1,e,hits)==0 and #parryCalls==3 and #hitCalls==1,"same attack repeated a projectile rewrite")
+            assert(combat.apply(1,e,hits)==0 and #parryCalls==4 and #hitCalls==1,"same attack repeated a projectile rewrite")
             bullet(8,15,-4)
-            assert(combat.apply(1,e,hits)==1 and #parryCalls==4 and reflected(8),"a later new bullet must remain parryable")
+            assert(combat.apply(1,e,hits)==1 and #parryCalls==5 and reflected(8),"a later new bullet must remain parryable")
         end
     end
 end
@@ -426,7 +424,7 @@ assert(reflected(2).y>=-10 and reflected(2).y< -9.9)
 projectileScene();bullet(2,400,-4,-30000,0).velocity.enabled=false
 assert(combat.apply(1,e)==0,"outer query projected a disabled velocity component")
 projectileScene();bullet(2,400,-4,-30000,0,1)
-assert(combat.apply(1,e)==0,"outer query parried a friendly high-speed shot")
+assert(combat.apply(1,e)==1 and reflected(2),"outer query missed a friendly high-speed shot crossing the blade")
 projectileScene();bullet(2,400,-4,-30000,0)
 wall=200
 assert(combat.apply(1,e)==0,"outer predicted path crossed intervening terrain")

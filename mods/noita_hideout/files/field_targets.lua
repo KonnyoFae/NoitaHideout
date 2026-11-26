@@ -26,24 +26,4 @@ function M.friendly(player,entity)
         or EntityGetHerdRelationSafe(player,entity)>=40
 end
 
--- The same owner/faction check is used by katana stasis and projectile parries.
--- Read disabled projectile components too: stasis suspends their simulation.
-function M.hostileProjectile(player,entity,shot)
-    if not player or player==0 or not EntityGetIsAlive(player) or not entity or entity==0 or not EntityGetIsAlive(entity)
-        or not M.canAffect(entity,ModIsEnabled("quant.ew")) or EntityHasTag(entity,"nh_katana_field")
-        or EntityGetFirstComponentIncludingDisabled(entity,"ItemComponent") then return false end
-    shot=shot or EntityGetFirstComponentIncludingDisabled(entity,"ProjectileComponent")
-    if not shot or shot==0 then return false end
-    local shooter=ComponentGetValue2(shot,"mWhoShot")
-    if shooter and shooter~=0 and EntityGetIsAlive(shooter) then
-        return not M.friendly(player,EntityGetRootEntity(shooter))
-    end
-    local genome=EntityGetFirstComponentIncludingDisabled(player,"GenomeDataComponent")
-    local shotHerd=ComponentGetValue2(shot,"mShooterHerdId")
-    -- A dead shooter's stored herd retains its allegiance. An effect without
-    -- either a live shooter or a known firing herd is not proven hostile.
-    return genome and type(shotHerd)=="number" and shotHerd>0
-        and GetHerdRelation(ComponentGetValue2(genome,"herd_id"),shotHerd)<40 or false
-end
-
 return M

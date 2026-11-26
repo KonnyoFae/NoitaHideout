@@ -21,7 +21,9 @@ local otherMotion={"ItemComponent","PhysicsBodyComponent","PhysicsBody2Component
 
 function M.reflect(player,id,shot,vel,nx,ny,contactX,contactY)
     if not shot or not vel or not finite(nx) or not finite(ny)
-        or not targets.hostileProjectile(player,id,shot) then return false end
+        or not player or player==0 or not EntityGetIsAlive(player)
+        or not id or id==0 or not EntityGetIsAlive(id) or EntityHasTag(id,"nh_katana_field")
+        or not targets.canAffect(id,ModIsEnabled("quant.ew")) then return false end
     if first(id,"ProjectileComponent")~=shot or first(id,"VelocityComponent")~=vel
         or not running(shot) or not running(vel) then return false end
     for _,kind in ipairs(otherMotion) do if first(id,kind) then return false end end

@@ -8,7 +8,7 @@ local M={order={"travel_satchel","travel_pack","loot_case"},types={
         medical={"tactical_medkit","tactical_surgery_kit"},
         tools={"fire_tube","frost_tube","rocket_turret_pack","improved_shield_charger","improved_ammo_pack","sedative_launcher"},
         doses={"fire","lightning","frost","healing","quick_heal","haste","poison"}},
-    loot_case={zh="保险盒",en="Lockbox",gold=3,tarot=15,card=8,
+    loot_case={zh="保险盒",en="Lockbox",gold=3,tarot=15,card=8,red=1,
         chances={food=0,medical=30,tool=35,dose=35},
         medical={"advanced_medkit","advanced_surgery_kit"},
         tools={"shock_tube","derringer","shield_turret_pack","advanced_shield_charger","advanced_ammo_pack","sedative_launcher"},
@@ -102,6 +102,11 @@ function M.open(player,kind,pay)
         if tier.card>0 and roll(100)<=tier.card then
             local id=NHCompanions.order[roll(#NHCompanions.order)]
             if not spawn(EntityLoad(root.."card_"..id..".xml",x-9,y-5)) then return end
+        end
+        -- A supply box shares its tier's ordinary loot; the red roll belongs to the lockbox itself.
+        if bag.red and roll(100)<=bag.red then
+            local reds=dofile("mods/noita_hideout/files/red_collectibles.lua")
+            if not spawn(EntityLoad(reds[roll(#reds)].file,x+9,y-5)) then return end
         end
         if not pay(dose,subtype) then return end
         if dose then NHDoses.confirmLoot(dose) end

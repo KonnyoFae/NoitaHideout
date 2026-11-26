@@ -1,7 +1,7 @@
 local root="mods/noita_hideout/files/"
 local entities,components={},{}
 local multiplayer,redirectFail=false,false
-local sparks,redirects={},0
+local sparks,redirects,factionQueries={},0,0
 local function entity(tags)
     local id=#entities+1
     local e={alive=true,tags={},components={},x=12,y=18,r=0.4,sx=-1.25,sy=0.75}
@@ -49,12 +49,15 @@ function EntitySetTransform(id,x,y,r,sx,sy)
 end
 function ModIsEnabled() return multiplayer end
 function GameGetGameEffectCount(id) return entities[id].charmed and 1 or 0 end
-function GetHerdRelation(a,b) return a==b and 100 or 0 end
-function EntityGetHerdRelationSafe(a,b)
-    local ga=EntityGetFirstComponentIncludingDisabled(a,"GenomeDataComponent")
-    local gb=EntityGetFirstComponentIncludingDisabled(b,"GenomeDataComponent")
-    return ga and gb and GetHerdRelation(components[ga].herd_id,components[gb].herd_id) or 0
+local function forbiddenFactionQuery()
+    factionQueries=factionQueries+1
+    error("Projectile parries must never query factions, including invalid cached herd IDs")
 end
+GetHerdRelation=forbiddenFactionQuery
+EntityGetHerdRelation=forbiddenFactionQuery
+EntityGetHerdRelationSafe=forbiddenFactionQuery
+HerdIdToString=forbiddenFactionQuery
+StringToHerdId=forbiddenFactionQuery
 function GameCreateCosmeticParticle(...) sparks[#sparks+1]={...} end
 function GameShootProjectile() error("Parry must not reinitialize or respawn the projectile") end
 NHEWItems={gid=function(id)
@@ -69,7 +72,9 @@ local freeze={
     redirect=function(id,vx,vy)
         redirects=redirects+1
         if redirectFail then return false end
-        assert(not targets.hostileProjectile(1,id),"stasis was checked before changing projectile allegiance")
+        local shot=EntityGetFirstComponentIncludingDisabled(id,"ProjectileComponent")
+        assert(components[shot].mWhoShot==1 and components[shot].mEntityThatShot==1,
+            "shared stasis was checked before changing projectile attribution")
         local c=EntityGetFirstComponentIncludingDisabled(id,"VelocityComponent")
         ComponentSetValue2(c,"mVelocity",vx,vy)
         return true
@@ -83,7 +88,8 @@ function dofile_once(path)
 end
 local parry=dofile(root.."katana_parry.lua")
 local player=entity("player_unit")
-EntityAddComponent2(player,"GenomeDataComponent",{herd_id=1})
+local playerHerd=0 -- The real player's herd is valid at index zero.
+EntityAddComponent2(player,"GenomeDataComponent",{herd_id=playerHerd})
 local enemy=entity("enemy")
 EntityAddComponent2(enemy,"GenomeDataComponent",{herd_id=2})
 local function bullet(owner,vx,vy)
@@ -107,7 +113,7 @@ assert(vx==0 and vy==-500 and entities[id].x==12 and entities[id].y==18)
 assert(math.abs(entities[id].r+math.pi/2)<1e-9 and entities[id].sx==-1.25 and entities[id].sy==0.75)
 assert(components[shot]==saved and saved.damage==2.5 and saved.lifetime==37 and saved.mStartingLifetime==80)
 assert(saved.mInitialSpeed==500 and saved.mLastFrameDamaged==21 and saved.damage_by_type.fire==0.8 and saved.config_explosion.damage==4)
-assert(saved.mDamagedEntities[1]==enemy and saved.mWhoShot==player and saved.mEntityThatShot==player and saved.mShooterHerdId==1)
+assert(saved.mDamagedEntities[1]==enemy and saved.mWhoShot==player and saved.mEntityThatShot==player and saved.mShooterHerdId==playerHerd)
 assert(saved.collide_with_entities and saved.collide_with_tag=="hittable" and saved.dont_collide_with_tag=="")
 assert(not saved.friendly_fire and saved.never_hit_player and saved.collide_with_shooter_frames==-1 and saved.explosion_dont_damage_shooter)
 assert(components[homing].target_tag=="enemy" and not components[homing].target_who_shot and components[homing].predefined_target==0)
@@ -115,7 +121,10 @@ assert(components[homing].enabled and components[homing].homing_targeting_coeff=
 assert(components[area].entities_with_tag=="enemy" and components[area].entity_responsible==player and components[area].damage_per_frame==0.3)
 assert(components[area].update_every_n_frame==4 and EntityHasTag(id,"nh_katana_reflected"))
 assert(#sparks==1 and sparks[1][1]=="spark_white" and sparks[1][4]==5 and sparks[1][8]==0.08 and sparks[1][9]==0.16)
-assert(not parry.reflect(player,id,shot,vel,1,0) and #sparks==1,"reflected friendly fire was reflected a second time")
+-- The combat token's hit set prevents duplicate rewrites within one swing
+-- (katana_combat_spec). An independent later swing may deflect this same shot.
+assert(parry.reflect(player,id,shot,vel,1,0) and #sparks==2,"a later parry rejected an already player-owned shot")
+vx,vy=ComponentGetValue2(vel,"mVelocity");assert(vx==500 and vy==0)
 
 -- Timed/terrain-only explosive shells keep ignoring entity collisions; normal
 -- impact projectiles retain them. Both still acquire enemy-targeting filters.
@@ -168,16 +177,36 @@ for _,kind in ipairs({"ItemComponent","PhysicsBodyComponent","PhysicsBody2Compon
 end
 refused(function(e) EntityAddComponent2(e,"LightningComponent",{is_projectile=true}) end)
 refused(function(e) entities[e].parent=enemy end)
-refused(function(e,s) components[s].mWhoShot=player end)
 local ally=entity("enemy,noita_hideout_companion")
 EntityAddComponent2(ally,"GenomeDataComponent",{herd_id=2})
-refused(function(e,s) components[s].mWhoShot=ally end)
-entities[ally].tags.noita_hideout_companion=nil;entities[ally].charmed=true
-refused(function(e,s) components[s].mWhoShot=ally end)
-refused(function(e,s) components[s].mWhoShot=0;components[s].mShooterHerdId=0 end)
-refused(function(e,s) components[s].mWhoShot=0;components[s].mShooterHerdId=1 end)
-id,shot,vel=bullet(0);components[shot].mWhoShot=0
-assert(parry.reflect(player,id,shot,vel,1,0),"dead shooter's hostile herd should remain eligible")
+local charmed=entity("enemy");entities[charmed].charmed=true
+EntityAddComponent2(charmed,"GenomeDataComponent",{herd_id=2})
+local neutral=entity("mortal")
+EntityAddComponent2(neutral,"GenomeDataComponent",{herd_id=3})
+local turret=entity("nh_deployed_turret")
+EntityAddComponent2(turret,"GenomeDataComponent",{herd_id=playerHerd})
+local dead=entity("enemy");entities[dead].alive=false
+EntityAddComponent2(dead,"GenomeDataComponent",{herd_id=2})
+local function accepted(owner,herd,label)
+    local e,s,v=bullet(owner)
+    components[s].mShooterHerdId=herd
+    local before,redirectBefore=#sparks,redirects
+    assert(parry.reflect(player,e,s,v,1,0),"parry rejected "..label)
+    local sx,sy=ComponentGetValue2(v,"mVelocity")
+    assert(sx==500 and sy==0 and #sparks==before+1 and redirects==redirectBefore+1)
+    assert(components[s].mWhoShot==player and components[s].mEntityThatShot==player
+        and components[s].mShooterHerdId==playerHerd and components[s].damage==2.5 and components[s].lifetime==37)
+    assert(EntityHasTag(e,"nh_katana_reflected") and factionQueries==0)
+end
+for _,case in ipairs({
+    {player,playerHerd,"self shot"},{ally,2,"companion shot"},{charmed,2,"charmed shooter's shot"},
+    {turret,playerHerd,"friendly turret shot"},{neutral,3,"neutral shot"},{enemy,2,"enemy shot"},
+    {dead,2,"dead shooter's shot"},{987654,25166272,"missing shooter with corrupt herd"},
+}) do accepted(case[1],case[2],case[3]) end
+for _,herd in ipairs({-1,0,1,2,25166272,2147483647}) do
+    accepted(0,herd,"ownerless shot with cached herd "..herd)
+end
+accepted(0,nil,"ownerless shot without a cached herd")
 
 -- DES replicas and ambiguous ownership never acquire projectile authority.
 multiplayer=true
@@ -196,4 +225,5 @@ assert(not parry.reflect(player,id,shot,vel,1,0,99,88))
 assert(components[shot].mWhoShot==enemy and components[shot].collide_with_tag=="prey" and components[shot].friendly_fire)
 assert(components[homing].target_tag=="prey" and components[homing].target_who_shot and components[homing].predefined_target==player)
 vx,vy=ComponentGetValue2(vel,"mVelocity");assert(vx==-300 and vy==400 and entities[id].x==12)
-print("Katana parry: original projectile, speed, credit, homing, moving aura, stasis, contact, rollback and EW ownership passed.")
+assert(factionQueries==0,"a projectile path swallowed a forbidden faction query")
+print("Katana parry: every faction, corrupt/absent herd without queries, original projectile, speed, attribution, homing, aura, stasis, contact, rollback and EW ownership passed.")

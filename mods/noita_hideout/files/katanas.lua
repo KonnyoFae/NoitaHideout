@@ -24,8 +24,8 @@ K.types.dragon_king={zh="龙王",en="Dragon King",durability=90,warehouseCategor
     noteEn="Relic katana; no scrap crafting recipe. Tap left-click for a wide slash. Hold left-click for 0.3 seconds to create up to 2 seconds of brief stasis; release to dash-slash toward the reticle, at no resource cost. Hold right-click for 0.6 seconds to spend only 1 durability for 30 seconds of stasis Blade Mode with free movement. Hold left-click to slash repeatedly; press right-click again to exit. Each direct Blade Mode kill restores 10% of maximum shield, 5 reserve ammo and 5% of maximum HP. At zero durability, quick slashes and the free left-click skill remain available."}
 for kind,d in pairs(K.types) do
     d.kind=kind
-    d.noteZh=d.noteZh.." 所有斩击均可沿刀尖方向弹回碰到的敌弹。"
-    d.noteEn=d.noteEn.." Every slash deflects enemy shots along the blade's direction."
+    d.noteZh=d.noteZh.." 所有斩击都能把接触刀刃的子弹沿刀尖方向弹出，包括自己和友军的子弹。"
+    d.noteEn=d.noteEn.." Any slash can deflect shots along the blade, including your own and your allies' shots."
     d.file=root.."items/"..kind..".xml"
     d.icon=root.."items/"..kind.."_icon.png"
     d.sprite=root.."items/"..kind.."_sprite.xml"
